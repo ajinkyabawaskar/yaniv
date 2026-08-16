@@ -6,7 +6,7 @@
   --felt-light: #154533;
   --felt-dark: #071912;
   --felt-vignette: radial-gradient(ellipse at center, #184e3a 0%, #0c2d21 55%, #05140e 100%);
-  
+
   /* Gold Accents & Trims */
   --gold-primary: #d4af37;
   --gold-light: #f6e29d;
@@ -29,7 +29,7 @@
   --ink-muted: #7e9187;
   --ink-light: #d6e2db;
   --paper-bg: #091a13;
-  
+
   /* Glassmorphic Overlays */
   --glass-bg: rgba(10, 32, 23, 0.75);
   --glass-border: 1px solid rgba(212, 175, 55, 0.25);
@@ -39,6 +39,10 @@
   --status-online: #10b981;
   --status-ingame: #f59e0b;
   --status-offline: #6b7280;
+
+  /* Layout Variables */
+  --navbar-height: 56px;
+  --sidebar-width: 280px;
 }
 
 * {

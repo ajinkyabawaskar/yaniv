@@ -138,3 +138,91 @@
   color: var(--ink-muted);
   text-align: center;
 }
+
+/* ==========================================================================
+   Mobile Responsive Styles (for drawer context)
+   ========================================================================== */
+@media (max-width: 768px) {
+  .scoreboard-panel {
+    padding: 16px;
+    gap: 16px;
+  }
+
+  .scoreboard-header h3 {
+    font-size: 15px;
+  }
+
+  .leaderboard-icon {
+    font-size: 16px;
+  }
+
+  .scoreboard-player-row {
+    padding: 12px 14px;
+    border-radius: 10px;
+  }
+
+  .rank-number {
+    font-size: 14px;
+    width: 24px;
+  }
+
+  .player-name-text {
+    font-size: 14px;
+    max-width: 120px;
+  }
+
+  .turn-tag,
+  .eliminated-tag {
+    font-size: 9px;
+  }
+
+  .score-total-badge {
+    padding: 6px 12px;
+    border-radius: 8px;
+  }
+
+  .score-digit {
+    font-size: 18px;
+  }
+
+  .pts-label {
+    font-size: 10px;
+  }
+
+  .scoreboard-footer-tip {
+    font-size: 11px;
+    padding-top: 12px;
+  }
+}
+
+@media (max-width: 480px) {
+  .scoreboard-panel {
+    padding: 14px;
+  }
+
+  .scoreboard-header {
+    padding-bottom: 10px;
+  }
+
+  .scoreboard-header h3 {
+    font-size: 14px;
+  }
+
+  .scoreboard-player-row {
+    padding: 10px 12px;
+  }
+
+  .rank-number {
+    font-size: 13px;
+    width: 22px;
+  }
+
+  .player-name-text {
+    font-size: 13px;
+    max-width: 100px;
+  }
+
+  .score-digit {
+    font-size: 16px;
+  }
+}

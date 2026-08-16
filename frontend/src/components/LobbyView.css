@@ -266,3 +266,173 @@
     grid-template-columns: 1fr;
   }
 }
+
+@media (max-width: 480px) {
+  .lobby-view-root {
+    padding: 16px 12px;
+    align-items: flex-start;
+  }
+
+  .lobby-hero-card {
+    padding: 24px 16px;
+    border-radius: 16px;
+    gap: 20px;
+  }
+
+  .hero-emblem {
+    font-size: 18px;
+    letter-spacing: 0.2em;
+  }
+
+  .lobby-main-title {
+    font-size: 26px;
+  }
+
+  .lobby-subtitle {
+    font-size: 13px;
+  }
+
+  .lobby-actions-grid {
+    gap: 12px;
+  }
+
+  .action-card {
+    padding: 20px 16px;
+    border-radius: 12px;
+  }
+
+  .card-top-icon {
+    font-size: 24px;
+    margin-bottom: 8px;
+  }
+
+  .action-card h3 {
+    font-size: 16px;
+  }
+
+  .action-card p {
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .lobby-primary-btn,
+  .lobby-secondary-btn {
+    padding: 14px;
+    font-size: 14px;
+    min-height: 48px;
+  }
+
+  .join-input-group input {
+    padding: 14px;
+    font-size: 16px; /* Prevents zoom on iOS */
+    min-height: 48px;
+  }
+
+  .join-btn-row {
+    gap: 8px;
+  }
+
+  .submit-join-btn,
+  .cancel-join-btn {
+    padding: 12px;
+    font-size: 13px;
+    min-height: 48px;
+  }
+
+  .friend-code-strip {
+    flex-direction: column;
+    gap: 12px;
+    align-items: stretch;
+    padding: 14px 16px;
+  }
+
+  .strip-left {
+    justify-content: center;
+    gap: 10px;
+  }
+
+  .strip-label {
+    font-size: 10px;
+  }
+
+  .code-display {
+    font-size: 14px;
+  }
+
+  .copy-code-btn {
+    padding: 12px;
+    font-size: 13px;
+    min-height: 48px;
+  }
+
+  .rules-summary-box {
+    padding: 14px;
+    border-radius: 10px;
+  }
+
+  .rules-summary-box h4 {
+    font-size: 11px;
+  }
+
+  .rules-grid {
+    gap: 8px;
+  }
+
+  .rule-item {
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .rule-badge {
+    width: 16px;
+    height: 16px;
+    font-size: 9px;
+  }
+}
+
+@media (max-width: 360px) {
+  .lobby-view-root {
+    padding: 12px 10px;
+  }
+
+  .lobby-hero-card {
+    padding: 20px 14px;
+  }
+
+  .lobby-main-title {
+    font-size: 22px;
+  }
+
+  .action-card {
+    padding: 16px 12px;
+  }
+
+  .action-card h3 {
+    font-size: 15px;
+  }
+
+  .action-card p {
+    font-size: 11px;
+  }
+
+  .lobby-primary-btn,
+  .lobby-secondary-btn {
+    padding: 12px;
+    font-size: 13px;
+  }
+
+  .join-input-group input {
+    padding: 12px;
+    font-size: 15px;
+  }
+
+  .submit-join-btn,
+  .cancel-join-btn {
+    padding: 10px;
+    font-size: 12px;
+  }
+
+  .friend-code-strip {
+    padding: 12px 14px;
+  }
+}

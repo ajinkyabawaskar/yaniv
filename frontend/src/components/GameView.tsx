@@ -23,8 +23,18 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
   const [serverError, setServerError] = useState<string | null>(null);
   const [showRoundOver, setShowRoundOver] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+  const [showScoreboard, setShowScoreboard] = useState(false);
 
   const currentUserId = localStorage.getItem('userId') || '';
+
+  // Detect mobile viewport
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth <= 768);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   // Helper to check if a player is a round winner
   const isRoundWinner = (userId: string) => {
@@ -295,13 +305,35 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
             />
           </div>
 
-          <div className="scoreboard-wrapper">
+          {/* Scoreboard - Hidden on mobile, shown as drawer */}
+          <div className={`scoreboard-wrapper ${isMobile && showScoreboard ? 'mobile-open' : ''}`}>
             <ScoreboardView
               scores={gameState.scores}
               currentTurnPlayerId={gameState.currentTurnPlayerId}
               eliminatedPlayers={gameState.eliminatedPlayers}
             />
           </div>
+
+          {/* Mobile Scoreboard Toggle Button */}
+          {isMobile && (
+            <button
+              className="scoreboard-toggle-btn"
+              onClick={() => setShowScoreboard(!showScoreboard)}
+              aria-label={showScoreboard ? 'Hide Scoreboard' : 'Show Scoreboard'}
+              aria-expanded={showScoreboard}
+            >
+              🏆 {showScoreboard ? 'Hide' : 'Scores'}
+            </button>
+          )}
+
+          {/* Mobile Scoreboard Overlay */}
+          {isMobile && (
+            <div
+              className={`scoreboard-overlay ${showScoreboard ? 'visible' : ''}`}
+              onClick={() => setShowScoreboard(false)}
+              aria-hidden="true"
+            />
+          )}
         </div>
       )}
 

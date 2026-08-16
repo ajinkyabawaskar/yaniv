@@ -1025,55 +1025,420 @@
    5. Responsive Scaling for Mobile Viewports
    ========================================================================== */
 @media (max-width: 768px) {
+  .table-canvas-root {
+    min-height: 100%;
+  }
+
   .felt-surface {
-    padding: 10px 10px 14px;
+    padding: 8px 8px 12px;
     border-width: 2px;
+    flex-direction: column;
+    justify-content: flex-start;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Opponents Arc - compact horizontal scroll on mobile */
+  .opponents-radial-arc {
+    gap: 8px;
+    padding: 4px 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    justify-content: flex-start;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .opponents-radial-arc::-webkit-scrollbar {
+    display: none;
+  }
+
+  .opponent-seat {
+    min-width: 72px;
+    padding: 8px 10px;
+    flex-shrink: 0;
+  }
+
+  .opponent-avatar {
+    width: 36px;
+    height: 36px;
+    font-size: 12px;
+  }
+
+  .opponent-name {
+    font-size: 12px;
+    max-width: 70px;
+  }
+
+  .opponent-score-pill {
+    font-size: 10px;
+    padding: 2px 5px;
+  }
+
+  .opponent-card-stack {
+    height: 24px;
+    width: 44px;
+  }
+
+  .mini-card-back {
+    width: 16px;
+    height: 22px;
+  }
+
+  .card-count-badge {
+    font-size: 9px;
+    padding: 1px 3px;
+  }
+
+  /* Center Play Area - STACK VERTICALLY on mobile */
+  .center-play-area {
+    flex-direction: column;
+    gap: 10px;
+    margin: 8px 0;
+    flex: 1;
+    align-items: stretch;
+    justify-content: flex-start;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .zone-column {
+    width: 100%;
+    min-width: 0;
+    min-height: auto;
+    padding: 12px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .zone-header {
+    margin-bottom: 8px;
+  }
+
+  .zone-title {
+    font-size: 10px;
+  }
+
+  .deck-count-pill,
+  .discard-count-pill {
+    font-size: 9px;
+    padding: 2px 5px;
+  }
+
+  /* Zone 1: Draw Pile - compact */
+  .deck-stack-3d {
+    width: 72px;
+    height: 100px;
+  }
+
+  .deck-layer {
+    width: 72px;
+    height: 100px;
+  }
+
+  .card-back-emblem {
+    font-size: 22px;
+  }
+
+  .draw-prompt-badge {
+    font-size: 10px;
+    padding: 3px 8px;
+  }
+
+  /* Zone 2: Staging - larger touch target */
+  .staging-drop-zone {
+    min-height: 100px;
+    padding: 16px;
+  }
+
+  .staging-slot-area {
+    min-height: 80px;
+  }
+
+  .staged-card {
+    width: 56px;
+    height: 78px;
+    min-width: 56px;
+  }
+
+  .staging-empty-state {
+    padding: 16px;
+  }
+
+  .staging-icon {
+    font-size: 28px;
+  }
+
+  .staging-hint {
+    font-size: 12px;
+    max-width: 200px;
+  }
+
+  .unstage-btn {
+    font-size: 11px;
+    padding: 6px 12px;
+    min-height: 40px;
+  }
+
+  .staging-status-pill {
+    font-size: 11px;
+    padding: 6px 10px;
+  }
+
+  /* Zone 3: Discard Pile - horizontal fan, scrollable */
+  .discard-pile-zone {
+    min-width: 0;
+  }
+
+  .discard-fan-container {
+    min-height: 100px;
+    min-width: 0;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 4px 0;
+  }
+
+  .discard-fan-container::-webkit-scrollbar {
+    display: none;
+  }
+
+  .discard-cards-fan {
+    width: max-content;
+    height: 100px;
+    min-width: 100%;
+    display: flex;
+    gap: 12px;
+    align-items: flex-end;
+  }
+
+  .discard-fan-card {
+    width: 72px;
+    height: 100px;
+    flex-shrink: 0;
+    position: relative;
+    top: auto;
+    left: auto;
+  }
+
+  .discard-empty-box {
+    width: 72px;
+    height: 100px;
+    flex-shrink: 0;
+  }
+
+  .pick-handle-glow {
+    font-size: 9px;
+    padding: 2px 5px;
+    bottom: 4px;
+  }
+
+  .locked-indicator {
+    width: 20px;
+    height: 20px;
+    font-size: 12px;
+  }
+
+  .discard-prompt-hint {
+    font-size: 11px;
+    margin-top: 6px;
+  }
+
+  /* Player HUD Bar - wrap nicely */
+  .player-hud-bar {
+    gap: 8px;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+  }
+
+  .hand-total-pill {
+    padding: 6px 12px;
+    min-height: 44px;
+  }
+
+  .hand-total-pill .score-label {
+    font-size: 10px;
+  }
+
+  .hand-total-pill .score-digits {
+    font-size: 16px;
+  }
+
+  .yaniv-badge {
+    font-size: 10px;
+  }
+
+  .hand-sort-controls {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .sort-btn {
+    font-size: 11px;
+    padding: 8px 12px;
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .nudge-group {
+    display: flex;
+    gap: 8px;
+  }
+
+  .nudge-btn {
+    width: 44px;
+    height: 44px;
+    font-size: 18px;
+    border-radius: 8px;
+  }
+
+  .call-yaniv-btn {
+    font-size: 13px;
+    padding: 10px 20px;
+    min-height: 48px;
+    min-width: 160px;
+  }
+
+  .stage-action-btn {
+    font-size: 13px;
+    padding: 10px 18px;
+    min-height: 44px;
+    min-width: 120px;
+  }
+
+  /* Player Hand - larger cards, better touch targets */
+  .player-hand-container {
+    padding-bottom: 8px;
+  }
+
+  .player-hand-fanned {
+    gap: clamp(4px, 1.2vw, 10px);
+    padding: 8px 12px 4px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    justify-content: flex-start;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .player-hand-fanned::-webkit-scrollbar {
+    display: none;
+  }
+
+  .hand-card {
+    width: clamp(68px, 12vw, 88px);
+    height: clamp(95px, 16vw, 124px);
+    min-width: 68px;
+    flex-shrink: 0;
+    min-height: 95px;
+  }
+
+  /* Banners - responsive */
+  .dramatic-yaniv-overlay {
+    top: 25%;
+    padding: 16px 24px;
+    left: 5%;
+    right: 5%;
+    max-width: 90vw;
+  }
+
+  .yaniv-title {
+    font-size: 32px;
+  }
+
+  .yaniv-bell-icon {
+    font-size: 40px;
+  }
+
+  .yaniv-caller {
+    font-size: 14px;
+  }
+
+  .dramatic-asaf-overlay .asaf-strike-card {
+    padding: 20px 28px;
+    margin: 0 16px;
+  }
+
+  .asaf-title {
+    font-size: 36px;
+  }
+
+  .asaf-details {
+    font-size: 13px;
+  }
+
+  /* Yaniv Contest Overlay - responsive */
+  .contest-overlay-content {
+    padding: 24px 20px;
+    margin: 0 12px;
+  }
+
+  .contest-title {
+    font-size: 28px;
+  }
+
+  .contest-caller-name {
+    font-size: 22px;
+  }
+
+  .contest-timer-value {
+    font-size: 40px;
+  }
+
+  .contest-progress-bar {
+    width: 100%;
+    max-width: 280px;
+  }
+
+  .contest-btn {
+    padding: 14px 28px;
+    font-size: 16px;
+    min-height: 48px;
+  }
+}
+
+@media (max-width: 480px) {
+  .felt-surface {
+    padding: 6px 6px 10px;
   }
 
   .opponents-radial-arc {
-    gap: 8px;
+    gap: 6px;
     padding: 4px 6px;
   }
 
   .opponent-seat {
-    min-width: 80px;
+    min-width: 64px;
     padding: 6px 8px;
   }
 
   .opponent-avatar {
-    width: 30px;
-    height: 30px;
-    font-size: 11px;
+    width: 32px;
+    height: 32px;
+    font-size: 10px;
   }
 
   .opponent-name {
-    font-size: 11px;
-    max-width: 65px;
-  }
-
-  .center-play-area {
-    gap: 12px;
-    margin: 6px 0;
-  }
-
-  .zone-column {
-    padding: 8px;
-    min-width: 95px;
+    font-size: 10px;
+    max-width: 60px;
   }
 
   .deck-stack-3d {
-    width: 68px;
-    height: 96px;
+    width: 60px;
+    height: 84px;
   }
 
   .deck-layer {
-    width: 68px;
-    height: 96px;
+    width: 60px;
+    height: 84px;
   }
 
   .staging-drop-zone {
-    min-width: 120px;
-    min-height: 140px;
+    padding: 12px;
+    min-height: 80px;
   }
 
   .staged-card {
@@ -1082,30 +1447,76 @@
   }
 
   .discard-cards-fan {
-    width: 110px;
-    height: 96px;
+    gap: 8px;
+    height: 84px;
   }
 
   .discard-fan-card {
-    width: 68px;
-    height: 96px;
+    width: 60px;
+    height: 84px;
   }
 
-  .player-hud-bar {
-    gap: 8px;
-    margin-bottom: 8px;
+  .discard-empty-box {
+    width: 60px;
+    height: 84px;
   }
 
-  .hand-total-pill {
-    padding: 4px 10px;
-  }
-
-  .hand-total-pill .score-digits {
-    font-size: 15px;
+  .hand-card {
+    width: clamp(60px, 14vw, 78px);
+    height: clamp(84px, 18vw, 110px);
   }
 
   .call-yaniv-btn {
     font-size: 12px;
-    padding: 6px 14px;
+    padding: 10px 16px;
+    min-width: 140px;
+  }
+
+  .sort-btn {
+    padding: 8px 10px;
+    font-size: 10px;
+  }
+}
+
+/* Landscape mobile adjustments */
+@media (max-width: 768px) and (orientation: landscape) {
+  .felt-surface {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-content: flex-start;
+    overflow-y: auto;
+  }
+
+  .opponents-radial-arc {
+    order: 0;
+    width: 100%;
+    flex-basis: 100%;
+    margin-bottom: 8px;
+  }
+
+  .center-play-area {
+    order: 1;
+    flex: 1;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    min-height: 0;
+  }
+
+  .zone-column {
+    flex: 1;
+    min-width: 140px;
+    min-height: 180px;
+  }
+
+  .main-player-dock {
+    order: 2;
+    width: 100%;
+    flex-basis: 100%;
+    margin-top: 8px;
+  }
+
+  .player-hand-fanned {
+    justify-content: center;
   }
 }

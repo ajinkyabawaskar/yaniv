@@ -103,3 +103,104 @@
 .decline-invite-btn:hover {
   background: rgba(239, 68, 68, 0.35);
 }
+
+/* ==========================================================================
+   Mobile Responsive Styles
+   ========================================================================== */
+@media (max-width: 768px) {
+  .invite-toasts-container {
+    bottom: 0;
+    right: 0;
+    left: 0;
+    padding: 12px;
+    flex-direction: column;
+    gap: 8px;
+    align-items: stretch;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.8), transparent);
+  }
+
+  .invite-toast-card {
+    width: 100%;
+    max-width: none;
+    padding: 14px 16px;
+    border-radius: 14px;
+    border: 1px solid rgba(212, 175, 55, 0.4);
+    box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.5), 0 0 16px rgba(212, 175, 55, 0.3);
+    animation: slideInUpMobile 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  @keyframes slideInUpMobile {
+    from {
+      opacity: 0;
+      transform: translateY(100%);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .toast-icon {
+    font-size: 20px;
+  }
+
+  .toast-title {
+    font-size: 15px;
+  }
+
+  .toast-text {
+    font-size: 13px;
+  }
+
+  .toast-actions-row {
+    gap: 8px;
+  }
+
+  .accept-invite-btn,
+  .decline-invite-btn {
+    padding: 12px 16px;
+    font-size: 13px;
+    min-height: 48px;
+  }
+
+  .accept-invite-btn {
+    font-size: 13px;
+  }
+}
+
+@media (max-width: 480px) {
+  .invite-toasts-container {
+    padding: 10px;
+    bottom: 10px;
+  }
+
+  .invite-toast-card {
+    padding: 12px 14px;
+    border-radius: 12px;
+    gap: 10px;
+  }
+
+  .toast-icon {
+    font-size: 18px;
+  }
+
+  .toast-title {
+    font-size: 14px;
+  }
+
+  .toast-text {
+    font-size: 12px;
+  }
+
+  .toast-actions-row {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .accept-invite-btn,
+  .decline-invite-btn {
+    padding: 14px;
+    font-size: 13px;
+    min-height: 52px;
+  }
+}
