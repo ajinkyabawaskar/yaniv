@@ -379,7 +379,7 @@ public class GameStateController {
             List<String> playerIds = players.stream()
                     .map(gp -> gp.getId().getUserId())
                     .toList();
-            YanivGameEngine engine = new YanivGameEngine(roomId, (List<String>) playerIds, 5, 200);
+            YanivGameEngine engine = new YanivGameEngine(roomId, (List<String>) playerIds, 7, 200);
             gameEngines.put(roomId, engine);
 
             for (String playerId : playerIds) {

@@ -31,7 +31,7 @@ public class YanivGameEngine {
     private GameState currentState;
     private int currentPlayerIndex;
     private int roundNumber;
-    private Integer yanivThreshold; // Default 5, can be customized
+    private Integer yanivThreshold; // Default 7, can be customized
     private Integer targetScore;
     private String callerId; // Player who called Yaniv
     private Map<String, Integer> roundScores; // Scores for current round
@@ -44,7 +44,7 @@ public class YanivGameEngine {
     public YanivGameEngine(String gameId, List<String> playerIds, Integer yanivThreshold, Integer targetScore) {
         this.gameId = gameId;
         this.playerIds = new ArrayList<>(playerIds);
-        this.yanivThreshold = yanivThreshold != null ? yanivThreshold : 5;
+        this.yanivThreshold = yanivThreshold != null ? yanivThreshold : 7;
         this.targetScore = targetScore != null ? targetScore : 200;
 
         initializeGame();
