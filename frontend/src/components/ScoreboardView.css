@@ -1,0 +1,140 @@
+/* ==========================================================================
+   ScoreboardView.css - In-Game Live Leaderboard Panel
+   ========================================================================== */
+
+.scoreboard-panel {
+  width: 100%;
+  height: 100%;
+  padding: 16px 12px;
+  display: flex;
+  flex-direction: column;
+  background: transparent;
+  gap: 12px;
+}
+
+.scoreboard-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(212, 175, 55, 0.25);
+}
+
+.scoreboard-header h3 {
+  font-family: 'Cinzel', serif;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--gold-light);
+  letter-spacing: 0.05em;
+}
+
+.leaderboard-icon {
+  font-size: 14px;
+}
+
+.scoreboard-player-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.scoreboard-player-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: all 0.2s ease;
+}
+
+.scoreboard-player-row.turn-active {
+  border-color: var(--gold-primary);
+  background: rgba(212, 175, 55, 0.12);
+  box-shadow: 0 0 12px rgba(212, 175, 55, 0.25);
+}
+
+.scoreboard-player-row.player-out {
+  opacity: 0.45;
+  filter: grayscale(1);
+}
+
+.row-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.rank-number {
+  font-family: 'Cinzel', serif;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--gold-light);
+  width: 20px;
+}
+
+.player-meta-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.player-name-text {
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 90px;
+}
+
+.turn-tag {
+  font-family: 'DM Mono', monospace;
+  font-size: 8px;
+  font-weight: 700;
+  color: #34d399;
+}
+
+.eliminated-tag {
+  font-family: 'DM Mono', monospace;
+  font-size: 8px;
+  font-weight: 700;
+  color: #f87171;
+}
+
+.score-total-badge {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  background: rgba(0, 0, 0, 0.4);
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(212, 175, 55, 0.2);
+}
+
+.score-digit {
+  font-family: 'Cinzel', serif;
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--gold-light);
+}
+
+.pts-label {
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  color: var(--ink-muted);
+}
+
+.scoreboard-footer-tip {
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  color: var(--ink-muted);
+  text-align: center;
+}

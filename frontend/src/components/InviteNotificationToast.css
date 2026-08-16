@@ -1,0 +1,105 @@
+/* ==========================================================================
+   InviteNotificationToast.css - Real-Time Inbound Game Invitation Toast
+   ========================================================================== */
+
+.invite-toasts-container {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.invite-toast-card {
+  pointer-events: auto;
+  width: 320px;
+  padding: 16px;
+  border-radius: 12px;
+  background: radial-gradient(circle at top left, #1a4231 0%, #071912 100%);
+  border: 1px solid var(--gold-primary);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.7), 0 0 20px rgba(212, 175, 55, 0.4);
+  backdrop-filter: blur(12px);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  animation: slideInUp 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes slideInUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.toast-icon {
+  font-size: 22px;
+  color: var(--gold-light);
+}
+
+.toast-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.toast-title {
+  font-family: 'Cinzel', serif;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--gold-light);
+}
+
+.toast-text {
+  font-size: 13px;
+  color: #fff;
+  line-height: 1.4;
+}
+
+.toast-text code {
+  font-family: 'DM Mono', monospace;
+  color: var(--gold-light);
+  font-weight: 700;
+}
+
+.toast-actions-row {
+  display: flex;
+  gap: 8px;
+}
+
+.accept-invite-btn {
+  flex: 1;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--gold-gradient);
+  color: #0c2b1e;
+  font-weight: 800;
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  box-shadow: 0 2px 8px rgba(212, 175, 55, 0.4);
+}
+
+.accept-invite-btn:hover {
+  background: #fce09b;
+}
+
+.decline-invite-btn {
+  padding: 8px 14px;
+  border-radius: 6px;
+  background: rgba(239, 68, 68, 0.2);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.decline-invite-btn:hover {
+  background: rgba(239, 68, 68, 0.35);
+}

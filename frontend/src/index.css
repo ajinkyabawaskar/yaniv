@@ -1,0 +1,132 @@
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800;900&family=DM+Mono:ital,wght@0,400;0,500;1,400&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700;9..144,800&family=Outfit:wght@300;400;500;600;700;800&display=swap');
+
+:root {
+  /* Casino Felt Theme Palette */
+  --felt-base: #0c2c20;
+  --felt-light: #154533;
+  --felt-dark: #071912;
+  --felt-vignette: radial-gradient(ellipse at center, #184e3a 0%, #0c2d21 55%, #05140e 100%);
+  
+  /* Gold Accents & Trims */
+  --gold-primary: #d4af37;
+  --gold-light: #f6e29d;
+  --gold-dark: #8e6d1c;
+  --gold-glow: rgba(212, 175, 55, 0.45);
+  --gold-gradient: linear-gradient(135deg, #fce09b 0%, #d4af37 50%, #996c1b 100%);
+  --gold-border: 1px solid rgba(212, 175, 55, 0.4);
+
+  /* Crimson & Penalty Accents */
+  --crimson-primary: #9b1c1c;
+  --crimson-light: #ef4444;
+  --crimson-dark: #500707;
+  --crimson-glow: rgba(239, 68, 68, 0.5);
+  --crimson-gradient: linear-gradient(135deg, #ef4444 0%, #9b1c1c 50%, #500707 100%);
+
+  /* Neutral Casino Elements */
+  --card-cream: #fffdf5;
+  --card-border: #14231b;
+  --ink-dark: #0f1914;
+  --ink-muted: #7e9187;
+  --ink-light: #d6e2db;
+  --paper-bg: #091a13;
+  
+  /* Glassmorphic Overlays */
+  --glass-bg: rgba(10, 32, 23, 0.75);
+  --glass-border: 1px solid rgba(212, 175, 55, 0.25);
+  --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.45);
+
+  /* Status Colors */
+  --status-online: #10b981;
+  --status-ingame: #f59e0b;
+  --status-offline: #6b7280;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+html, body, #root {
+  min-height: 100%;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  background-color: var(--paper-bg);
+  color: var(--card-cream);
+  font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button, input {
+  font: inherit;
+  outline: none;
+}
+
+button {
+  cursor: pointer;
+  border: 0;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+  filter: grayscale(0.5);
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(5, 20, 14, 0.4);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(212, 175, 55, 0.3);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(212, 175, 55, 0.6);
+}
+
+/* Animations */
+@keyframes goldPulse {
+  0%, 100% {
+    box-shadow: 0 0 15px rgba(212, 175, 55, 0.3), inset 0 0 10px rgba(212, 175, 55, 0.2);
+    border-color: rgba(212, 175, 55, 0.6);
+  }
+  50% {
+    box-shadow: 0 0 28px rgba(212, 175, 55, 0.7), inset 0 0 16px rgba(212, 175, 55, 0.4);
+    border-color: rgba(246, 226, 157, 0.95);
+  }
+}
+
+@keyframes greenGlow {
+  0%, 100% {
+    box-shadow: 0 0 15px rgba(16, 185, 129, 0.4), inset 0 0 10px rgba(16, 185, 129, 0.2);
+    border-color: rgba(16, 185, 129, 0.7);
+  }
+  50% {
+    box-shadow: 0 0 30px rgba(16, 185, 129, 0.8), inset 0 0 18px rgba(16, 185, 129, 0.5);
+    border-color: rgba(52, 211, 153, 1);
+  }
+}
+
+@keyframes crimsonFlash {
+  0% { box-shadow: inset 0 0 0 0 rgba(239, 68, 68, 0); }
+  50% { box-shadow: inset 0 0 80px 30px rgba(239, 68, 68, 0.85); }
+  100% { box-shadow: inset 0 0 0 0 rgba(239, 68, 68, 0); }
+}
+
+@keyframes timerHeartbeat {
+  0%, 100% { transform: scale(1); filter: brightness(1); }
+  50% { transform: scale(1.08); filter: brightness(1.3); }
+}

@@ -1,0 +1,268 @@
+/* ==========================================================================
+   LobbyView.css - Casino Lobby & Table Selection Lounge
+   ========================================================================== */
+
+.lobby-view-root {
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--felt-vignette);
+}
+
+.lobby-hero-card {
+  width: 100%;
+  max-width: 680px;
+  padding: 36px;
+  border-radius: 20px;
+  background: var(--glass-bg);
+  border: var(--glass-border);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(16px);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.hero-emblem {
+  font-size: 20px;
+  letter-spacing: 0.3em;
+  color: var(--gold-light);
+  opacity: 0.8;
+}
+
+.lobby-main-title {
+  font-family: 'Cinzel', serif;
+  font-size: 32px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  background: var(--gold-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 0 4px 20px rgba(212, 175, 55, 0.4);
+}
+
+.lobby-subtitle {
+  font-size: 14px;
+  color: var(--ink-light);
+  margin-top: -16px;
+}
+
+.lobby-actions-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.action-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24px 20px;
+  border-radius: 14px;
+  background: rgba(4, 18, 12, 0.6);
+  border: 1px solid rgba(212, 175, 55, 0.25);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  transition: transform 0.2s ease, border-color 0.2s ease;
+}
+
+.action-card:hover {
+  transform: translateY(-3px);
+  border-color: var(--gold-primary);
+}
+
+.card-top-icon {
+  font-size: 28px;
+  margin-bottom: 10px;
+}
+
+.action-card h3 {
+  font-family: 'Cinzel', serif;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--gold-light);
+  margin-bottom: 8px;
+}
+
+.action-card p {
+  font-size: 12px;
+  color: var(--ink-light);
+  line-height: 1.5;
+  margin-bottom: 16px;
+  flex: 1;
+}
+
+.lobby-primary-btn {
+  width: 100%;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--gold-gradient);
+  color: #081a13;
+  font-family: 'Cinzel', serif;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  box-shadow: 0 4px 14px rgba(212, 175, 55, 0.4);
+}
+
+.lobby-secondary-btn {
+  width: 100%;
+  padding: 12px;
+  border-radius: 8px;
+  background: rgba(212, 175, 55, 0.15);
+  border: 1px solid rgba(212, 175, 55, 0.4);
+  color: var(--gold-light);
+  font-family: 'Cinzel', serif;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.join-input-group {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.join-input-group input {
+  width: 100%;
+  padding: 10px;
+  border-radius: 8px;
+  background: rgba(10, 32, 23, 0.9);
+  border: 1px solid rgba(212, 175, 55, 0.5);
+  color: var(--gold-light);
+  font-family: 'DM Mono', monospace;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: center;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.join-btn-row {
+  display: flex;
+  gap: 8px;
+}
+
+.submit-join-btn {
+  flex: 1;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--gold-gradient);
+  color: #081a13;
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.cancel-join-btn {
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--ink-light);
+  font-size: 12px;
+}
+
+/* Friend Code Strip */
+.friend-code-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 18px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(212, 175, 55, 0.3);
+}
+
+.strip-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.strip-label {
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+
+.code-display {
+  font-family: 'DM Mono', monospace;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--gold-light);
+  letter-spacing: 0.08em;
+}
+
+.copy-code-btn {
+  font-family: 'Outfit', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 6px;
+  background: rgba(212, 175, 55, 0.2);
+  border: 1px solid rgba(212, 175, 55, 0.4);
+  color: var(--gold-light);
+}
+
+.copy-code-btn:hover {
+  background: rgba(212, 175, 55, 0.35);
+}
+
+/* Rules Summary */
+.rules-summary-box {
+  padding: 16px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  text-align: left;
+}
+
+.rules-summary-box h4 {
+  font-family: 'DM Mono', monospace;
+  font-size: 12px;
+  color: var(--gold-light);
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+
+.rules-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.rule-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--ink-light);
+  line-height: 1.4;
+}
+
+.rule-badge {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(212, 175, 55, 0.2);
+  border: 1px solid var(--gold-primary);
+  color: var(--gold-light);
+  font-size: 10px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+@media (max-width: 640px) {
+  .lobby-actions-grid,
+  .rules-grid {
+    grid-template-columns: 1fr;
+  }
+}
