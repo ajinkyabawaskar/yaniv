@@ -28,9 +28,19 @@ export default function MainView({ initialRoomCode }: MainViewProps) {
   const [friends, setFriends] = useState<FriendInfo[]>([]);
   const [loadingFriends, setLoadingFriends] = useState(true);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
   const [showEditProfileModal, setShowEditProfileModal] = useState(false);
   const [newDisplayName, setNewDisplayName] = useState(user?.displayName || '');
   const [savingProfile, setSavingProfile] = useState(false);
+
+  // Detect mobile viewport
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth <= 768);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   const loadFriends = useCallback(async () => {
     try {
@@ -118,6 +128,20 @@ export default function MainView({ initialRoomCode }: MainViewProps) {
     navigate('/login');
   };
 
+  const toggleSidebar = () => {
+    if (isMobile) {
+      setIsSidebarOpen(!isSidebarOpen);
+    } else {
+      setIsSidebarCollapsed(!isSidebarCollapsed);
+    }
+  };
+
+  const closeSidebar = () => {
+    if (isMobile) {
+      setIsSidebarOpen(false);
+    }
+  };
+
   const handleUpdateDisplayName = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newDisplayName.trim() || !user) return;
@@ -147,10 +171,16 @@ export default function MainView({ initialRoomCode }: MainViewProps) {
           </div>
           <button
             className="sidebar-toggle-btn"
-            onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-            title="Toggle Friends Sidebar"
+            onClick={toggleSidebar}
+            title={isMobile ? 'Toggle Friends' : 'Toggle Friends Sidebar'}
           >
-            {isSidebarCollapsed ? '👥 Show Friends' : '◀ Hide'}
+            {isMobile
+              ? isSidebarOpen
+                ? '✕ Close'
+                : '👥 Friends'
+              : isSidebarCollapsed
+              ? '👥 Show Friends'
+              : '◀ Hide'}
           </button>
         </div>
 
@@ -174,16 +204,30 @@ export default function MainView({ initialRoomCode }: MainViewProps) {
         </div>
       </header>
 
+      {/* Mobile Sidebar Overlay */}
+      {isMobile && (
+        <div
+          className={`sidebar-overlay ${isSidebarOpen ? 'visible' : ''}`}
+          onClick={closeSidebar}
+          aria-hidden="true"
+        />
+      )}
+
       {/* Main Content Workspace */}
       <div className="main-workspace">
         {/* Collapsible Friends Sidebar */}
-        <aside className={`main-sidebar-aside ${isSidebarCollapsed ? 'collapsed' : ''}`}>
+        <aside
+          className={`main-sidebar-aside ${isSidebarCollapsed ? 'collapsed' : ''} ${isMobile && isSidebarOpen ? 'mobile-open' : ''}`}
+          role="complementary"
+          aria-label="Friends sidebar"
+        >
           <FriendsSidebar
             friends={friends}
             loading={loadingFriends}
             onFriendsChanged={loadFriends}
             isCollapsed={isSidebarCollapsed}
             onToggleCollapse={() => setIsSidebarCollapsed(true)}
+            onClose={closeSidebar}
           />
         </aside>
 

@@ -17,6 +17,7 @@ interface FriendsSidebarProps {
   onFriendsChanged: () => Promise<void>;
   isCollapsed?: boolean;
   onToggleCollapse?: () => void;
+  onClose?: () => void;
 }
 
 interface PendingRequest {
@@ -32,6 +33,7 @@ export default function FriendsSidebar({
   onFriendsChanged,
   isCollapsed = false,
   onToggleCollapse,
+  onClose,
 }: FriendsSidebarProps) {
   const { send, isConnected } = useStomp();
   const currentGameId = useGameStore((s) => s.gameId);
@@ -121,6 +123,11 @@ export default function FriendsSidebar({
     setTimeout(() => {
       setInvitedFriends((prev) => ({ ...prev, [friend.userId]: false }));
     }, 5000);
+
+    // Close sidebar on mobile after inviting
+    if (onClose) {
+      onClose();
+    }
   };
 
   const getPresenceColor = (presence: string) => {
@@ -175,6 +182,11 @@ export default function FriendsSidebar({
           {onToggleCollapse && (
             <button className="icon-btn collapse-toggle-btn" onClick={onToggleCollapse} title="Collapse sidebar">
               ◀
+            </button>
+          )}
+          {onClose && (
+            <button className="icon-btn close-btn" onClick={onClose} title="Close sidebar" aria-label="Close sidebar">
+              ✕
             </button>
           )}
         </div>

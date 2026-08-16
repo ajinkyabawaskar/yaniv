@@ -65,11 +65,99 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  min-width: 28px;
+  min-height: 28px;
 }
 
 .icon-btn:hover {
   background: rgba(212, 175, 55, 0.35);
   color: #fff;
+}
+
+.icon-btn.close-btn {
+  width: 32px;
+  height: 32px;
+  font-size: 14px;
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
+}
+
+.icon-btn.close-btn:hover {
+  background: rgba(239, 68, 68, 0.4);
+  color: #fff;
+}
+
+@media (max-width: 768px) {
+  .icon-btn {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .icon-btn.close-btn {
+    width: 44px;
+    height: 44px;
+  }
+
+  .sidebar-header {
+    padding-bottom: 10px;
+    margin-bottom: 10px;
+  }
+
+  .header-title-group h2 {
+    font-size: 18px;
+  }
+
+  .add-friend-input-row input {
+    padding: 12px 14px;
+    font-size: 16px; /* Prevents zoom on iOS */
+  }
+
+  .submit-add-btn {
+    padding: 12px 16px;
+    font-size: 14px;
+    min-height: 44px;
+  }
+
+  .friend-row-card {
+    padding: 14px 16px;
+    min-height: 56px;
+  }
+
+  .friend-display-name {
+    font-size: 15px;
+  }
+
+  .friend-code-sub {
+    font-size: 11px;
+  }
+
+  .invite-friend-btn {
+    padding: 10px 16px;
+    font-size: 13px;
+    min-height: 44px;
+  }
+
+  .presence-text-tag {
+    font-size: 11px;
+  }
+
+  .pending-request-card {
+    padding: 12px 14px;
+  }
+
+  .req-name {
+    font-size: 14px;
+  }
+
+  .accept-btn,
+  .decline-btn {
+    width: 40px;
+    height: 40px;
+    font-size: 14px;
+  }
 }
 
 /* Add Friend Card */
