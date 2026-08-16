@@ -66,7 +66,7 @@ public class SecurityConfig {
                 // Actuator endpoints for health checks
                 .requestMatchers("/actuator", "/actuator/**").permitAll()
                 // Static resources and frontend
-                .requestMatchers("/", "/index.html", "/static/**", "/asset-manifest.json", "/manifest.json", "/favicon.ico").permitAll()
+                .requestMatchers("/", "/index.html", "/static/**", "/cards/**", "/asset-manifest.json", "/manifest.json", "/favicon.ico").permitAll()
                 // Everything else requires authentication
                 .anyRequest().authenticated()
             )
