@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { useStomp } from '../contexts/StompContext';
-import { gameApi, friendApi, presenceApi, userApi } from '../utils/api';
+import { gameApi, friendApi, presenceApi, userApi, versionApi } from '../utils/api';
 import FriendsSidebar, { FriendInfo } from '../components/FriendsSidebar';
 import InviteNotificationToast from '../components/InviteNotificationToast';
 import LobbyView from '../components/LobbyView';
@@ -33,6 +33,7 @@ export default function MainView({ initialRoomCode }: MainViewProps) {
   const [showEditProfileModal, setShowEditProfileModal] = useState(false);
   const [newDisplayName, setNewDisplayName] = useState(user?.displayName || '');
   const [savingProfile, setSavingProfile] = useState(false);
+  const [appVersion, setAppVersion] = useState<string>('');
 
   // Detect mobile viewport
   useEffect(() => {
@@ -40,6 +41,13 @@ export default function MainView({ initialRoomCode }: MainViewProps) {
     checkMobile();
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  // Fetch app version on mount
+  useEffect(() => {
+    versionApi.getVersion()
+      .then((res) => setAppVersion(res.version))
+      .catch(() => setAppVersion('unknown'));
   }, []);
 
   const loadFriends = useCallback(async () => {
@@ -197,6 +205,12 @@ export default function MainView({ initialRoomCode }: MainViewProps) {
             <span className={`status-light ${isConnected ? 'online' : 'offline'}`} />
             <span className="status-label">{isConnected ? 'LIVE' : 'OFFLINE'}</span>
           </div>
+
+          {appVersion && (
+            <span className="version-badge" title="Application Version">
+              v{appVersion}
+            </span>
+          )}
 
           <button onClick={handleLogout} className="nav-logout-btn">
             Logout

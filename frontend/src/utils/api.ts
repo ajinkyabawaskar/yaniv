@@ -164,6 +164,17 @@ export interface PlayersResponse {
   }>;
 }
 
+// Version API Response Types
+export interface VersionResponse {
+  version: string;
+  name: string;
+}
+
+// Version API
+export const versionApi = {
+  getVersion: () => apiClient.get<VersionResponse>('/version'),
+};
+
 // Room/Game API
 export const gameApi = {
   createRoom: (targetScore?: number, maxPlayers?: number) =>

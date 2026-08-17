@@ -152,6 +152,19 @@
   color: var(--ink-light);
 }
 
+.version-badge {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--gold-light);
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: rgba(212, 175, 55, 0.15);
+  border: 1px solid rgba(212, 175, 55, 0.35);
+  opacity: 0.85;
+  white-space: nowrap;
+}
+
 .nav-logout-btn {
   font-size: 12px;
   padding: 6px 12px;
@@ -332,6 +345,10 @@
   }
 
   .status-label {
+    display: none;
+  }
+
+  .version-badge {
     display: none;
   }
 
