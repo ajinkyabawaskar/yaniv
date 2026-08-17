@@ -1,1 +1,28 @@
-{\n  "compilerOptions": {\n    "target": "ES2020",\n    "useDefineForClassFields": true,\n    "lib": ["ES2020", "DOM", "DOM.Iterable"],\n    "module": "ESNext",\n    "skipLibCheck": true,\n\n    /* Bundler mode */\n    "moduleResolution": "bundler",\n    "allowImportingTsExtensions": true,\n    "resolveJsonModule": true,\n    "isolatedModules": true,\n    "moduleResolution": "node",\n    "allowJs": true,\n    "strict": true,\n    "noEmit": true,\n    "jsx": "react-jsx",\n    "sourceMap": true,\n\n    /* Interop constraints */\n    "esModuleInterop": true,\n    "allowSyntheticDefaultImports": true,\n    "forceConsistentCasingInFileNames": true\n  },\n  "include": ["src"],\n  "references": [{ "path": "./tsconfig.node.json" }]\n}\n"}, {"filePath": "/Users/ajinkya/repos/yanif/frontend/tsconfig.json", "newString": "", "oldString": ""}
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+
+    /* Bundler mode */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "moduleResolution": "node",
+    "allowJs": true,
+    "strict": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "sourceMap": true,
+
+    /* Interop constraints */
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src"],
+  "references": [{ "path": "./tsconfig.node.json" }]
+}

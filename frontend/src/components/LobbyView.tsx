@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { preloadAllCards } from '../utils/cardPreload';
 import './LobbyView.css';
 
 interface LobbyViewProps {
@@ -12,6 +13,26 @@ export default function LobbyView({ onCreateGame, onJoinGame, friendCode }: Lobb
   const [showJoinForm, setShowJoinForm] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
+  const [cardsPreloaded, setCardsPreloaded] = useState(false);
+
+  // Preload all card SVGs when lobby mounts - happens in background while user waits
+  useEffect(() => {
+    let mounted = true;
+
+    preloadAllCards().then(() => {
+      if (mounted) {
+        setCardsPreloaded(true);
+        console.log('[CardPreload] All 54 card SVGs preloaded successfully');
+      }
+    }).catch((err) => {
+      console.warn('[CardPreload] Preload completed with some errors:', err);
+      if (mounted) setCardsPreloaded(true);
+    });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const handleJoinGame = async () => {
     if (!joinCode.trim()) return;
@@ -122,6 +143,14 @@ export default function LobbyView({ onCreateGame, onJoinGame, friendCode }: Lobb
               <span><strong>Asaf Penalty:</strong> If another player has $\le$ your score, they get 0 and you take $+30$ penalty!</span>
             </div>
           </div>
+        </div>
+
+        {/* Card Assets Preload Status */}
+        <div className="preload-status-bar">
+          <span className={`preload-indicator ${cardsPreloaded ? 'complete' : 'loading'}`}>
+            {cardsPreloaded ? '✓ Card assets ready' : '⟳ Loading card assets...'}
+          </span>
+          <span className="preload-hint">Instant card draws in-game</span>
         </div>
       </div>
     </div>
