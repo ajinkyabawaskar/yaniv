@@ -139,18 +139,15 @@ public class GameStateController {
             // Update presence back to IN_GAME
             presenceService.setUserInGame(userId);
 
-            // Broadcast reconnected status
+            // Broadcast reconnected status to other players
             broadcastPlayerDisconnected(roomId, userId, false);
 
-            // Force full state sync for the reconnecting player
-            GameStateMessage stateMessage = buildGameStateForPlayers(engine, roomId, userId);
-            messagingTemplate.convertAndSendToUser(
-                userId,
-                "/queue/game-state",
-                stateMessage
-            );
+            // NOTE: Do NOT proactively send game state here — race condition!
+            // Frontend will request state via /app/room/{roomId}/state after reconnecting
+            // (sent via flushPending in StompContext.onConnect and GameView effect)
+            // This avoids sending to /user/queue/game-state before frontend subscribes.
 
-            System.out.println("Player " + userId + " reconnected to active game in room " + roomId);
+            System.out.println("Player " + userId + " reconnected to active game in room " + roomId + "; waiting for client state request");
         } else {
             // Normal join
             presenceService.setUserOnline(userId);
