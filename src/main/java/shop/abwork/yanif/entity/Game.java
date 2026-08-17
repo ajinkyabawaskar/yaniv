@@ -27,6 +27,9 @@ public class Game {
     @Column(nullable = false)
     private Integer targetScore;
 
+    @Column(nullable = false)
+    private Integer maxPlayers;
+
     @Column(nullable = false, length = 36)
     private String hostUserId;
 
@@ -47,10 +50,15 @@ public class Game {
     }
 
     public Game(String roomCode, Integer targetScore, String hostUserId) {
+        this(roomCode, targetScore, hostUserId, 6); // Default 6 players
+    }
+
+    public Game(String roomCode, Integer targetScore, String hostUserId, Integer maxPlayers) {
         this.id = UUID.randomUUID().toString();
         this.roomCode = roomCode;
         this.status = GameStatus.LOBBY;
         this.targetScore = targetScore != null ? targetScore : 200;
+        this.maxPlayers = maxPlayers != null ? maxPlayers : 6;
         this.hostUserId = hostUserId;
         this.createdAt = LocalDateTime.now();
     }
@@ -86,6 +94,14 @@ public class Game {
 
     public void setTargetScore(Integer targetScore) {
         this.targetScore = targetScore;
+    }
+
+    public Integer getMaxPlayers() {
+        return maxPlayers;
+    }
+
+    public void setMaxPlayers(Integer maxPlayers) {
+        this.maxPlayers = maxPlayers;
     }
 
     public String getHostUserId() {

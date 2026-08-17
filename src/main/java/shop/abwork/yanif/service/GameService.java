@@ -43,11 +43,25 @@ public class GameService {
      *
      * @param roomCode    6-character room code
      * @param targetScore Target score for game elimination (default 200)
+     * @param hostUserId  Host user ID
+     * @param maxPlayers  Maximum players (default 6)
+     * @return Created game object
+     */
+    public Game createGame(String roomCode, Integer targetScore, String hostUserId, Integer maxPlayers) {
+        Game game = new Game(roomCode, targetScore, hostUserId, maxPlayers);
+        return gameRepository.save(game);
+    }
+
+    /**
+     * Create a new game room with default max players (6).
+     *
+     * @param roomCode    6-character room code
+     * @param targetScore Target score for game elimination (default 200)
+     * @param hostUserId  Host user ID
      * @return Created game object
      */
     public Game createGame(String roomCode, Integer targetScore, String hostUserId) {
-        Game game = new Game(roomCode, targetScore, hostUserId);
-        return gameRepository.save(game);
+        return createGame(roomCode, targetScore, hostUserId, 6);
     }
 
     /**

@@ -371,6 +371,7 @@ public class GameStateController {
                 GameStateMessage lobbyState = new GameStateMessage();
                 lobbyState.gameId = roomId;
                 lobbyState.roomCode = game.getRoomCode();
+                lobbyState.maxPlayers = game.getMaxPlayers();
                 lobbyState.currentState = game.getStatus().toString();
                 lobbyState.roundNumber = 0;
                 lobbyState.scores = new HashMap<>();
@@ -465,6 +466,7 @@ public class GameStateController {
         GameStateMessage lobbyState = new GameStateMessage();
         lobbyState.gameId = roomId;
         lobbyState.roomCode = game.getRoomCode();
+        lobbyState.maxPlayers = game.getMaxPlayers();
         lobbyState.currentState = game.getStatus().toString();
         lobbyState.roundNumber = 0;
         lobbyState.scores = new HashMap<>();
@@ -540,6 +542,7 @@ public class GameStateController {
         message.gameId = roomId;
         var game = gameService.getGameById(roomId);
         message.roomCode = game != null ? game.getRoomCode() : "";
+        message.maxPlayers = game != null ? game.getMaxPlayers() : 6;
         message.roundNumber = engine.getRoundNumber();
         message.currentState = engine.getCurrentState().toString();
         message.currentTurnPlayerId = engine.getCurrentPlayer();
@@ -845,6 +848,9 @@ public class GameStateController {
         public String yanivCallerName;
         public long yanivCalledAt;          // Server epoch ms
         public int yanivContestTimerSeconds; // Total allowed seconds (15)
+
+        // Max players in room
+        public Integer maxPlayers;
 
         // All player hands revealed on ROUND_OVER
         public Map<String, List<Map<String, Object>>> allPlayerHands;

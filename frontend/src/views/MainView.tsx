@@ -108,7 +108,7 @@ export default function MainView({ initialRoomCode }: MainViewProps) {
 
   const handleCreateGame = async () => {
     try {
-      const response = await gameApi.createRoom(200, 4);
+      const response = await gameApi.createRoom(200, 6);
       setCurrentGameId(response.gameId);
       setCurrentRoomCode(response.roomCode);
       setActiveView('game');

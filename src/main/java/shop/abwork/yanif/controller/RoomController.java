@@ -53,9 +53,11 @@ public class RoomController {
 
             // Determine target score (default 200)
             Integer targetScore = request.targetScore != null ? request.targetScore : 200;
+            // Determine max players (default 6)
+            Integer maxPlayers = request.maxPlayers != null ? request.maxPlayers : 6;
 
             // Create game
-            Game game = gameService.createGame(roomCode, targetScore, hostUserId);
+            Game game = gameService.createGame(roomCode, targetScore, hostUserId, maxPlayers);
 
             // Add host as first player
             gameService.addPlayerToGame(game.getId(), hostUserId);
@@ -111,6 +113,13 @@ public class RoomController {
             boolean alreadyJoined = gameService.getGamePlayers(game.getId()).stream()
                     .anyMatch(player -> player.getId().getUserId().equals(userId));
             if (!alreadyJoined) {
+                // Check max players limit
+                int currentPlayerCount = gameService.getGamePlayers(game.getId()).size();
+                int maxPlayers = game.getMaxPlayers() != null ? game.getMaxPlayers() : 6;
+                if (currentPlayerCount >= maxPlayers) {
+                    return ResponseEntity.badRequest()
+                            .body(Map.of("error", "Room is full (max " + maxPlayers + " players)"));
+                }
                 gameService.addPlayerToGame(game.getId(), userId);
             }
 

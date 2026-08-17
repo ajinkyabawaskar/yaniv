@@ -36,6 +36,7 @@ export interface GameState {
   asafByUserId: string | null; // Who caused Asaf
   isRoundOver: boolean; // Whether round is over and waiting for acknowledgment
   error: string | null;
+  maxPlayers: number; // Maximum players allowed in the room
 
   // Yaniv Contest Timer fields
   yanivCallerId: string | null;
@@ -80,6 +81,7 @@ export const useGameStore = create<GameState>((set) => ({
   asafByUserId: null,
   isRoundOver: false,
   error: null,
+  maxPlayers: 6,
 
   // Yaniv Contest Timer initial values
   yanivCallerId: null,
@@ -137,6 +139,7 @@ export const useGameStore = create<GameState>((set) => ({
       asafByUserId: null,
       isRoundOver: false,
       error: null,
+      maxPlayers: 6,
       yanivCallerId: null,
       yanivCallerName: null,
       yanivCalledAt: null,
