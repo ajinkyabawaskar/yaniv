@@ -1,13 +1,13 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
-import * as SockJS from 'sockjs-client';
-import { Client, Message, Subscription } from '@stomp/stompjs';
+import SockJS from 'sockjs-client';
+import { Client, Message, StompSubscription } from '@stomp/stompjs';
 import { useAuthStore } from '../stores/authStore';
 
 interface StompContextType {
   isConnected: boolean;
   client: Client | null;
   send: (destination: string, body: any) => void;
-  subscribe: (destination: string, callback: (message: Message) => void) => Subscription;
+  subscribe: (destination: string, callback: (message: Message) => void) => StompSubscription | null;
   flushPending: () => void;
 }
 
@@ -40,7 +40,7 @@ export function StompProvider({ children }: { children: React.ReactNode }) {
   const [isConnected, setIsConnected] = useState(false);
   const clientRef = useRef<Client | null>(null);
   const pendingMessagesRef = useRef<Array<{ destination: string; body: any }>>([]);
-  const subscriptionsRef = useRef<Map<string, Subscription>>(new Map());
+  const subscriptionsRef = useRef<Map<string, StompSubscription>>(new Map());
 
   useEffect(() => {
     if (!jwtToken || !userId) return;

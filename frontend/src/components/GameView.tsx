@@ -37,6 +37,23 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
+  // Handle visibility change for robust reconnection on mobile
+  // When app comes to foreground, ensure we request game state if connected
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!document.hidden && isConnected) {
+        // App came to foreground - request fresh game state
+        // This handles case where STOMP reconnected but GameView's isConnected effect didn't fire
+        console.log('App foregrounded, requesting game state');
+        send('/app/room/' + gameId + '/state', {});
+        send('/app/room/' + gameId + '/join', {});
+      }
+    };
+
+    window.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => window.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [isConnected, gameId, send]);
+
   // Yaniv Contest Timer - updates every 100ms during contest period
   useEffect(() => {
     if (gameState.yanivCallerId && gameState.yanivCalledAt && gameState.yanivContestTimerSeconds > 0) {
@@ -272,7 +289,7 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
         <div className="game-lobby-wrapper">
           <div className="lobby-glass-panel">
             <h2 className="lobby-title">Game Lobby #{roomCode}</h2>
-            <p className="lobby-desc">Share room code or link to assemble your table (2–6 players)</p>
+            <p className="lobby-desc">Share room code or link to assemble your table (2–4 players)</p>
 
             <div className="invite-link-box">
               <input
@@ -287,7 +304,7 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
             </div>
 
             <div className="lobby-players-grid">
-              <h4>Joined Players ({gameState.players?.length || 0})</h4>
+              <h4>Joined Players ({gameState.players?.length || 0}/4)</h4>
               <div className="players-list">
                 {gameState.players?.map((player) => (
                   <div key={player.userId} className="lobby-player-card">

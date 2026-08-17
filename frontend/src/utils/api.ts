@@ -74,13 +74,44 @@ class ApiClient {
 
 export const apiClient = new ApiClient();
 
+// User API Response Types
+export interface UserResolveResponse {
+  userId: string;
+  displayName: string;
+  friendCode: string;
+  jwtToken: string;
+  createdAt: string;
+}
+
+// Friend API Response Types
+export interface FriendListResponse {
+  friends: Array<{
+    userId: string;
+    displayName: string;
+    friendCode: string;
+    presence: 'online' | 'offline' | 'in-game';
+  }>;
+}
+
+export interface PendingRequestsResponse {
+  pendingRequests: Array<{
+    friendshipId: string;
+    fromUser: {
+      userId: string;
+      displayName: string;
+      friendCode: string;
+    };
+    createdAt: string;
+  }>;
+}
+
 // User API
 export const userApi = {
   resolve: (fingerprintHash: string, displayName?: string) =>
-    apiClient.post('/users/resolve', { fingerprintHash, displayName }),
-  
+    apiClient.post<UserResolveResponse>('/users/resolve', { fingerprintHash, displayName }),
+
   profile: () => apiClient.get('/users/profile'),
-  
+
   updateProfile: (displayName: string) =>
     apiClient.put('/users/profile', { displayName }),
 };
@@ -89,35 +120,66 @@ export const userApi = {
 export const friendApi = {
   sendRequest: (friendCode: string) =>
     apiClient.post('/friends/request', { friendCode }),
-  
+
   respondRequest: (friendshipId: string, accepted: boolean) =>
     apiClient.post('/friends/respond', { friendshipId, accepted }),
-  
-  getList: () => apiClient.get('/friends/list'),
-  
-  getPendingRequests: () => apiClient.get('/friends/pending-requests'),
+
+  getList: () => apiClient.get<FriendListResponse>('/friends/list'),
+
+  getPendingRequests: () => apiClient.get<PendingRequestsResponse>('/friends/pending-requests'),
 };
 
 export const presenceApi = {
   markOnline: () => apiClient.post('/presence/online', {}),
 };
 
+// Room/Game API Response Types
+export interface CreateRoomResponse {
+  gameId: string;
+  roomCode: string;
+}
+
+export interface JoinRoomResponse {
+  gameId: string;
+  roomCode: string;
+}
+
+export interface GameDetailsResponse {
+  gameId: string;
+  roomCode: string;
+  status: string;
+  hostUserId: string;
+  players: Array<{
+    userId: string;
+    displayName: string;
+    isHost: boolean;
+  }>;
+}
+
+export interface PlayersResponse {
+  players: Array<{
+    userId: string;
+    displayName: string;
+    isHost: boolean;
+  }>;
+}
+
 // Room/Game API
 export const gameApi = {
   createRoom: (targetScore?: number, maxPlayers?: number) =>
-    apiClient.post('/rooms', { targetScore, maxPlayers }),
-  
+    apiClient.post<CreateRoomResponse>('/rooms', { targetScore, maxPlayers }),
+
   joinRoom: (roomCode: string) =>
-    apiClient.post(`/rooms/${roomCode}/join`, {}),
-  
+    apiClient.post<JoinRoomResponse>(`/rooms/${roomCode}/join`, {}),
+
   getRoom: (roomCode: string) =>
-    apiClient.get(`/rooms/code/${roomCode}`),
-  
+    apiClient.get<GameDetailsResponse>(`/rooms/code/${roomCode}`),
+
   getGameDetails: (gameId: string) =>
-    apiClient.get(`/rooms/${gameId}`),
-  
+    apiClient.get<GameDetailsResponse>(`/rooms/${gameId}`),
+
   getPlayers: (gameId: string) =>
-    apiClient.get(`/rooms/${gameId}/players`),
+    apiClient.get<PlayersResponse>(`/rooms/${gameId}/players`),
 };
 
 export default apiClient;
