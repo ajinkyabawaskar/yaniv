@@ -195,7 +195,7 @@ public class PresenceController {
     public static class PresenceUpdateMessage {
         public String type;                         // FRIENDS_STATUS, PRESENCE_CHANGED
         public String userId;                       // For single presence changes
-        public String presence;                     // ONLINE, OFFLINE, IN_GAME
+        public String presence;                     // ONLINE, OFFLINE, IN_GAME, DISCONNECTED_IN_GAME
         public Map<String, String> friendsPresence; // For bulk status update
     }
 }

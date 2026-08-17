@@ -548,4 +548,11 @@ public class YanivGameEngine {
     public String getCallerId() {
         return callerId;
     }
+
+    /**
+     * Get all player IDs in this game (including eliminated).
+     */
+    public List<String> getAllPlayerIds() {
+        return new ArrayList<>(playerIds);
+    }
 }

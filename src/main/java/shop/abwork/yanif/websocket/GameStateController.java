@@ -7,11 +7,15 @@ import shop.abwork.yanif.game.model.Hand;
 import shop.abwork.yanif.service.GameService;
 import shop.abwork.yanif.service.PresenceService;
 import shop.abwork.yanif.service.UserService;
+import org.springframework.context.event.EventListener;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Controller;
+import org.springframework.web.socket.messaging.SessionConnectedEvent;
+import org.springframework.web.socket.messaging.SessionDisconnectEvent;
 
 import java.util.*;
 import java.util.Objects;
@@ -36,6 +40,14 @@ public class GameStateController {
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2);
     private final Map<String, ScheduledFuture<?>> yanivTimers = new ConcurrentHashMap<>();
 
+    // Action deduplication: track processed action IDs per player per room
+    // Format: roomId:playerId:actionId -> timestamp
+    private final Map<String, Long> processedActions = new ConcurrentHashMap<>();
+
+    // Track disconnected players who are still in game (for reconnection)
+    // roomId -> Set of disconnected userIds
+    private final Map<String, Set<String>> disconnectedInGame = new ConcurrentHashMap<>();
+
     public GameStateController(GameService gameService,
                               PresenceService presenceService,
                               UserService userService,
@@ -47,7 +59,107 @@ public class GameStateController {
     }
 
     /**
+     * Handle WebSocket session disconnect.
+     * If player is in an active game, mark them as disconnected but keep game state.
+     * Pause turn timer for that player.
+     */
+    @EventListener
+    public void handleSessionDisconnect(SessionDisconnectEvent event) {
+        String userId = getUserIdFromSession(event);
+
+        if (userId == null) {
+            return;
+        }
+
+        // Find which room this user is in (if any)
+        String roomId = findRoomForUser(userId);
+        if (roomId == null) {
+            return;
+        }
+
+        // Check if there's an active game engine for this room
+        YanivGameEngine engine = gameEngines.get(roomId);
+        if (engine == null) {
+            // Not in an active game, just update presence
+            presenceService.setUserOffline(userId);
+            return;
+        }
+
+        // Check if game is still in progress (not in lobby, not game over)
+        if (engine.isGameOver() || engine.isRoundOver()) {
+            // Game is between rounds or over, just update presence
+            presenceService.setUserOffline(userId);
+            return;
+        }
+
+        // Player is in an active game - mark as disconnected but keep in game
+        disconnectedInGame.computeIfAbsent(roomId, k -> ConcurrentHashMap.newKeySet()).add(userId);
+
+        // Update presence to DISCONNECTED_IN_GAME status (extended TTL)
+        presenceService.setUserDisconnectedInGame(userId);
+
+        // Broadcast disconnected status to other players
+        broadcastPlayerDisconnected(roomId, userId, true);
+
+        System.out.println("Player " + userId + " disconnected from active game in room " + roomId);
+    }
+
+    /**
+     * Handle WebSocket session connect.
+     * If player was previously disconnected in an active game, restore their state.
+     */
+    @EventListener
+    public void handleSessionConnect(SessionConnectedEvent event) {
+        String userId = getUserIdFromSession(event);
+
+        if (userId == null) {
+            return;
+        }
+
+        // Find which room this user is in
+        String roomId = findRoomForUser(userId);
+        if (roomId == null) {
+            return;
+        }
+
+        // Check if there's an active game engine for this room
+        YanivGameEngine engine = gameEngines.get(roomId);
+        if (engine == null) {
+            // Not in an active game
+            presenceService.setUserOnline(userId);
+            return;
+        }
+
+        // Check if this player was previously disconnected in this game
+        Set<String> disconnected = disconnectedInGame.get(roomId);
+        if (disconnected != null && disconnected.contains(userId)) {
+            // Player is reconnecting to an active game
+            disconnected.remove(userId);
+
+            // Update presence back to IN_GAME
+            presenceService.setUserInGame(userId);
+
+            // Broadcast reconnected status
+            broadcastPlayerDisconnected(roomId, userId, false);
+
+            // Force full state sync for the reconnecting player
+            GameStateMessage stateMessage = buildGameStateForPlayers(engine, roomId, userId);
+            messagingTemplate.convertAndSendToUser(
+                userId,
+                "/queue/game-state",
+                stateMessage
+            );
+
+            System.out.println("Player " + userId + " reconnected to active game in room " + roomId);
+        } else {
+            // Normal join
+            presenceService.setUserOnline(userId);
+        }
+    }
+
+    /**
      * Handle player discard and draw action.
+     * Includes action deduplication to handle network retries.
      */
     @MessageMapping("/room/{roomId}/action")
     public void handleGameAction(@DestinationVariable String roomId,
@@ -66,6 +178,26 @@ public class GameStateController {
                 return;
             }
 
+            // Action deduplication: check if this action was already processed
+            // Action ID format: roomId:userId:actionTimestamp (sent by client)
+            if (action.actionId != null && !action.actionId.isEmpty()) {
+                String dedupKey = roomId + ":" + userId + ":" + action.actionId;
+                Long existing = processedActions.putIfAbsent(dedupKey, System.currentTimeMillis());
+                if (existing != null) {
+                    System.out.println("Duplicate action ignored: " + dedupKey);
+                    // Re-send current state to ensure client is in sync
+                    YanivGameEngine engine = gameEngines.get(roomId);
+                    if (engine != null) {
+                        GameStateMessage stateMessage = buildGameStateForPlayers(engine, roomId, userId);
+                        messagingTemplate.convertAndSendToUser(userId, "/queue/game-state", stateMessage);
+                    }
+                    return;
+                }
+                // Clean up old entries (older than 5 minutes)
+                long cutoff = System.currentTimeMillis() - 5 * 60 * 1000;
+                processedActions.entrySet().removeIf(e -> e.getValue() < cutoff);
+            }
+
             // Get or create game engine
             YanivGameEngine engine = gameEngines.computeIfAbsent(roomId, k -> {
                 var game = gameService.getGameById(roomId);
@@ -77,6 +209,12 @@ public class GameStateController {
                         .toList();
                 return new YanivGameEngine(roomId, (List<String>) players, 7, 200);
             });
+
+            // Check if it's this player's turn
+            if (!userId.equals(engine.getCurrentPlayer()) && !"CALL_YANIV".equals(action.actionType)) {
+                sendErrorToUser(userId, "Not your turn");
+                return;
+            }
 
             // Process action
             switch (action.actionType) {
@@ -594,6 +732,62 @@ public class GameStateController {
     }
 
     /**
+     * Extract user ID from STOMP session.
+     */
+    private String getUserIdFromSession(SessionDisconnectEvent event) {
+        StompHeaderAccessor headerAccessor = StompHeaderAccessor.wrap(event.getMessage());
+        // The user is set in the WebSocketConfig ChannelInterceptor
+        if (headerAccessor.getUser() != null) {
+            return headerAccessor.getUser().getName();
+        }
+        return null;
+    }
+
+    /**
+     * Extract user ID from STOMP session (for connect event).
+     */
+    private String getUserIdFromSession(SessionConnectedEvent event) {
+        StompHeaderAccessor headerAccessor = StompHeaderAccessor.wrap(event.getMessage());
+        if (headerAccessor.getUser() != null) {
+            return headerAccessor.getUser().getName();
+        }
+        return null;
+    }
+
+    /**
+     * Find the room a user is currently in by checking game engines.
+     */
+    private String findRoomForUser(String userId) {
+        for (Map.Entry<String, YanivGameEngine> entry : gameEngines.entrySet()) {
+            if (entry.getValue().getAllPlayerIds().contains(userId)) {
+                return entry.getKey();
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Broadcast player disconnected/reconnected status to other players in the room.
+     */
+    private void broadcastPlayerDisconnected(String roomId, String userId, boolean disconnected) {
+        var players = gameService.getGamePlayers(roomId);
+        for (var player : players) {
+            String playerId = player.getId().getUserId();
+            if (!playerId.equals(userId)) {
+                GameStateMessage message = new GameStateMessage();
+                message.gameId = roomId;
+                message.playerDisconnected = userId;
+                message.playerDisconnectedStatus = disconnected;
+                messagingTemplate.convertAndSendToUser(
+                    playerId,
+                    "/queue/game-state",
+                    message
+                );
+            }
+        }
+    }
+
+    /**
      * Request DTOs
      */
     public static class GameActionMessage {
@@ -602,6 +796,7 @@ public class GameStateController {
         public List<String> discardedCardIds;
         public String drawSource;       // DECK or DISCARD_PILE
         public String drawnCardId;
+        public String actionId;         // For deduplication (client-generated unique ID)
     }
 
     public static class YanivCallMessage {
@@ -656,5 +851,9 @@ public class GameStateController {
 
         // All player hands revealed on ROUND_OVER
         public Map<String, List<Map<String, Object>>> allPlayerHands;
+
+        // Player reconnection status
+        public String playerDisconnected;
+        public boolean playerDisconnectedStatus;
     }
 }
