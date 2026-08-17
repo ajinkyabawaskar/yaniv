@@ -18,10 +18,10 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 24px;
-  background: rgba(5, 20, 14, 0.92);
+  padding: 6px 16px;
+  background: rgba(5, 20, 14, 0.95);
   border-bottom: 1px solid rgba(212, 175, 55, 0.25);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
   backdrop-filter: blur(12px);
 }
 
@@ -285,13 +285,13 @@
 
 @media (max-width: 768px) {
   .main-top-navbar {
-    padding: 8px 12px;
+    padding: 5px 10px;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: 6px;
   }
 
   .nav-left {
-    gap: 8px;
+    gap: 6px;
     flex: 1;
     min-width: 0;
   }
@@ -301,14 +301,14 @@
   }
 
   .sidebar-toggle-btn {
-    padding: 8px 12px;
-    font-size: 13px;
-    min-height: 44px;
-    min-width: 44px;
+    padding: 5px 8px;
+    font-size: 11px;
+    min-height: 32px;
+    min-width: 32px;
   }
 
   .nav-right {
-    gap: 8px;
+    gap: 5px;
   }
 
   .user-info {
@@ -316,19 +316,19 @@
   }
 
   .user-profile-badge {
-    padding: 8px;
-    min-height: 44px;
-    min-width: 44px;
+    padding: 5px;
+    min-height: 32px;
+    min-width: 32px;
   }
 
   .user-avatar {
-    width: 32px;
-    height: 32px;
-    font-size: 12px;
+    width: 26px;
+    height: 26px;
+    font-size: 10px;
   }
 
   .connection-pill {
-    padding: 6px 10px;
+    padding: 4px 6px;
   }
 
   .status-label {
@@ -336,9 +336,9 @@
   }
 
   .nav-logout-btn {
-    padding: 8px 12px;
-    font-size: 13px;
-    min-height: 44px;
+    padding: 5px 8px;
+    font-size: 11px;
+    min-height: 32px;
   }
 
   .main-sidebar-aside {
@@ -368,6 +368,10 @@
 }
 
 @media (max-width: 480px) {
+  .main-top-navbar {
+    padding: 4px 8px;
+  }
+
   .brand-name {
     display: none;
   }
@@ -376,8 +380,14 @@
     gap: 0;
   }
 
+  .sidebar-toggle-btn {
+    padding: 4px 6px;
+    min-height: 28px;
+    min-width: 28px;
+  }
+
   .nav-logout-btn {
-    padding: 8px;
+    padding: 6px;
     font-size: 0;
   }
 
@@ -387,6 +397,6 @@
   }
 
   .connection-pill {
-    padding: 6px 8px;
+    padding: 4px 6px;
   }
 }

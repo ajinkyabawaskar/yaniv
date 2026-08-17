@@ -46,6 +46,8 @@ interface TableCanvasProps {
   yanivCalledAt?: number | null;
   yanivContestTimerSeconds?: number;
   allPlayerHands?: Record<string, Card[]>;
+  // Current user ID for Yaniv contest UI
+  currentUserId?: string | null;
 }
 
 export const getCardImagePath = (rank: string, suit: string): string => {
@@ -221,16 +223,12 @@ export default function TableCanvas({
   allPlayerHands = {},
 }: TableCanvasProps) {
   const [selectedCards, setSelectedCards] = useState<string[]>([]);
-  const [stagedCards, setStagedCards] = useState<string[]>([]);
-  const [isStagingValid, setIsStagingValid] = useState<boolean>(false);
   const [statusFeedback, setStatusFeedback] = useState<string | null>(null);
   const [isFeedbackError, setIsFeedbackError] = useState<boolean>(false);
-  const [isDragOverStaging, setIsDragOverStaging] = useState(false);
   const [localSortedHand, setLocalSortedHand] = useState<Card[]>(hand);
   const [draggedCardId, setDraggedCardId] = useState<string | null>(null);
   const [dragOverCardId, setDragOverCardId] = useState<string | null>(null);
   const [isDealingAnimation, setIsDealingAnimation] = useState(false);
-  const [showYanivBanner, setShowYanivBanner] = useState(false);
   const [showAsafBanner, setShowAsafBanner] = useState(false);
   const [lastTapTime, setLastTapTime] = useState<Record<string, number>>({});
   const [turnTimerSeconds, setTurnTimerSeconds] = useState<number>(30);
@@ -274,15 +272,7 @@ export default function TableCanvas({
     }
   }, [roundNumber]);
 
-  useEffect(() => {
-    if (roundWinner) {
-      setShowYanivBanner(true);
-      soundEngine.playYanivBell();
-      const timer = setTimeout(() => setShowYanivBanner(false), 4000);
-      return () => clearTimeout(timer);
-    }
-  }, [roundWinner]);
-
+  
   useEffect(() => {
     if (isAsaf) {
       setShowAsafBanner(true);
@@ -296,7 +286,15 @@ export default function TableCanvas({
     setTurnTimerSeconds(30);
     const interval = setInterval(() => {
       setTurnTimerSeconds((prev) => {
-        if (prev <= 1) return 0;
+        if (prev <= 1) {
+          // Auto-play: discard first card and draw from deck when timer expires
+          if (isPlayerTurn && hand.length > 0) {
+            const autoDiscard = [hand[0].id];
+            soundEngine.playTimerTick(true);
+            onDiscard(autoDiscard, 'DECK');
+          }
+          return 0;
+        }
         if (prev <= 6 && prev > 1) {
           soundEngine.playTimerTick(prev <= 3);
         }
@@ -305,13 +303,11 @@ export default function TableCanvas({
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [currentTurnPlayerId]);
+  }, [currentTurnPlayerId, isPlayerTurn, hand, onDiscard]);
 
   useEffect(() => {
     if (!isPlayerTurn) {
-      setStagedCards([]);
       setSelectedCards([]);
-      setIsStagingValid(false);
       setStatusFeedback(null);
     }
   }, [isPlayerTurn, currentTurnPlayerId]);
@@ -340,9 +336,7 @@ export default function TableCanvas({
     }
   }, [yanivCallerId, yanivCalledAt, yanivContestTimerSeconds]);
 
-  const currentHandCards = useMemo(() => {
-    return localSortedHand.filter((c) => !stagedCards.includes(c.id));
-  }, [localSortedHand, stagedCards]);
+  const currentHandCards = localSortedHand;
 
   const handScore = useMemo(() => calculateHandScore(currentHandCards), [currentHandCards]);
   const isYanivEligible = handScore <= yanivThreshold;
@@ -371,20 +365,13 @@ export default function TableCanvas({
 
   // Card click: Single-tap toggle or double-tap multi-select
   const handleCardClick = (card: Card) => {
-    if (stagedCards.includes(card.id)) {
-      handleUnstageCard(card.id);
-      return;
-    }
-
     const now = Date.now();
     const lastTap = lastTapTime[card.id] || 0;
     const isDoubleTap = now - lastTap < 300;
     setLastTapTime((prev) => ({ ...prev, [card.id]: now }));
 
     if (isDoubleTap) {
-      const matchingRankCards = localSortedHand.filter(
-        (c) => c.rank === card.rank && !stagedCards.includes(c.id)
-      );
+      const matchingRankCards = localSortedHand.filter((c) => c.rank === card.rank);
       const matchingIds = matchingRankCards.map((c) => c.id);
       setSelectedCards((prev) => {
         const allSelected = matchingIds.every((id) => prev.includes(id));
@@ -405,52 +392,9 @@ export default function TableCanvas({
     }
   };
 
-  // Stage selected cards
-  const handleStageSelectedCards = useCallback(() => {
-    if (selectedCards.length === 0) {
-      setStatusFeedback('Select 1 or more cards to stage');
-      setIsFeedbackError(true);
-      return;
-    }
-    const cardsToStage = localSortedHand.filter((c) => selectedCards.includes(c.id));
-    const validation = isValidCombination(cardsToStage, localSortedHand.length);
-
-    if (validation.valid) {
-      setStagedCards(selectedCards);
-      setSelectedCards([]);
-      setIsStagingValid(true);
-      setStatusFeedback('Valid combination staged! Tap Draw Pile or Discard Pile to complete turn.');
-      setIsFeedbackError(false);
-      soundEngine.playValidStagingDrop();
-      hapticFirmSnap();
-    } else {
-      setIsStagingValid(false);
-      setStatusFeedback(validation.reason || 'Invalid combination');
-      setIsFeedbackError(true);
-      soundEngine.playInvalidRejection();
-      hapticDoubleError();
-    }
-  }, [selectedCards, localSortedHand]);
-
-  const handleUnstageCard = (cardId: string) => {
-    setStagedCards((prev) => prev.filter((id) => id !== cardId));
-    setIsStagingValid(false);
-    setStatusFeedback(null);
-    soundEngine.playCardSelectTick();
-    hapticLightTick();
-  };
-
-  const handleCancelStaging = () => {
-    setStagedCards([]);
-    setIsStagingValid(false);
-    setStatusFeedback(null);
-    soundEngine.playCardSelectTick();
-  };
-
-  // Drag-and-drop handler for hand reordering & staging
+  // Drag-and-drop handler for hand reordering only (no staging)
   const handleHandCardDragStart = (e: React.DragEvent, cardId: string) => {
     setDraggedCardId(cardId);
-    e.dataTransfer.setData('cardId', cardId);
     e.dataTransfer.setData('handReorderId', cardId);
     e.dataTransfer.effectAllowed = 'move';
     soundEngine.playFeltSlide(0.4);
@@ -539,65 +483,36 @@ export default function TableCanvas({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedCards]);
 
-  const handleDragOverStaging = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    setIsDragOverStaging(true);
-  };
-
-  const handleDragLeaveStaging = () => {
-    setIsDragOverStaging(false);
-  };
-
-  const handleDropOnStaging = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragOverStaging(false);
-    const cardId = e.dataTransfer.getData('cardId') || draggedCardId;
-    if (cardId && !selectedCards.includes(cardId)) {
-      setSelectedCards([cardId]);
-    }
-    setDraggedCardId(null);
-    setDragOverCardId(null);
-    handleStageSelectedCards();
-  };
-
-  const handleDrawFromDeck = () => {
-    if (!isPlayerTurn) return;
-
-    let cardsToDiscard: string[] = [];
-
-    if (stagedCards.length > 0) {
-      if (!isStagingValid) {
-        soundEngine.playInvalidRejection();
-        hapticDoubleError();
-        return;
-      }
-      cardsToDiscard = stagedCards;
-    } else if (selectedCards.length > 0) {
-      const cardsObjects = localSortedHand.filter((c) => selectedCards.includes(c.id));
-      const validation = isValidCombination(cardsObjects, localSortedHand.length);
-      if (!validation.valid) {
-        setStatusFeedback(validation.reason || 'Invalid combination');
-        setIsFeedbackError(true);
-        soundEngine.playInvalidRejection();
-        hapticDoubleError();
-        return;
-      }
-      cardsToDiscard = selectedCards;
-    } else {
+  const validateAndDiscard = useCallback((
+    drawSource: 'DECK' | 'DISCARD_PILE',
+    drawnCardId?: string
+  ) => {
+    if (selectedCards.length === 0) {
       setStatusFeedback('Select cards to discard from your hand first!');
       setIsFeedbackError(true);
       soundEngine.playInvalidRejection();
       hapticDoubleError();
       return;
     }
-
+    const cardsObjects = localSortedHand.filter((c) => selectedCards.includes(c.id));
+    const validation = isValidCombination(cardsObjects, localSortedHand.length);
+    if (!validation.valid) {
+      setStatusFeedback(validation.reason || 'Invalid combination');
+      setIsFeedbackError(true);
+      soundEngine.playInvalidRejection();
+      hapticDoubleError();
+      return;
+    }
     soundEngine.playDealerFlick();
-    onDiscard(cardsToDiscard, 'DECK');
-    setStagedCards([]);
+    onDiscard(selectedCards, drawSource, drawnCardId);
     setSelectedCards([]);
-    setIsStagingValid(false);
     setStatusFeedback(null);
+    setIsFeedbackError(false);
+  }, [selectedCards, localSortedHand, onDiscard]);
+
+  const handleDrawFromDeck = () => {
+    if (!isPlayerTurn) return;
+    validateAndDiscard('DECK');
   };
 
   const handleDrawFromDiscard = (targetCard: Card) => {
@@ -622,40 +537,7 @@ export default function TableCanvas({
       return;
     }
 
-    let cardsToDiscard: string[] = [];
-
-    if (stagedCards.length > 0) {
-      if (!isStagingValid) {
-        soundEngine.playInvalidRejection();
-        hapticDoubleError();
-        return;
-      }
-      cardsToDiscard = stagedCards;
-    } else if (selectedCards.length > 0) {
-      const cardsObjects = localSortedHand.filter((c) => selectedCards.includes(c.id));
-      const validation = isValidCombination(cardsObjects, localSortedHand.length);
-      if (!validation.valid) {
-        setStatusFeedback(validation.reason || 'Invalid combination');
-        setIsFeedbackError(true);
-        soundEngine.playInvalidRejection();
-        hapticDoubleError();
-        return;
-      }
-      cardsToDiscard = selectedCards;
-    } else {
-      setStatusFeedback('Select cards to discard from your hand first!');
-      setIsFeedbackError(true);
-      soundEngine.playInvalidRejection();
-      hapticDoubleError();
-      return;
-    }
-
-    soundEngine.playDealerFlick();
-    onDiscard(cardsToDiscard, 'DISCARD_PILE', targetCard.id);
-    setStagedCards([]);
-    setSelectedCards([]);
-    setIsStagingValid(false);
-    setStatusFeedback(null);
+    validateAndDiscard('DISCARD_PILE', targetCard.id);
   };
 
   const handleSortByRank = () => {
@@ -756,25 +638,6 @@ export default function TableCanvas({
           )}
         </AnimatePresence>
 
-        {/* Dramatic Yaniv Banner */}
-        <AnimatePresence>
-          {showYanivBanner && (
-            <motion.div
-              className="dramatic-yaniv-overlay"
-              initial={{ scale: 0.5, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 1.2, opacity: 0 }}
-              transition={{ type: 'spring', damping: 15 }}
-            >
-              <div className="yaniv-bell-icon">🔔</div>
-              <h1 className="yaniv-title">YANIV!</h1>
-              <p className="yaniv-caller">
-                {roundWinner ? playerNames[roundWinner] || roundWinner : 'Round Winner'} called Yaniv!
-              </p>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
         {/* Dramatic Asaf Banner */}
         <AnimatePresence>
           {showAsafBanner && (
@@ -814,23 +677,22 @@ export default function TableCanvas({
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: idx * 0.1 }}
               >
-                {isTurn && (
-                  <svg className={`turn-timer-ring ${isUrgentTimer ? 'urgent' : ''}`} viewBox="0 0 100 100">
-                    <circle cx="50" cy="50" r="46" className="timer-track" />
-                    <circle
-                      cx="50"
-                      cy="50"
-                      r="46"
-                      className="timer-fill"
-                      style={{
-                        strokeDasharray: 289,
-                        strokeDashoffset: 289 * (1 - timerProgress),
-                      }}
-                    />
-                  </svg>
-                )}
-
                 <div className="opponent-avatar-wrap">
+                  {isTurn && (
+                    <svg className={`turn-timer-ring ${isUrgentTimer ? 'urgent' : ''}`} viewBox="0 0 100 100">
+                      <circle cx="50" cy="50" r="46" className="timer-track" />
+                      <circle
+                        cx="50"
+                        cy="50"
+                        r="46"
+                        className="timer-fill"
+                        style={{
+                          strokeDasharray: 289,
+                          strokeDashoffset: 289 * (1 - timerProgress),
+                        }}
+                      />
+                    </svg>
+                  )}
                   <div className="opponent-avatar">{opponent.displayName.substring(0, 2).toUpperCase()}</div>
                   {opponent.isHost && <span className="host-badge" title="Host">👑</span>}
                 </div>
@@ -859,13 +721,11 @@ export default function TableCanvas({
           })}
         </div>
 
-        {/* 2. Center Play Area (3-Zone Layout) */}
+        {/* 2. Center Play Area (2-Zone Layout) */}
         <div className="center-play-area">
           {/* Zone 1: Draw Pile (Left) */}
           <div
-            className={`zone-column draw-pile-zone ${
-              (stagedCards.length > 0 && isStagingValid) || selectedCards.length > 0 ? 'pulse-prompt' : ''
-            }`}
+            className={`zone-column draw-pile-zone ${selectedCards.length > 0 ? 'pulse-prompt' : ''}`}
             onClick={handleDrawFromDeck}
           >
             <div className="zone-header">
@@ -894,79 +754,7 @@ export default function TableCanvas({
             )}
           </div>
 
-          {/* Zone 2: Staging Drop Zone (Center) */}
-          <div
-            className={`zone-column staging-drop-zone ${
-              isDragOverStaging ? 'drag-hover' : ''
-            } ${stagedCards.length > 0 ? (isStagingValid ? 'valid-staged' : 'invalid-staged') : ''}`}
-            onDragOver={handleDragOverStaging}
-            onDragLeave={handleDragLeaveStaging}
-            onDrop={handleDropOnStaging}
-            onClick={() => {
-              if (selectedCards.length > 0 && stagedCards.length === 0) {
-                handleStageSelectedCards();
-              }
-            }}
-          >
-            <div className="zone-header">
-              <span className="zone-title">STAGING ZONE</span>
-              {stagedCards.length > 0 && (
-                <button className="unstage-btn" onClick={handleCancelStaging} title="Return cards to hand">
-                  Cancel
-                </button>
-              )}
-            </div>
-
-            <div className="staging-slot-area">
-              {stagedCards.length === 0 ? (
-                <div className="staging-empty-state">
-                  <span className="staging-icon">📥</span>
-                  <p className="staging-hint">
-                    {selectedCards.length > 0
-                      ? `Tap or Drop to Stage (${selectedCards.length}) Selected`
-                      : 'Select cards or drop to stage'}
-                  </p>
-                </div>
-              ) : (
-                <div className="staged-cards-fan">
-                  {stagedCards.map((cId) => {
-                    const card = localSortedHand.find((c) => c.id === cId);
-                    if (!card) return null;
-                    return (
-                      <motion.div
-                        key={card.id}
-                        className="staged-card"
-                        initial={{ scale: 0.8, y: 15 }}
-                        animate={{ scale: 1, y: 0 }}
-                        onClick={() => handleUnstageCard(card.id)}
-                        title="Click to return to hand"
-                      >
-                        <img
-                          src={getCardImagePath(card.rank, card.suit)}
-                          alt={`${card.rank} of ${card.suit}`}
-                          className="card-img"
-                        />
-                      </motion.div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* Validation Feedback */}
-            {stagedCards.length > 0 && (
-              <div className={`staging-status-pill ${isStagingValid ? 'valid' : 'invalid'}`}>
-                {isStagingValid ? '✓ Valid! Now tap Draw Pile or Discard' : statusFeedback || '✗ Invalid combination'}
-              </div>
-            )}
-            {statusFeedback && stagedCards.length === 0 && (
-              <div className={`staging-status-pill ${isFeedbackError ? 'invalid' : 'valid'}`}>
-                {statusFeedback}
-              </div>
-            )}
-          </div>
-
-          {/* Zone 3: Discard Pile (Right) */}
+          {/* Zone 2: Discard Pile (Right) - expanded */}
           <div className="zone-column discard-pile-zone">
             <div className="zone-header">
               <span className="zone-title">DISCARD PILE</span>
@@ -1035,7 +823,7 @@ export default function TableCanvas({
         <div className="main-player-dock">
           <div className="player-hud-bar">
             <div className={`hand-total-pill ${isYanivEligible ? 'ready-yaniv' : ''}`}>
-              <span className="score-label">HAND TOTAL:</span>
+              <span className="score-label">TOTAL:</span>
               <span className="score-digits">{handScore}</span>
               {isYanivEligible && <span className="yaniv-badge">✨ READY FOR YANIV!</span>}
             </div>
@@ -1090,10 +878,10 @@ export default function TableCanvas({
               </motion.button>
             )}
 
-            {isPlayerTurn && selectedCards.length > 0 && stagedCards.length === 0 && (
-              <button className="stage-action-btn" onClick={handleStageSelectedCards}>
-                Stage ({selectedCards.length})
-              </button>
+            {isPlayerTurn && selectedCards.length > 0 && (
+              <div className="selected-hint">
+                Tap Draw Pile or a discard card to discard & draw
+              </div>
             )}
           </div>
 
@@ -1102,8 +890,6 @@ export default function TableCanvas({
               <AnimatePresence>
                 {localSortedHand.map((card, idx) => {
                   const isSelected = selectedCards.includes(card.id);
-                  const isStaged = stagedCards.includes(card.id);
-                  if (isStaged) return null;
 
                   const totalCards = localSortedHand.length;
                   const centerOffset = idx - (totalCards - 1) / 2;

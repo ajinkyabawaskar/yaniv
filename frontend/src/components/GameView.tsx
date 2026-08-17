@@ -25,6 +25,7 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
   const [copiedLink, setCopiedLink] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [showScoreboard, setShowScoreboard] = useState(false);
+  const [yanivContestTimerRemaining, setYanivContestTimerRemaining] = useState<number>(0);
 
   const currentUserId = localStorage.getItem('userId') || '';
 
@@ -35,6 +36,25 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
+
+  // Yaniv Contest Timer - updates every 100ms during contest period
+  useEffect(() => {
+    if (gameState.yanivCallerId && gameState.yanivCalledAt && gameState.yanivContestTimerSeconds > 0) {
+      const endTime = gameState.yanivCalledAt + gameState.yanivContestTimerSeconds * 1000;
+
+      const updateTimer = () => {
+        const now = Date.now();
+        const remaining = Math.max(0, Math.ceil((endTime - now) / 1000));
+        setYanivContestTimerRemaining(remaining);
+      };
+
+      updateTimer();
+      const interval = setInterval(updateTimer, 100);
+      return () => clearInterval(interval);
+    } else {
+      setYanivContestTimerRemaining(0);
+    }
+  }, [gameState.yanivCallerId, gameState.yanivCalledAt, gameState.yanivContestTimerSeconds]);
 
   // Helper to check if a player is a round winner
   const isRoundWinner = (userId: string) => {
@@ -80,6 +100,12 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
             isAsaf: gameData.isAsaf || false,
             asafByUserId: gameData.asafByUserId || null,
             isRoundOver: isRoundOverState,
+            // Yaniv contest timer fields
+            yanivCallerId: gameData.yanivCallerId || null,
+            yanivCallerName: gameData.yanivCallerName || null,
+            yanivCalledAt: gameData.yanivCalledAt || null,
+            yanivContestTimerSeconds: gameData.yanivContestTimerSeconds || 15,
+            allPlayerHands: gameData.allPlayerHands || {},
           });
 
           const userId = localStorage.getItem('userId');
@@ -204,14 +230,29 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
         <div className="header-left">
           <span className="room-code-tag">ROOM #{roomCode}</span>
           <span className="round-badge">ROUND {gameState.roundNumber || 1}</span>
+          {gameState.yanivCallerId && yanivContestTimerRemaining > 0 && (
+            <span className="yaniv-timer-badge">
+              ⏱️ {yanivContestTimerRemaining}s
+            </span>
+          )}
         </div>
 
         <div className="header-actions">
           <button className="copy-link-btn" onClick={handleCopyInviteLink}>
-            {copiedLink ? '✓ Link Copied' : '🔗 Invite Link'}
+            <span>{copiedLink ? '✓ Link Copied' : '🔗 Invite Link'}</span>
           </button>
+          {gameStarted && (
+            <button
+              className="scoreboard-toggle-btn"
+              onClick={() => setShowScoreboard(!showScoreboard)}
+              aria-label={showScoreboard ? 'Hide Scoreboard' : 'Show Scoreboard'}
+              aria-expanded={showScoreboard}
+            >
+              <span>🏆 {showScoreboard ? 'Hide' : 'Scores'}</span>
+            </button>
+          )}
           <button className="exit-table-btn" onClick={onExit}>
-            Exit Table
+            <span>Exit Table</span>
           </button>
         </div>
       </div>
@@ -302,6 +343,7 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
               yanivContestTimerSeconds={gameState.yanivContestTimerSeconds}
               allPlayerHands={gameState.allPlayerHands}
               serverError={serverError}
+              currentUserId={currentUserId}
             />
           </div>
 
@@ -313,18 +355,6 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
               eliminatedPlayers={gameState.eliminatedPlayers}
             />
           </div>
-
-          {/* Mobile Scoreboard Toggle Button */}
-          {isMobile && (
-            <button
-              className="scoreboard-toggle-btn"
-              onClick={() => setShowScoreboard(!showScoreboard)}
-              aria-label={showScoreboard ? 'Hide Scoreboard' : 'Show Scoreboard'}
-              aria-expanded={showScoreboard}
-            >
-              🏆 {showScoreboard ? 'Hide' : 'Scores'}
-            </button>
-          )}
 
           {/* Mobile Scoreboard Overlay */}
           {isMobile && (
