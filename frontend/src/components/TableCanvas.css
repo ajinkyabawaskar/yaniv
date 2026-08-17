@@ -391,17 +391,19 @@
   display: block;
 }
 
-/* Zone 3: Discard Pile Horizontal Fan with Sequence Rules */
+/* Zone 3: Discard Pile - Fan Layout (like player hand) */
 .discard-pile-zone {
   min-width: 160px;
 }
 
 .discard-fan-container {
   position: relative;
-  min-height: 124px;
+  min-height: 140px;
   min-width: 120px;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 8px;
 }
 
 .discard-empty-box {
@@ -417,22 +419,24 @@
 }
 
 .discard-cards-fan {
-  position: relative;
-  height: 124px;
-  width: 140px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  gap: 8px; /* gap between cards in fan */
+  min-height: 124px;
+  width: max-content;
 }
 
 .discard-fan-card {
-  position: absolute;
-  top: 0;
   width: 88px;
   height: 124px;
   border-radius: 6px;
   overflow: hidden;
   box-shadow: 2px 4px 12px rgba(0, 0, 0, 0.5);
   background: #fff;
-  transition: all 0.2s ease;
   cursor: pointer;
+  flex-shrink: 0;
+  transform-origin: bottom center;
 }
 
 .discard-fan-card.drawable-eligible {
@@ -1090,17 +1094,20 @@
     padding: 3px 8px;
   }
 
-  /* Zone 2: Discard Pile - horizontal fan, scrollable */
+  /* Zone 2: Discard Pile - fan layout, scrollable if needed */
   .discard-pile-zone {
     min-width: 0;
   }
 
   .discard-fan-container {
-    min-height: 100px;
+    min-height: 110px;
     min-width: 0;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     padding: 4px 0;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
   }
 
   .discard-fan-container::-webkit-scrollbar {
@@ -1112,7 +1119,7 @@
     height: 100px;
     min-width: 100%;
     display: flex;
-    gap: 12px;
+    gap: 8px;
     align-items: flex-end;
   }
 
@@ -1120,9 +1127,7 @@
     width: 72px;
     height: 100px;
     flex-shrink: 0;
-    position: relative;
-    top: auto;
-    left: auto;
+    transform-origin: bottom center;
   }
 
   .discard-empty-box {

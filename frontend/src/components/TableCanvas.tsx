@@ -784,15 +784,28 @@ export default function TableCanvas({
                       idx > 0 &&
                       idx < discardDisplayCards.length - 1;
 
+                    // Fan layout calculations (similar to player hand)
+                    const totalCards = discardDisplayCards.length;
+                    const centerOffset = idx - (totalCards - 1) / 2;
+                    const rotationDeg = centerOffset * 4; // Slightly more rotation for discard pile
+                    const translateY = Math.abs(centerOffset) * 3;
+                    // Z-index: center card on top, edges behind
+                    const zIndex = totalCards - Math.abs(centerOffset);
+
                     return (
                       <motion.div
                         key={card.id || idx}
                         className={`discard-fan-card ${isDrawable ? 'drawable-eligible' : 'locked-ineligible'}`}
                         style={{
-                          left: `${idx * 26}px`,
-                          zIndex: idx + 1,
+                          zIndex,
+                          transformOrigin: 'bottom center',
                         }}
-                        whileHover={isDrawable ? { y: -12, scale: 1.05 } : { x: [-2, 2, -2, 0] }}
+                        animate={{
+                          rotate: rotationDeg,
+                          y: translateY,
+                        }}
+                        transition={{ type: 'spring', stiffness: 400, damping: 28 }}
+                        whileHover={isDrawable ? { y: -12, scale: 1.05, rotate: 0 } : { x: [-2, 2, -2, 0] }}
                         onClick={() => handleDrawFromDiscard(card)}
                       >
                         <img
