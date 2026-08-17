@@ -507,44 +507,36 @@
 .hand-total-pill {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 14px;
-  border-radius: 20px;
-  background: var(--glass-bg);
-  border: 1px solid rgba(212, 175, 55, 0.3);
-  backdrop-filter: blur(10px);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.hand-total-pill .score-label {
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(10, 32, 23, 0.85);
+  border: 1px solid rgba(212, 175, 55, 0.35);
+  color: var(--gold-light);
+  line-height: 1.2;
+  min-height: 32px;
+  min-width: 36px;
   font-family: 'DM Mono', monospace;
   font-size: 11px;
-  color: var(--ink-light);
+  font-weight: 600;
+  transition: all 0.2s ease;
 }
 
-.hand-total-pill .score-digits {
-  font-family: 'Cinzel', serif;
-  font-size: 18px;
-  font-weight: 800;
-  color: #fff;
+.hand-total-pill:hover {
+  background: rgba(212, 175, 55, 0.2);
+  border-color: var(--gold-primary);
 }
 
 .hand-total-pill.ready-yaniv {
   background: var(--gold-gradient);
   border-color: #fff;
-  color: #0d281e;
+  color: #0a241a;
   animation: goldPulse 1.8s infinite ease-in-out;
 }
 
-.hand-total-pill.ready-yaniv .score-label,
-.hand-total-pill.ready-yaniv .score-digits {
-  color: #0a241a;
-}
-
-.yaniv-badge {
+.hand-total-pill .yaniv-badge {
   font-weight: 800;
-  font-size: 11px;
+  font-size: 10px;
   letter-spacing: 0.05em;
   color: #071c14;
 }
@@ -574,16 +566,22 @@
 }
 
 .call-yaniv-btn {
-  font-family: 'Cinzel', serif;
-  font-size: 14px;
-  font-weight: 800;
-  padding: 8px 18px;
-  border-radius: 24px;
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
   background: var(--gold-gradient);
   color: #0a241a;
   border: 1px solid #fff;
-  letter-spacing: 0.05em;
-  box-shadow: 0 4px 18px rgba(212, 175, 55, 0.6);
+  line-height: 1.2;
+  min-height: 32px;
+  min-width: 36px;
+  box-shadow: 0 2px 8px rgba(212, 175, 55, 0.4);
+}
+
+.call-yaniv-btn:hover {
+  box-shadow: 0 4px 12px rgba(212, 175, 55, 0.6);
 }
 
 .selected-hint {
@@ -1156,20 +1154,14 @@
   }
 
   .hand-total-pill {
-    padding: 6px 12px;
-    min-height: 44px;
-  }
-
-  .hand-total-pill .score-label {
+    padding: 2px 6px;
+    min-height: 32px;
+    min-width: 36px;
     font-size: 10px;
   }
 
-  .hand-total-pill .score-digits {
-    font-size: 16px;
-  }
-
-  .yaniv-badge {
-    font-size: 10px;
+  .hand-total-pill .yaniv-badge {
+    font-size: 9px;
   }
 
   .hand-sort-controls {
@@ -1180,30 +1172,18 @@
   }
 
   .sort-btn {
-    font-size: 11px;
-    padding: 3px 10px;
+    font-size: 10px;
+    padding: 2px 6px;
     min-height: 32px;
     min-width: 36px;
     line-height: 1.2;
   }
 
-  .nudge-group {
-    display: flex;
-    gap: 8px;
-  }
-
-  .nudge-btn {
-    width: 44px;
-    height: 44px;
-    font-size: 18px;
-    border-radius: 8px;
-  }
-
   .call-yaniv-btn {
-    font-size: 13px;
-    padding: 10px 20px;
-    min-height: 48px;
-    min-width: 160px;
+    font-size: 10px;
+    padding: 2px 6px;
+    min-height: 32px;
+    min-width: 36px;
   }
 
   /* Player Hand - overlapping fan layout, all 5 cards visible */
@@ -1379,14 +1359,17 @@
   .player-hand-fanned .hand-card:nth-child(5) { --card-index: 1; }
 
   .call-yaniv-btn {
-    font-size: 12px;
-    padding: 10px 16px;
-    min-width: 140px;
+    font-size: 10px;
+    padding: 2px 6px;
+    min-height: 32px;
+    min-width: 36px;
   }
 
   .sort-btn {
-    padding: 8px 10px;
+    padding: 2px 6px;
     font-size: 10px;
+    min-height: 32px;
+    min-width: 36px;
   }
 }
 

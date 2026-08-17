@@ -440,52 +440,6 @@ export default function TableCanvas({
     setDragOverCardId(null);
   };
 
-  // Nudge selected card left/right
-  const handleNudgeCardLeft = (cardId: string) => {
-    setLocalSortedHand((prev) => {
-      const idx = prev.findIndex((c) => c.id === cardId);
-      if (idx <= 0) return prev;
-      const next = [...prev];
-      const [moved] = next.splice(idx, 1);
-      next.splice(idx - 1, 0, moved);
-      return next;
-    });
-    soundEngine.playCardSelectTick();
-    hapticLightTick();
-  };
-
-  const handleNudgeCardRight = (cardId: string) => {
-    setLocalSortedHand((prev) => {
-      const idx = prev.findIndex((c) => c.id === cardId);
-      if (idx === -1 || idx >= prev.length - 1) return prev;
-      const next = [...prev];
-      const [moved] = next.splice(idx, 1);
-      next.splice(idx + 1, 0, moved);
-      return next;
-    });
-    soundEngine.playCardSelectTick();
-    hapticLightTick();
-  };
-
-  // Keyboard navigation for reordering selected card
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (selectedCards.length === 1) {
-        const cardId = selectedCards[0];
-        if (e.key === 'ArrowLeft') {
-          e.preventDefault();
-          handleNudgeCardLeft(cardId);
-        } else if (e.key === 'ArrowRight') {
-          e.preventDefault();
-          handleNudgeCardRight(cardId);
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedCards]);
-
   const validateAndDiscard = useCallback((
     drawSource: 'DECK' | 'DISCARD_PILE',
     drawnCardId?: string
@@ -562,12 +516,51 @@ export default function TableCanvas({
     );
   };
 
+  // Keyboard navigation for reordering selected card
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (selectedCards.length === 1) {
+        const cardId = selectedCards[0];
+        if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          setLocalSortedHand((prev) => {
+            const idx = prev.findIndex((c) => c.id === cardId);
+            if (idx <= 0) return prev;
+            const next = [...prev];
+            const [moved] = next.splice(idx, 1);
+            next.splice(idx - 1, 0, moved);
+            return next;
+          });
+          soundEngine.playCardSelectTick();
+          hapticLightTick();
+        } else if (e.key === 'ArrowRight') {
+          e.preventDefault();
+          setLocalSortedHand((prev) => {
+            const idx = prev.findIndex((c) => c.id === cardId);
+            if (idx === -1 || idx >= prev.length - 1) return prev;
+            const next = [...prev];
+            const [moved] = next.splice(idx, 1);
+            next.splice(idx + 1, 0, moved);
+            return next;
+          });
+          soundEngine.playCardSelectTick();
+          hapticLightTick();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedCards]);
+
   const selectedCardIndex = useMemo(() => {
     if (selectedCards.length === 1) {
       return localSortedHand.findIndex((c) => c.id === selectedCards[0]);
     }
     return -1;
   }, [selectedCards, localSortedHand]);
+
+  // Note: Keyboard reordering (ArrowLeft/ArrowRight) still works for selected cards
 
   return (
     <div className="table-canvas-root">
@@ -845,28 +838,6 @@ export default function TableCanvas({
               <button className="sort-btn" onClick={handleSortBySuit} title="Sort hand by suit">
                 ♣ Suit
               </button>
-
-              {/* Nudge Buttons when 1 card is selected */}
-              {selectedCards.length === 1 && (
-                <div className="nudge-group">
-                  <button
-                    className="nudge-btn"
-                    onClick={() => handleNudgeCardLeft(selectedCards[0])}
-                    disabled={selectedCardIndex <= 0}
-                    title="Shift card left (or press ← key)"
-                  >
-                    ◀
-                  </button>
-                  <button
-                    className="nudge-btn"
-                    onClick={() => handleNudgeCardRight(selectedCards[0])}
-                    disabled={selectedCardIndex === -1 || selectedCardIndex >= localSortedHand.length - 1}
-                    title="Shift card right (or press → key)"
-                  >
-                    ▶
-                  </button>
-                </div>
-              )}
             </div>
 
             {isPlayerTurn && isYanivEligible && (
