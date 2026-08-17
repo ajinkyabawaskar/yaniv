@@ -44,12 +44,17 @@ export interface GameState {
   yanivContestTimerSeconds: number; // Total allowed seconds (e.g., 15)
   allPlayerHands: Record<string, GameCard[]>; // Revealed hands on ROUND_OVER
 
+  // Disconnected players tracking for reconnection UI
+  disconnectedPlayers: Set<string>; // userIds of disconnected players
+
   // Actions
   setGame: (game: Partial<GameState>) => void;
   setError: (error: string | null) => void;
   addCardToHand: (card: GameCard) => void;
   removeCardFromHand: (cardId: string) => void;
   clearGame: () => void;
+  addDisconnectedPlayer: (userId: string) => void;
+  removeDisconnectedPlayer: (userId: string) => void;
 }
 
 export const useGameStore = create<GameState>((set) => ({
@@ -83,6 +88,9 @@ export const useGameStore = create<GameState>((set) => ({
   yanivContestTimerSeconds: 15,
   allPlayerHands: {},
 
+  // Disconnected players
+  disconnectedPlayers: new Set(),
+
   setGame: (game) => set((state) => ({ ...state, ...game })),
   setError: (error) => set({ error }),
   addCardToHand: (card) =>
@@ -93,6 +101,18 @@ export const useGameStore = create<GameState>((set) => ({
     set((state) => ({
       playerHand: state.playerHand.filter((c) => c.id !== cardId),
     })),
+  addDisconnectedPlayer: (userId) =>
+    set((state) => {
+      const newSet = new Set(state.disconnectedPlayers);
+      newSet.add(userId);
+      return { disconnectedPlayers: newSet };
+    }),
+  removeDisconnectedPlayer: (userId) =>
+    set((state) => {
+      const newSet = new Set(state.disconnectedPlayers);
+      newSet.delete(userId);
+      return { disconnectedPlayers: newSet };
+    }),
   clearGame: () =>
     set({
       gameId: null,
@@ -122,6 +142,7 @@ export const useGameStore = create<GameState>((set) => ({
       yanivCalledAt: null,
       yanivContestTimerSeconds: 15,
       allPlayerHands: {},
+      disconnectedPlayers: new Set(),
     }),
 }));
 

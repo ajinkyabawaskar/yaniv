@@ -83,6 +83,12 @@
   filter: grayscale(1);
 }
 
+.opponent-seat.disconnected {
+  opacity: 0.6;
+  border-color: var(--crimson-light);
+  background: rgba(50, 10, 10, 0.5);
+}
+
 /* Turn Timer SVG Ring - centered on avatar */
 .turn-timer-ring {
   position: absolute;
@@ -132,6 +138,34 @@
   align-items: center;
   justify-content: center;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  position: relative;
+}
+
+.opponent-avatar.disconnected {
+  border-color: var(--crimson-light);
+  background: linear-gradient(135deg, #4a1010 0%, #2a0808 100%);
+}
+
+.disconnected-indicator {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--crimson-light);
+  color: #fff;
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 8px var(--crimson-light);
+  animation: pulseRing 1s infinite;
+}
+
+@keyframes pulseRing {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.2); opacity: 0.7; }
 }
 
 .host-badge {
@@ -166,6 +200,19 @@
   padding: 2px 6px;
   border-radius: 4px;
   border: 1px solid rgba(212, 175, 55, 0.2);
+}
+
+.disconnected-badge {
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--crimson-light);
+  background: rgba(50, 10, 10, 0.8);
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: 1px solid var(--crimson-light);
+  animation: pulseRing 1.5s infinite;
+  margin-top: 2px;
 }
 
 /* Opponent Hand Card Stack */
@@ -440,7 +487,7 @@
    ========================================================================== */
 .main-player-dock {
   position: relative;
-  z-index: 20;
+  z-index: 12; /* Below center-play-area (15) so hand doesn't overlap discard pile */
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -967,6 +1014,19 @@
     padding: 1px 3px;
   }
 
+  .disconnected-indicator {
+    width: 14px;
+    height: 14px;
+    font-size: 8px;
+    top: -3px;
+    right: -3px;
+  }
+
+  .disconnected-badge {
+    font-size: 8px;
+    padding: 1px 4px;
+  }
+
   /* Center Play Area - 2-Zone horizontal layout on mobile */
   .center-play-area {
     flex-direction: row;
@@ -1261,6 +1321,19 @@
   .opponent-name {
     font-size: 10px;
     max-width: 60px;
+  }
+
+  .disconnected-indicator {
+    width: 12px;
+    height: 12px;
+    font-size: 7px;
+    top: -2px;
+    right: -2px;
+  }
+
+  .disconnected-badge {
+    font-size: 7px;
+    padding: 1px 3px;
   }
 
   .deck-stack-3d {

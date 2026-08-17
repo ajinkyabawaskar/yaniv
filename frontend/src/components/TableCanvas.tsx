@@ -18,6 +18,7 @@ export interface OpponentInfo {
   isCurrentTurn: boolean;
   isEliminated: boolean;
   cardCount: number;
+  isDisconnected?: boolean;
 }
 
 interface TableCanvasProps {
@@ -221,6 +222,8 @@ export default function TableCanvas({
   yanivCalledAt = null,
   yanivContestTimerSeconds = 15,
   allPlayerHands = {},
+  // Current user ID for Yaniv contest UI
+  currentUserId = null,
 }: TableCanvasProps) {
   const [selectedCards, setSelectedCards] = useState<string[]>([]);
   const [statusFeedback, setStatusFeedback] = useState<string | null>(null);
@@ -666,13 +669,14 @@ export default function TableCanvas({
             const isTurn = opponent.isCurrentTurn;
             const timerProgress = isTurn ? Math.max(0, turnTimerSeconds / 30) : 1;
             const isUrgentTimer = isTurn && turnTimerSeconds <= 5;
+            const isDisconnected = opponent.isDisconnected;
 
             return (
               <motion.div
                 key={opponent.userId || idx}
                 className={`opponent-seat ${isTurn ? 'active-turn' : ''} ${
                   opponent.isEliminated ? 'eliminated' : ''
-                }`}
+                } ${isDisconnected ? 'disconnected' : ''}`}
                 initial={{ opacity: 0, y: -20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: idx * 0.1 }}
@@ -693,7 +697,10 @@ export default function TableCanvas({
                       />
                     </svg>
                   )}
-                  <div className="opponent-avatar">{opponent.displayName.substring(0, 2).toUpperCase()}</div>
+                  <div className={`opponent-avatar ${isDisconnected ? 'disconnected' : ''}`}>
+                    {opponent.displayName.substring(0, 2).toUpperCase()}
+                    {isDisconnected && <span className="disconnected-indicator" title="Disconnected">⚡</span>}
+                  </div>
                   {opponent.isHost && <span className="host-badge" title="Host">👑</span>}
                 </div>
 
@@ -702,6 +709,9 @@ export default function TableCanvas({
                   <div className="opponent-score-pill">
                     <span className="score-val">{opponent.score} pts</span>
                   </div>
+                  {isDisconnected && (
+                    <span className="disconnected-badge" title="Reconnecting...">🔄 Reconnecting</span>
+                  )}
                 </div>
 
                 <div className="opponent-card-stack" title={`${opponent.cardCount} cards in hand`}>

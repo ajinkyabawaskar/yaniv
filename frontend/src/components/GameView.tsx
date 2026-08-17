@@ -76,6 +76,15 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
             return;
           }
 
+          // Handle player disconnected/reconnected events
+          if (gameData.playerDisconnected) {
+            if (gameData.playerDisconnectedStatus) {
+              gameState.addDisconnectedPlayer(gameData.playerDisconnected);
+            } else {
+              gameState.removeDisconnectedPlayer(gameData.playerDisconnected);
+            }
+          }
+
           const isRoundOverState = gameData.currentState === 'ROUND_OVER';
           setShowRoundOver(isRoundOverState);
 
@@ -211,8 +220,9 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
         isCurrentTurn: gameState.currentTurnPlayerId === p.userId,
         isEliminated: gameState.eliminatedPlayers?.includes(p.userId) || false,
         cardCount: gameState.opponentCounts?.[p.userId] !== undefined ? gameState.opponentCounts[p.userId] : 5,
+        isDisconnected: gameState.disconnectedPlayers?.has(p.userId) || false,
       }));
-  }, [gameState.players, gameState.scores, gameState.currentTurnPlayerId, gameState.eliminatedPlayers, gameState.opponentCounts, currentUserId]);
+  }, [gameState.players, gameState.scores, gameState.currentTurnPlayerId, gameState.eliminatedPlayers, gameState.opponentCounts, gameState.disconnectedPlayers, currentUserId]);
 
   if (loading) {
     return (

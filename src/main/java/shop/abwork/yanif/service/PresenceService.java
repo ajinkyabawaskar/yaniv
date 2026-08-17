@@ -7,18 +7,20 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Service for managing user presence status via Redis.
- * Tracks online, offline, and in-game statuses for real-time updates.
+ * Tracks online, offline, in-game, and disconnected-in-game statuses for real-time updates.
  */
 @Service
 public class PresenceService {
 
     private static final String PRESENCE_KEY_PREFIX = "user:presence:";
-    private static final long PRESENCE_TTL = 5; // minutes
+    private static final long PRESENCE_TTL = 5; // minutes (for ONLINE, IN_GAME)
+    private static final long DISCONNECTED_IN_GAME_TTL = 30; // minutes (extended for reconnection)
     private static final TimeUnit PRESENCE_TTL_UNIT = TimeUnit.MINUTES;
 
     public static final String STATUS_ONLINE = "ONLINE";
     public static final String STATUS_OFFLINE = "OFFLINE";
     public static final String STATUS_IN_GAME = "IN_GAME";
+    public static final String STATUS_DISCONNECTED_IN_GAME = "DISCONNECTED_IN_GAME";
 
     private final RedisTemplate<String, String> redisTemplate;
 
@@ -32,7 +34,7 @@ public class PresenceService {
      * @param userId User ID
      */
     public void setUserOnline(String userId) {
-        setUserPresence(userId, STATUS_ONLINE);
+        setUserPresence(userId, STATUS_ONLINE, PRESENCE_TTL);
     }
 
     /**
@@ -50,14 +52,24 @@ public class PresenceService {
      * @param userId User ID
      */
     public void setUserInGame(String userId) {
-        setUserPresence(userId, STATUS_IN_GAME);
+        setUserPresence(userId, STATUS_IN_GAME, PRESENCE_TTL);
+    }
+
+    /**
+     * Set user as disconnected but still in an active game.
+     * Uses extended TTL (30 minutes) to allow for reconnection.
+     *
+     * @param userId User ID
+     */
+    public void setUserDisconnectedInGame(String userId) {
+        setUserPresence(userId, STATUS_DISCONNECTED_IN_GAME, DISCONNECTED_IN_GAME_TTL);
     }
 
     /**
      * Get user's current presence status.
      *
      * @param userId User ID
-     * @return Presence status (ONLINE, IN_GAME, OFFLINE)
+     * @return Presence status (ONLINE, IN_GAME, DISCONNECTED_IN_GAME, OFFLINE)
      */
     public String getUserPresence(String userId) {
         String presence = redisTemplate.opsForValue().get(getPresenceKey(userId));
@@ -73,7 +85,11 @@ public class PresenceService {
         String key = getPresenceKey(userId);
         String presence = redisTemplate.opsForValue().get(key);
         if (presence != null) {
-            redisTemplate.expire(key, PRESENCE_TTL, PRESENCE_TTL_UNIT);
+            // Use extended TTL if currently disconnected in game
+            long ttl = STATUS_DISCONNECTED_IN_GAME.equals(presence)
+                ? DISCONNECTED_IN_GAME_TTL
+                : PRESENCE_TTL;
+            redisTemplate.expire(key, ttl, PRESENCE_TTL_UNIT);
         }
     }
 
@@ -86,7 +102,10 @@ public class PresenceService {
         if (presence == null) {
             setUserOnline(userId);
         } else {
-            redisTemplate.expire(key, PRESENCE_TTL, PRESENCE_TTL_UNIT);
+            long ttl = STATUS_DISCONNECTED_IN_GAME.equals(presence)
+                ? DISCONNECTED_IN_GAME_TTL
+                : PRESENCE_TTL;
+            redisTemplate.expire(key, ttl, PRESENCE_TTL_UNIT);
         }
     }
 
@@ -95,12 +114,13 @@ public class PresenceService {
      *
      * @param userId      User ID
      * @param presence    Presence status
+     * @param ttlMinutes  TTL in minutes
      */
-    private void setUserPresence(String userId, String presence) {
+    private void setUserPresence(String userId, String presence, long ttlMinutes) {
         redisTemplate.opsForValue().set(
                 getPresenceKey(userId),
                 presence,
-                PRESENCE_TTL,
+                ttlMinutes,
                 PRESENCE_TTL_UNIT
         );
     }
