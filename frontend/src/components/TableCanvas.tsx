@@ -832,6 +832,29 @@ export default function TableCanvas({
         {/* 3. Main Player Dock (Bottom Center) */}
         <div className="main-player-dock">
           <div className="player-hud-bar">
+            {/* Current Player Turn Indicator with Timer Ring */}
+            {isPlayerTurn && (
+              <div className="current-player-turn-indicator">
+                <svg className="turn-timer-ring current-player-timer" viewBox="0 0 100 100">
+                  <circle cx="50" cy="50" r="46" className="timer-track" />
+                  <circle
+                    cx="50"
+                    cy="50"
+                    r="46"
+                    className="timer-fill"
+                    style={{
+                      strokeDasharray: 289,
+                      strokeDashoffset: 289 * (1 - Math.max(0, turnTimerSeconds / 30)),
+                    }}
+                  />
+                </svg>
+                <div className="turn-indicator-content">
+                  <span className="turn-label">YOUR TURN</span>
+                  <span className="turn-timer-value">{turnTimerSeconds}s</span>
+                </div>
+              </div>
+            )}
+
             <div className={`hand-total-pill ${isYanivEligible ? 'ready-yaniv' : ''}`}>
               <span className="score-label">TOTAL:</span>
               <span className="score-digits">{handScore}</span>

@@ -494,6 +494,64 @@
   width: 100%;
 }
 
+/* Current Player Turn Indicator (shows in HUD bar when it's your turn) */
+.current-player-turn-indicator {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  flex-shrink: 0;
+  margin-right: 8px;
+}
+
+.current-player-timer {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(-90deg);
+  width: 64px;
+  height: 64px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.turn-indicator-content {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  pointer-events: none;
+}
+
+.turn-label {
+  font-family: 'Cinzel', serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--gold-primary);
+  text-shadow: 0 0 8px rgba(212, 175, 55, 0.8);
+  animation: turnLabelPulse 1.5s ease-in-out infinite;
+}
+
+.turn-timer-value {
+  font-family: 'DM Mono', monospace;
+  font-size: 18px;
+  font-weight: 800;
+  color: #fff;
+  text-shadow: 0 0 12px rgba(212, 175, 55, 0.9);
+  line-height: 1;
+}
+
+@keyframes turnLabelPulse {
+  0%, 100% { opacity: 0.8; text-shadow: 0 0 8px rgba(212, 175, 55, 0.6); }
+  50% { opacity: 1; text-shadow: 0 0 16px rgba(212, 175, 55, 1); }
+}
+
 /* Real-Time Floating HUD Bar */
 .player-hud-bar {
   display: flex;
@@ -1148,6 +1206,26 @@
     margin-top: 6px;
   }
 
+  /* Current Player Turn Indicator - mobile */
+  .current-player-turn-indicator {
+    width: 56px;
+    height: 56px;
+    margin-right: 4px;
+  }
+
+  .current-player-timer {
+    width: 52px;
+    height: 52px;
+  }
+
+  .turn-label {
+    font-size: 9px;
+  }
+
+  .turn-timer-value {
+    font-size: 14px;
+  }
+
   /* Player HUD Bar - wrap nicely */
   .player-hud-bar {
     gap: 8px;
@@ -1388,6 +1466,25 @@
     padding: 8px 10px;
     font-size: 10px;
   }
+
+  /* Current Player Turn Indicator - 480px */
+  .current-player-turn-indicator {
+    width: 48px;
+    height: 48px;
+  }
+
+  .current-player-timer {
+    width: 44px;
+    height: 44px;
+  }
+
+  .turn-label {
+    font-size: 8px;
+  }
+
+  .turn-timer-value {
+    font-size: 12px;
+  }
 }
 
 /* Landscape mobile adjustments */
@@ -1426,6 +1523,24 @@
     width: 100%;
     flex-basis: 100%;
     margin-top: 8px;
+  }
+
+  .current-player-turn-indicator {
+    width: 60px;
+    height: 60px;
+  }
+
+  .current-player-timer {
+    width: 54px;
+    height: 54px;
+  }
+
+  .turn-label {
+    font-size: 10px;
+  }
+
+  .turn-timer-value {
+    font-size: 16px;
   }
 
   .player-hand-fanned {
