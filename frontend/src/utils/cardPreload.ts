@@ -38,18 +38,29 @@ export function getAllCardPaths(): string[] {
  */
 export function preloadAllCards(): Promise<void> {
   const paths = getAllCardPaths();
+  console.log(`[CardPreload] Preloading ${paths.length} card SVGs via Image()`);
 
   // Use Image() constructor for preloading - more reliable than link[rel=preload]
-  const promises = paths.map((path) => {
+  const promises = paths.map((path, index) => {
     return new Promise<void>((resolve) => {
       const img = new Image();
-      img.onload = () => resolve();
-      img.onerror = () => resolve(); // Don't fail if one card fails
+      img.onload = () => {
+        if (index < 5 || index >= paths.length - 5) {
+          console.log(`[CardPreload] Loaded: ${path}`);
+        }
+        resolve();
+      };
+      img.onerror = () => {
+        console.warn(`[CardPreload] Failed to load: ${path}`);
+        resolve(); // Don't fail if one card fails
+      };
       img.src = path;
     });
   });
 
-  return Promise.all(promises).then(() => {});
+  return Promise.all(promises).then(() => {
+    console.log('[CardPreload] All card SVGs preloaded successfully');
+  });
 }
 
 /**
@@ -58,6 +69,7 @@ export function preloadAllCards(): Promise<void> {
  */
 export function preloadCardsViaLink(): void {
   const paths = getAllCardPaths();
+  console.log(`[CardPreload] Adding ${paths.length} preload links to document.head`);
 
   paths.forEach((path) => {
     // Check if already preloaded
@@ -103,6 +115,7 @@ export function useCardPreload() {
   const preload = useCallback(async () => {
     if (isPreloaded || isPreloading) return;
 
+    console.log('[CardPreload] Hook: Starting preload');
     setIsPreloading(true);
     setProgress(0);
 
@@ -130,6 +143,7 @@ export function useCardPreload() {
     setIsPreloading(false);
     setIsPreloaded(true);
     setProgress(100);
+    console.log('[CardPreload] Hook: Preload complete');
   }, [isPreloaded, isPreloading]);
 
   return { preload, isPreloading, isPreloaded, progress };
