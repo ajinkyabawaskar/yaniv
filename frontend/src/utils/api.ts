@@ -164,16 +164,8 @@ export interface PlayersResponse {
   }>;
 }
 
-// Version API Response Types
-export interface VersionResponse {
-  version: string;
-  name: string;
-}
-
-// Version API
-export const versionApi = {
-  getVersion: () => apiClient.get<VersionResponse>('/version'),
-};
+// Embedded frontend version (injected at build time via REACT_APP_VERSION)
+export const FRONTEND_VERSION: string = process.env.REACT_APP_VERSION || 'dev';
 
 // Room/Game API
 export const gameApi = {
