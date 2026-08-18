@@ -348,10 +348,6 @@
     display: none;
   }
 
-  .version-badge {
-    display: none;
-  }
-
   .nav-logout-btn {
     padding: 5px 8px;
     font-size: 11px;
@@ -415,5 +411,10 @@
 
   .connection-pill {
     padding: 4px 6px;
+  }
+
+  .version-badge {
+    font-size: 8px;
+    padding: 2px 5px;
   }
 }
