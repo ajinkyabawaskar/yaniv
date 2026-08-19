@@ -12,6 +12,7 @@ Thumbs.db
 *.iml
 *.iws
 *.ipr
+.claude/
 
 .vscode/
 .classpath
