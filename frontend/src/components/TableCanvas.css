@@ -78,6 +78,80 @@
   background: rgba(18, 52, 38, 0.9);
 }
 
+/* Current player highlight in the arc */
+.opponent-seat.current-player {
+  border-color: var(--gold-primary);
+  box-shadow: 0 0 24px rgba(212, 175, 55, 0.6), inset 0 0 16px rgba(212, 175, 55, 0.25);
+  background: linear-gradient(135deg, rgba(18, 52, 38, 0.95) 0%, rgba(10, 32, 23, 0.9) 100%);
+}
+
+.opponent-seat.current-player.active-turn {
+  box-shadow: 0 0 32px rgba(212, 175, 55, 0.8), inset 0 0 20px rgba(212, 175, 55, 0.3);
+}
+
+/* Current player avatar highlight */
+.opponent-avatar.current-player-avatar {
+  border-color: var(--gold-primary);
+  box-shadow: 0 0 16px rgba(212, 175, 55, 0.6), 0 2px 8px rgba(0, 0, 0, 0.5);
+  background: linear-gradient(135deg, #1b4332 0%, #0d281e 100%);
+}
+
+.you-badge {
+  position: absolute;
+  bottom: -14px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  font-weight: 700;
+  color: #0a241a;
+  background: var(--gold-gradient);
+  padding: 1px 6px;
+  border-radius: 10px;
+  white-space: nowrap;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+/* Small turn indicator in arc for current player */
+.current-player-turn-indicator-small {
+  margin-top: 4px;
+  padding: 2px 8px;
+  background: var(--gold-gradient);
+  border-radius: 12px;
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  color: #0a241a;
+  animation: turnLabelPulse 1.5s ease-in-out infinite;
+}
+
+.turn-label-small {
+  letter-spacing: 0.05em;
+}
+
+/* Call Yaniv button in arc for current player */
+.call-yaniv-btn-arc {
+  font-family: 'Cinzel', serif;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: #0a241a;
+  background: var(--gold-gradient);
+  border: 1px solid #fff;
+  border-radius: 8px;
+  padding: 4px 10px;
+  margin-top: 4px;
+  box-shadow: 0 2px 8px rgba(212, 175, 55, 0.4);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.call-yaniv-btn-arc:hover {
+  box-shadow: 0 4px 12px rgba(212, 175, 55, 0.6);
+  transform: translateY(-1px);
+}
+
 .opponent-seat.eliminated {
   opacity: 0.4;
   filter: grayscale(1);
@@ -507,65 +581,7 @@
   width: 100%;
 }
 
-/* Current Player Turn Indicator (shows in HUD bar when it's your turn) */
-.current-player-turn-indicator {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 72px;
-  height: 72px;
-  flex-shrink: 0;
-  margin-right: 8px;
-}
-
-.current-player-timer {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%) rotate(-90deg);
-  width: 64px;
-  height: 64px;
-  pointer-events: none;
-  z-index: 1;
-}
-
-.turn-indicator-content {
-  position: relative;
-  z-index: 2;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  pointer-events: none;
-}
-
-.turn-label {
-  font-family: 'Cinzel', serif;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  color: var(--gold-primary);
-  text-shadow: 0 0 8px rgba(212, 175, 55, 0.8);
-  animation: turnLabelPulse 1.5s ease-in-out infinite;
-}
-
-.turn-timer-value {
-  font-family: 'DM Mono', monospace;
-  font-size: 18px;
-  font-weight: 800;
-  color: #fff;
-  text-shadow: 0 0 12px rgba(212, 175, 55, 0.9);
-  line-height: 1;
-}
-
-@keyframes turnLabelPulse {
-  0%, 100% { opacity: 0.8; text-shadow: 0 0 8px rgba(212, 175, 55, 0.6); }
-  50% { opacity: 1; text-shadow: 0 0 16px rgba(212, 175, 55, 1); }
-}
-
-/* Real-Time Floating HUD Bar */
+/* Real-Time Floating HUD Bar - 3 uniform buttons */
 .player-hud-bar {
   display: flex;
   align-items: center;
@@ -575,37 +591,58 @@
   justify-content: center;
 }
 
-.hand-total-pill {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 8px;
-  border-radius: 4px;
+/* Unified button style for Hand Total, Rank Sort, Suit Sort */
+.hud-btn {
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 8px;
   background: rgba(10, 32, 23, 0.85);
   border: 1px solid rgba(212, 175, 55, 0.35);
   color: var(--gold-light);
   line-height: 1.2;
-  min-height: 32px;
-  min-width: 36px;
-  font-family: 'DM Mono', monospace;
-  font-size: 11px;
-  font-weight: 600;
+  min-height: 44px;
+  min-width: 100px;
   transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: default;
 }
 
-.hand-total-pill:hover {
+.hud-btn:hover {
   background: rgba(212, 175, 55, 0.2);
   border-color: var(--gold-primary);
 }
 
-.hand-total-pill.ready-yaniv {
+.hud-btn.interactive {
+  cursor: pointer;
+}
+
+.hud-btn.interactive:hover {
+  background: rgba(212, 175, 55, 0.25);
+  border-color: var(--gold-primary);
+  transform: translateY(-1px);
+}
+
+.hud-btn.interactive:active {
+  transform: translateY(0);
+}
+
+.hand-total-btn {
+  /* Same as hud-btn */
+}
+
+.hand-total-btn.ready-yaniv {
   background: var(--gold-gradient);
   border-color: #fff;
   color: #0a241a;
   animation: goldPulse 1.8s infinite ease-in-out;
 }
 
-.hand-total-pill .yaniv-badge {
+.hand-total-btn .yaniv-badge {
   font-weight: 800;
   font-size: 10px;
   letter-spacing: 0.05em;
@@ -614,45 +651,12 @@
 
 .hand-sort-controls {
   display: flex;
-  gap: 6px;
+  gap: 8px;
 }
 
 .sort-btn {
-  font-family: 'DM Mono', monospace;
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 4px;
-  background: rgba(10, 32, 23, 0.85);
-  border: 1px solid rgba(212, 175, 55, 0.35);
-  color: var(--gold-light);
-  line-height: 1.2;
-  min-height: 32px;
-  min-width: 36px;
-}
-
-.sort-btn:hover {
-  background: rgba(212, 175, 55, 0.2);
-  border-color: var(--gold-primary);
-}
-
-.call-yaniv-btn {
-  font-family: 'DM Mono', monospace;
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 4px;
-  background: var(--gold-gradient);
-  color: #0a241a;
-  border: 1px solid #fff;
-  line-height: 1.2;
-  min-height: 32px;
-  min-width: 36px;
-  box-shadow: 0 2px 8px rgba(212, 175, 55, 0.4);
-}
-
-.call-yaniv-btn:hover {
-  box-shadow: 0 4px 12px rgba(212, 175, 55, 0.6);
+  /* Inherits from hud-btn via class composition */
+  min-width: 90px;
 }
 
 .selected-hint {
@@ -816,7 +820,7 @@
 }
 
 /* ==========================================================================
-   4b. Yaniv Contest Overlay (Toned Down)
+   4b. Yaniv Contest Overlay
    ========================================================================== */
 .yaniv-contest-overlay {
   position: absolute;
@@ -831,7 +835,30 @@
 .contest-overlay-bg {
   position: absolute;
   inset: 0;
-  background: radial-gradient(ellipse at center, rgba(212, 175, 55, 0.12) 0%, rgba(20, 15, 8, 0.85) 70%);
+  background: radial-gradient(ellipse at center, rgba(180, 30, 30, 0.25) 0%, rgba(20, 10, 10, 0.85) 70%);
+  animation: contestPulse 2s ease-in-out infinite;
+}
+
+@keyframes contestPulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+.contest-pulse-ring {
+  position: absolute;
+  width: 300px;
+  height: 300px;
+  border: 2px solid rgba(239, 68, 68, 0.4);
+  border-radius: 50%;
+  animation: pulseRingExpand 2s ease-out infinite;
+}
+
+.contest-pulse-ring:nth-child(2) { animation-delay: 0.5s; }
+.contest-pulse-ring:nth-child(3) { animation-delay: 1s; }
+
+@keyframes pulseRingExpand {
+  0% { transform: scale(0.5); opacity: 0.8; }
+  100% { transform: scale(1.5); opacity: 0; }
 }
 
 .contest-overlay-content {
@@ -840,145 +867,156 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 24px 36px;
-  background: radial-gradient(circle, rgba(25, 22, 16, 0.95) 0%, rgba(12, 10, 6, 0.98) 100%);
-  border: 1px solid rgba(212, 175, 55, 0.35);
-  border-radius: 16px;
-  box-shadow:
-    0 0 40px rgba(212, 175, 55, 0.15),
-    0 12px 40px rgba(0, 0, 0, 0.7),
-    inset 0 0 20px rgba(212, 175, 55, 0.05);
+  padding: 32px 48px;
+  background: radial-gradient(circle, rgba(40, 15, 15, 0.98) 0%, rgba(15, 5, 5, 0.99) 100%);
+  border: 2px solid var(--crimson-primary);
+  border-radius: 24px;
+  box-shadow: 
+    0 0 80px rgba(239, 68, 68, 0.6),
+    0 0 160px rgba(239, 68, 68, 0.3),
+    0 20px 60px rgba(0, 0, 0, 0.9),
+    inset 0 0 40px rgba(239, 68, 68, 0.1);
   text-align: center;
-  backdrop-filter: blur(16px);
+  backdrop-filter: blur(20px);
   pointer-events: auto;
 }
 
 .contest-icon {
-  font-size: 32px;
-  margin-bottom: 6px;
-  opacity: 0.9;
+  font-size: 48px;
+  margin-bottom: 8px;
+  animation: contestIconPulse 1s ease-in-out infinite;
+}
+
+@keyframes contestIconPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.15); }
 }
 
 .contest-title {
   font-family: 'Cinzel', serif;
-  font-size: 28px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  color: var(--gold-light);
-  text-shadow: 0 2px 12px rgba(212, 175, 55, 0.3);
+  font-size: 42px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  background: linear-gradient(135deg, #fca5a5 0%, #ef4444 50%, #fca5a5 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 0 4px 30px rgba(239, 68, 68, 0.5);
   margin: 0;
 }
 
 .contest-caller-info {
-  margin: 12px 0 6px;
+  margin: 16px 0 8px;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
 }
 
 .contest-caller-label {
   font-family: 'DM Mono', monospace;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
-  color: var(--gold-muted);
-  letter-spacing: 0.08em;
+  color: #fca5a5;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
 .contest-caller-name {
   font-family: 'Cinzel', serif;
-  font-size: 22px;
-  font-weight: 600;
-  color: var(--card-cream);
-  text-shadow: 0 1px 6px rgba(212, 175, 55, 0.25);
+  font-size: 28px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 2px 10px rgba(239, 68, 68, 0.5);
 }
 
 .contest-timer {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 3px;
-  margin: 12px 0;
+  gap: 4px;
+  margin: 16px 0;
 }
 
 .contest-timer-value {
   font-family: 'DM Mono', monospace;
-  font-size: 40px;
-  font-weight: 800;
-  color: var(--gold-primary);
-  text-shadow: 0 0 18px rgba(212, 175, 55, 0.4);
+  font-size: 56px;
+  font-weight: 900;
+  color: #fff;
+  text-shadow: 0 0 30px rgba(239, 68, 68, 0.8);
   line-height: 1;
 }
 
 .contest-timer-label {
   font-family: 'DM Mono', monospace;
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--gold-muted);
-  letter-spacing: 0.06em;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fca5a5;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .contest-progress-bar {
-  width: 240px;
-  height: 6px;
-  background: rgba(0, 0, 0, 0.4);
-  border-radius: 3px;
+  width: 280px;
+  height: 8px;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 4px;
   overflow: hidden;
-  margin: 12px 0;
-  border: 1px solid rgba(212, 175, 55, 0.15);
+  margin: 16px 0;
+  border: 1px solid rgba(239, 68, 68, 0.3);
 }
 
 .contest-progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--gold-primary) 0%, var(--gold-light) 50%, var(--gold-primary) 100%);
-  border-radius: 3px;
+  background: linear-gradient(90deg, #ef4444 0%, #f87171 50%, #ef4444 100%);
+  border-radius: 4px;
   transition: width 0.1s linear;
-  box-shadow: 0 0 10px rgba(212, 175, 55, 0.35);
+  box-shadow: 0 0 15px rgba(239, 68, 68, 0.6);
 }
 
 .contest-btn {
-  margin-top: 16px;
-  padding: 12px 32px;
+  margin-top: 20px;
+  padding: 16px 40px;
   font-family: 'Cinzel', serif;
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  color: #0a241a;
-  background: var(--gold-gradient);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 10px;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: #fff;
+  background: linear-gradient(135deg, #dc2626 0%, #ef4444 50%, #dc2626 100%);
+  border: 2px solid #fca5a5;
+  border-radius: 12px;
   cursor: pointer;
-  box-shadow:
-    0 0 12px rgba(212, 175, 55, 0.25),
-    0 4px 16px rgba(0, 0, 0, 0.4),
-    inset 0 1px 0 rgba(255, 255, 255, 0.15);
-  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.1);
+  box-shadow: 
+    0 0 20px rgba(239, 68, 68, 0.4),
+    0 8px 25px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
   transition: all 0.2s ease;
 }
 
 .contest-btn:hover {
-  transform: translateY(-1px);
-  box-shadow:
-    0 0 18px rgba(212, 175, 55, 0.35),
-    0 6px 20px rgba(0, 0, 0, 0.5),
-    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  transform: scale(1.05);
+  box-shadow: 
+    0 0 30px rgba(239, 68, 68, 0.6),
+    0 12px 35px rgba(0, 0, 0, 0.6),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
 }
 
 .contest-btn:active {
-  transform: translateY(0) scale(0.98);
+  transform: scale(0.95);
 }
 
 .contest-waiting-message {
-  margin-top: 16px;
+  margin-top: 20px;
   font-family: 'DM Mono', monospace;
-  font-size: 12px;
-  color: var(--gold-muted);
-  letter-spacing: 0.04em;
-  opacity: 0.8;
+  font-size: 14px;
+  color: #fca5a5;
+  letter-spacing: 0.05em;
+  animation: waitingPulse 1.5s ease-in-out infinite;
 }
 
-/* Removed: contestPulse, pulseRingExpand, contestIconPulse, waitingPulse animations */
+@keyframes waitingPulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
 
 /* ==========================================================================
    5. Responsive Scaling for Mobile Viewports
@@ -1060,6 +1098,22 @@
   .disconnected-badge {
     font-size: 8px;
     padding: 1px 4px;
+  }
+
+  .you-badge {
+    font-size: 8px;
+    padding: 1px 5px;
+    bottom: -12px;
+  }
+
+  .current-player-turn-indicator-small {
+    font-size: 9px;
+    padding: 2px 6px;
+  }
+
+  .call-yaniv-btn-arc {
+    font-size: 9px;
+    padding: 3px 8px;
   }
 
   /* Center Play Area - 2-Zone horizontal layout on mobile */
@@ -1184,26 +1238,6 @@
     margin-top: 6px;
   }
 
-  /* Current Player Turn Indicator - mobile */
-  .current-player-turn-indicator {
-    width: 56px;
-    height: 56px;
-    margin-right: 4px;
-  }
-
-  .current-player-timer {
-    width: 52px;
-    height: 52px;
-  }
-
-  .turn-label {
-    font-size: 9px;
-  }
-
-  .turn-timer-value {
-    font-size: 14px;
-  }
-
   /* Player HUD Bar - wrap nicely */
   .player-hud-bar {
     gap: 8px;
@@ -1211,37 +1245,18 @@
     flex-wrap: wrap;
   }
 
-  .hand-total-pill {
-    padding: 2px 6px;
-    min-height: 32px;
-    min-width: 36px;
+  .hud-btn {
+    padding: 4px 10px;
+    min-height: 40px;
+    min-width: 90px;
     font-size: 10px;
-  }
-
-  .hand-total-pill .yaniv-badge {
-    font-size: 9px;
   }
 
   .hand-sort-controls {
     display: flex;
-    gap: 8px;
+    gap: 6px;
     flex-wrap: wrap;
     justify-content: center;
-  }
-
-  .sort-btn {
-    font-size: 10px;
-    padding: 2px 6px;
-    min-height: 32px;
-    min-width: 36px;
-    line-height: 1.2;
-  }
-
-  .call-yaniv-btn {
-    font-size: 10px;
-    padding: 2px 6px;
-    min-height: 32px;
-    min-width: 36px;
   }
 
   /* Player Hand - overlapping fan layout, all 5 cards visible */
@@ -1430,23 +1445,27 @@
     min-width: 36px;
   }
 
-  /* Current Player Turn Indicator - 480px */
-  .current-player-turn-indicator {
-    width: 48px;
-    height: 48px;
+  .hud-btn {
+    padding: 4px 8px;
+    min-height: 38px;
+    min-width: 80px;
+    font-size: 10px;
   }
 
-  .current-player-timer {
-    width: 44px;
-    height: 44px;
+  .you-badge {
+    font-size: 7px;
+    padding: 1px 4px;
+    bottom: -10px;
   }
 
-  .turn-label {
+  .current-player-turn-indicator-small {
     font-size: 8px;
+    padding: 1px 5px;
   }
 
-  .turn-timer-value {
-    font-size: 12px;
+  .call-yaniv-btn-arc {
+    font-size: 8px;
+    padding: 2px 6px;
   }
 
   /* 480px - even tighter fan for discard pile */
@@ -1512,24 +1531,6 @@
     width: 100%;
     flex-basis: 100%;
     margin-top: 8px;
-  }
-
-  .current-player-turn-indicator {
-    width: 60px;
-    height: 60px;
-  }
-
-  .current-player-timer {
-    width: 54px;
-    height: 54px;
-  }
-
-  .turn-label {
-    font-size: 10px;
-  }
-
-  .turn-timer-value {
-    font-size: 16px;
   }
 
   .player-hand-fanned {

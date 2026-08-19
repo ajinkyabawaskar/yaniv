@@ -19,6 +19,7 @@ export interface OpponentInfo {
   isEliminated: boolean;
   cardCount: number;
   isDisconnected?: boolean;
+  isCurrentPlayer?: boolean;
 }
 
 interface TableCanvasProps {
@@ -570,48 +571,60 @@ export default function TableCanvas({
           {showYanivContestOverlay && yanivCallerId && yanivCallerName && (
             <motion.div
               className="yaniv-contest-overlay"
-              initial={{ opacity: 0, scale: 0.95 }}
+              initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 1.05 }}
-              transition={{ type: 'spring', damping: 25, stiffness: 180 }}
+              exit={{ opacity: 0, scale: 1.1 }}
+              transition={{ type: 'spring', damping: 20, stiffness: 200 }}
             >
               <div className="contest-overlay-bg" />
               <div className="contest-overlay-content">
+                <div className="contest-pulse-ring" />
+                <div className="contest-pulse-ring" style={{ animationDelay: '0.5s' }} />
+                <div className="contest-pulse-ring" style={{ animationDelay: '1s' }} />
+                
                 <div className="contest-header">
-                  <div className="contest-icon">🔔</div>
-                  <h1 className="contest-title">Yaniv Called</h1>
+                  <div className="contest-icon">⚡</div>
+                  <h1 className="contest-title">YANIV CALLED</h1>
                 </div>
-
+                
                 <div className="contest-caller-info">
                   <span className="contest-caller-label">Called by</span>
                   <span className="contest-caller-name">{yanivCallerName}</span>
                 </div>
-
+                
                 <div className="contest-timer">
                   <span className="contest-timer-value">{yanivContestTimerRemaining}s</span>
                   <span className="contest-timer-label">to Contest (Asaf)</span>
                 </div>
-
+                
                 <div className="contest-progress-bar">
-                  <div
+                  <div 
                     className="contest-progress-fill"
-                    style={{
-                      width: `${(yanivContestTimerRemaining / yanivContestTimerSeconds) * 100}%`
-                    }}
+                    style={{ 
+                      width: `${(yanivContestTimerRemaining / yanivContestTimerSeconds) * 100}%` 
+                    }} 
                   />
                 </div>
-
+                
                 {yanivCallerId !== currentUserId && (
                   <motion.button
                     className="contest-btn"
                     onClick={onContestYaniv}
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    animate={{
+                      boxShadow: [
+                        '0 0 20px rgba(239, 68, 68, 0.4)',
+                        '0 0 40px rgba(239, 68, 68, 0.8)',
+                        '0 0 20px rgba(239, 68, 68, 0.4)',
+                      ],
+                    }}
+                    transition={{ repeat: Infinity, duration: 1.2 }}
                   >
-                    🛡️ Contest (Asaf)
+                    🛡️ CONTEST (ASAF)
                   </motion.button>
                 )}
-
+                
                 {yanivCallerId === currentUserId && (
                   <div className="contest-waiting-message">
                     Waiting for other players to decide...
@@ -644,20 +657,23 @@ export default function TableCanvas({
           )}
         </AnimatePresence>
 
-        {/* 1. Opponents Arc (Top Semi-Circle) */}
+        {/* 1. All Players Arc (Top Semi-Circle) - includes current player */}
         <div className="opponents-radial-arc">
           {opponents.map((opponent, idx) => {
             const isTurn = opponent.isCurrentTurn;
+            const isCurrentPlayer = opponent.isCurrentPlayer;
             const timerProgress = isTurn ? Math.max(0, turnTimerSeconds / 30) : 1;
             const isUrgentTimer = isTurn && turnTimerSeconds <= 5;
             const isDisconnected = opponent.isDisconnected;
+            // Call Yaniv eligibility for current player
+            const isYanivEligibleForPlayer = isCurrentPlayer && isTurn && handScore <= yanivThreshold;
 
             return (
               <motion.div
                 key={opponent.userId || idx}
                 className={`opponent-seat ${isTurn ? 'active-turn' : ''} ${
                   opponent.isEliminated ? 'eliminated' : ''
-                } ${isDisconnected ? 'disconnected' : ''}`}
+                } ${isDisconnected ? 'disconnected' : ''} ${isCurrentPlayer ? 'current-player' : ''}`}
                 initial={{ opacity: 0, y: -20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: idx * 0.1 }}
@@ -678,9 +694,10 @@ export default function TableCanvas({
                       />
                     </svg>
                   )}
-                  <div className={`opponent-avatar ${isDisconnected ? 'disconnected' : ''}`}>
+                  <div className={`opponent-avatar ${isDisconnected ? 'disconnected' : ''} ${isCurrentPlayer ? 'current-player-avatar' : ''}`}>
                     {opponent.displayName.substring(0, 2).toUpperCase()}
                     {isDisconnected && <span className="disconnected-indicator" title="Disconnected">⚡</span>}
+                    {isCurrentPlayer && <span className="you-badge" title="You">YOU</span>}
                   </div>
                   {opponent.isHost && <span className="host-badge" title="Host">👑</span>}
                 </div>
@@ -690,6 +707,29 @@ export default function TableCanvas({
                   <div className="opponent-score-pill">
                     <span className="score-val">{opponent.score} pts</span>
                   </div>
+                  {isCurrentPlayer && (
+                    <span className="current-player-turn-indicator-small">
+                      <span className="turn-label-small">YOUR TURN</span>
+                    </span>
+                  )}
+                  {isYanivEligibleForPlayer && (
+                    <motion.button
+                      className="call-yaniv-btn-arc"
+                      onClick={onCallYaniv}
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      animate={{
+                        boxShadow: [
+                          '0 0 15px rgba(212, 175, 55, 0.4)',
+                          '0 0 30px rgba(212, 175, 55, 0.8)',
+                          '0 0 15px rgba(212, 175, 55, 0.4)',
+                        ],
+                      }}
+                      transition={{ repeat: Infinity, duration: 1.5 }}
+                    >
+                      🔔 YANIV
+                    </motion.button>
+                  )}
                   {isDisconnected && (
                     <span className="disconnected-badge" title="Reconnecting...">🔄 Reconnecting</span>
                   )}
@@ -821,68 +861,20 @@ export default function TableCanvas({
         {/* 3. Main Player Dock (Bottom Center) */}
         <div className="main-player-dock">
           <div className="player-hud-bar">
-            {/* Current Player Turn Indicator with Timer Ring */}
-            {isPlayerTurn && (
-              <div className="current-player-turn-indicator">
-                <svg className="turn-timer-ring current-player-timer" viewBox="0 0 100 100">
-                  <circle cx="50" cy="50" r="46" className="timer-track" />
-                  <circle
-                    cx="50"
-                    cy="50"
-                    r="46"
-                    className="timer-fill"
-                    style={{
-                      strokeDasharray: 289,
-                      strokeDashoffset: 289 * (1 - Math.max(0, turnTimerSeconds / 30)),
-                    }}
-                  />
-                </svg>
-                <div className="turn-indicator-content">
-                  <span className="turn-label">YOUR TURN</span>
-                  <span className="turn-timer-value">{turnTimerSeconds}s</span>
-                </div>
-              </div>
-            )}
-
-            <div className={`hand-total-pill ${isYanivEligible ? 'ready-yaniv' : ''}`}>
+            <div className={`hand-total-btn hud-btn ${isYanivEligible ? 'ready-yaniv' : ''}`}>
               <span className="score-label">TOTAL:</span>
               <span className="score-digits">{handScore}</span>
               {isYanivEligible && <span className="yaniv-badge">✨ READY FOR YANIV!</span>}
             </div>
 
             <div className="hand-sort-controls">
-              <button className="sort-btn" onClick={handleSortByRank} title="Sort hand by rank">
+              <button className="sort-btn hud-btn interactive" onClick={handleSortByRank} title="Sort hand by rank">
                 ↕ Rank
               </button>
-              <button className="sort-btn" onClick={handleSortBySuit} title="Sort hand by suit">
+              <button className="sort-btn hud-btn interactive" onClick={handleSortBySuit} title="Sort hand by suit">
                 ♣ Suit
               </button>
             </div>
-
-            {isPlayerTurn && isYanivEligible && (
-              <motion.button
-                className="call-yaniv-btn"
-                onClick={onCallYaniv}
-                whileHover={{ scale: 1.06 }}
-                whileTap={{ scale: 0.95 }}
-                animate={{
-                  boxShadow: [
-                    '0 0 15px rgba(212, 175, 55, 0.4)',
-                    '0 0 35px rgba(212, 175, 55, 0.85)',
-                    '0 0 15px rgba(212, 175, 55, 0.4)',
-                  ],
-                }}
-                transition={{ repeat: Infinity, duration: 1.5 }}
-              >
-                🔔 CALL YANIV!
-              </motion.button>
-            )}
-
-            {isPlayerTurn && selectedCards.length > 0 && (
-              <div className="selected-hint">
-                Tap Draw Pile or a discard card to discard & draw
-              </div>
-            )}
           </div>
 
           <div className="player-hand-container">

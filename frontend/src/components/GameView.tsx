@@ -224,11 +224,10 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
     setTimeout(() => setCopiedLink(false), 2500);
   };
 
-  // Compute Opponents for TableCanvas radial layout
-  const opponentsList: OpponentInfo[] = useMemo(() => {
+  // Compute all players for TableCanvas radial layout (including current player)
+  const allPlayersList: OpponentInfo[] = useMemo(() => {
     const players = gameState.players || [];
     return players
-      .filter((p) => p.userId !== currentUserId)
       .map((p) => ({
         userId: p.userId,
         displayName: p.displayName,
@@ -236,10 +235,13 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
         isHost: p.isHost,
         isCurrentTurn: gameState.currentTurnPlayerId === p.userId,
         isEliminated: gameState.eliminatedPlayers?.includes(p.userId) || false,
-        cardCount: gameState.opponentCounts?.[p.userId] !== undefined ? gameState.opponentCounts[p.userId] : 5,
+        cardCount: p.userId === currentUserId
+          ? gameState.playerHand?.length || 5
+          : (gameState.opponentCounts?.[p.userId] !== undefined ? gameState.opponentCounts[p.userId] : 5),
         isDisconnected: gameState.disconnectedPlayers?.has(p.userId) || false,
+        isCurrentPlayer: p.userId === currentUserId,
       }));
-  }, [gameState.players, gameState.scores, gameState.currentTurnPlayerId, gameState.eliminatedPlayers, gameState.opponentCounts, gameState.disconnectedPlayers, currentUserId]);
+  }, [gameState.players, gameState.scores, gameState.currentTurnPlayerId, gameState.eliminatedPlayers, gameState.opponentCounts, gameState.disconnectedPlayers, currentUserId, gameState.playerHand]);
 
   if (loading) {
     return (
@@ -265,6 +267,9 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
         </div>
 
         <div className="header-actions">
+          <button className="copy-link-btn" onClick={handleCopyInviteLink}>
+            <span>{copiedLink ? '✓ Link Copied' : '🔗 Invite Link'}</span>
+          </button>
           {gameStarted && (
             <button
               className="scoreboard-toggle-btn"
@@ -350,7 +355,7 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
               isPlayerTurn={isPlayerTurn}
               currentTurnPlayerId={gameState.currentTurnPlayerId}
               deckCount={gameState.deckCount}
-              opponents={opponentsList}
+              opponents={allPlayersList}
               roundNumber={gameState.roundNumber}
               scores={gameState.scores}
               onDiscard={handleDiscard}
@@ -379,6 +384,18 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
               eliminatedPlayers={gameState.eliminatedPlayers}
             />
           </div>
+
+          {/* Mobile Scoreboard Toggle Button */}
+          {isMobile && (
+            <button
+              className="scoreboard-toggle-btn"
+              onClick={() => setShowScoreboard(!showScoreboard)}
+              aria-label={showScoreboard ? 'Hide Scoreboard' : 'Show Scoreboard'}
+              aria-expanded={showScoreboard}
+            >
+              🏆 {showScoreboard ? 'Hide' : 'Scores'}
+            </button>
+          )}
 
           {/* Mobile Scoreboard Overlay */}
           {isMobile && (
