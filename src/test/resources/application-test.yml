@@ -1,0 +1,29 @@
+spring:
+  application:
+    name: yanif-test
+  datasource:
+    url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.H2Dialect
+  redis:
+    host: localhost
+    port: 6379
+  security:
+    jwt:
+      secret: test-secret-key-for-testing-only-at-least-256-bits-long
+      expiration: 3600000
+
+logging:
+  level:
+    shop.abwork.yanif: DEBUG
+    org.springframework.web.socket: DEBUG
+    org.springframework.messaging: DEBUG

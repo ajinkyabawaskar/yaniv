@@ -8,6 +8,9 @@
     "build": "./build-version.sh && cp -r build/* ../src/main/resources/static/",
     "build:local": "REACT_APP_VERSION=dev react-scripts build",
     "test": "react-scripts test",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:headed": "playwright test --headed",
     "eject": "react-scripts eject"
   },
   "dependencies": {
@@ -25,6 +28,7 @@
     "zustand": "^4.4.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.40.0",
     "@types/node": "^20.10.0",
     "@types/react": "^18.2.37",
     "@types/react-dom": "^18.2.15",
