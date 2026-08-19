@@ -10,7 +10,7 @@ import java.util.concurrent.TimeUnit;
 /**
  * Web MVC configuration for static resource cache control.
  * <p>
- * - Immutable assets (images, fonts, SVGs): long-term cache (1 year)
+ * - Immutable assets (images, fonts, SVGs, favicon, manifest): long-term cache (1 year)
  *   These are versioned via build hash or don't change between deployments.
  *   Preloading depends on browser cache working.
  * - HTML/JS/CSS: no cache (must revalidate) to prevent stale deployments.
@@ -28,12 +28,22 @@ public class WebMvcConfig implements WebMvcConfigurer {
 
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
-        // Card images and other immutable assets - long-term cache
-        registry.addResourceHandler("/cards/**", "/images/**", "/fonts/**", "/favicon.ico", "/manifest.json")
+        // Favicon - exact match, long-term cache
+        registry.addResourceHandler("/favicon.ico")
                 .addResourceLocations("classpath:/static/")
                 .setCacheControl(IMMUTABLE_CACHE);
 
-        // HTML, JS, CSS - no cache to ensure fresh deployments
+        // Manifest - exact match, long-term cache
+        registry.addResourceHandler("/manifest.json")
+                .addResourceLocations("classpath:/static/")
+                .setCacheControl(IMMUTABLE_CACHE);
+
+        // Card images and other immutable assets - long-term cache
+        registry.addResourceHandler("/cards/**", "/images/**", "/fonts/**")
+                .addResourceLocations("classpath:/static/")
+                .setCacheControl(IMMUTABLE_CACHE);
+
+        // HTML, JS, CSS, and all other static resources - no cache to ensure fresh deployments
         registry.addResourceHandler("/**")
                 .addResourceLocations("classpath:/static/")
                 .setCacheControl(NO_CACHE);
