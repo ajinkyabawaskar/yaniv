@@ -42,11 +42,11 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 4px 10px;
+  padding: 8px 12px;
   background: rgba(5, 20, 14, 0.9);
   border-bottom: 1px solid rgba(212, 175, 55, 0.25);
   backdrop-filter: blur(8px);
-  min-height: 32px;
+  min-height: 48px;
 }
 
 /* Scoreboard Toggle Button in Header */
@@ -154,7 +154,7 @@
   flex: 1;
   display: flex;
   overflow: hidden;
-  height: calc(100% - 32px);
+  height: calc(100% - 48px);
 }
 
 .table-area-wrapper {
@@ -502,7 +502,7 @@
   font-size: 16px;
   color: var(--gold-light);
   margin: 0 0 12px;
-  text-align: center;
+  text-align: center.
 }
 
 .revealed-hands-grid {
@@ -602,73 +602,71 @@
    ========================================================================== */
 @media (max-width: 768px) {
   .game-view-header {
-    padding: 4px 8px;
+    padding: 8px 12px;
     flex-wrap: wrap;
-    gap: 4px;
-    min-height: 30px;
+    gap: 8px;
   }
 
   .header-left {
-    gap: 4px;
+    gap: 8px;
     flex: 1;
     min-width: 0;
   }
 
   .room-code-tag {
-    font-size: 11px;
+    font-size: 13px;
   }
 
   .round-badge {
-    font-size: 8px;
-    padding: 2px 5px;
-  }
-
-  .yaniv-timer-badge {
-    font-size: 9px;
-    padding: 2px 6px;
+    font-size: 10px;
+    padding: 3px 8px;
   }
 
   .header-actions {
-    gap: 3px;
+    gap: 6px;
   }
 
   .copy-link-btn,
-  .exit-table-btn,
-  .scoreboard-toggle-btn {
-    padding: 5px 8px;
-    font-size: 10px;
-    min-height: 32px;
+  .exit-table-btn {
+    padding: 8px 12px;
+    font-size: 12px;
+    min-height: 44px;
   }
-
-  .copy-link-btn span,
-  .exit-table-btn span,
-  .scoreboard-toggle-btn span {
-    display: none;
-  }
-
-  .copy-link-btn::before { content: '🔗'; }
-  .copy-link-btn.copied::before { content: '✓'; }
-  .exit-table-btn::before { content: '✕'; }
-  .scoreboard-toggle-btn::before { content: '🏆'; }
 
   .game-play-layout {
-    height: calc(100% - 30px);
+    height: calc(100% - 48px);
   }
 
-  /* Scoreboard Toggle Button in Header - mobile adjustments */
+  /* Scoreboard Toggle Button for Mobile */
   .scoreboard-toggle-btn {
-    padding: 4px 8px;
-    font-size: 9px;
-    min-height: 28px;
-    border-radius: 14px;
-    gap: 3px;
+    display: flex;
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 50;
+    padding: 10px 14px;
+    border-radius: 24px;
+    background: var(--gold-gradient);
+    color: #0c2b1e;
+    font-family: 'Cinzel', serif;
+    font-size: 12px;
+    font-weight: 700;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    min-height: 44px;
+    align-items: center;
+    gap: 6px;
   }
 
-  /* Scoreboard as Mobile Drawer - adjusted for smaller header */
+  .scoreboard-toggle-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(212, 175, 55, 0.5);
+  }
+
+  /* Scoreboard as Mobile Drawer */
   .scoreboard-wrapper.mobile-open {
     display: flex !important;
     position: fixed;
-    top: 30px;
+    top: 48px;
     right: 0;
     bottom: 0;
     width: 280px;
@@ -693,7 +691,7 @@
   .scoreboard-overlay {
     display: none;
     position: fixed;
-    top: 36px;
+    top: 48px;
     left: 0;
     right: 0;
     bottom: 0;
@@ -888,34 +886,17 @@
 
 @media (max-width: 480px) {
   .game-view-header {
-    padding: 3px 6px;
-    min-height: 28px;
+    padding: 6px 10px;
   }
 
   .room-code-tag {
-    font-size: 10px;
-  }
-
-  .round-badge {
-    font-size: 7px;
-    padding: 1px 4px;
-  }
-
-  .yaniv-timer-badge {
-    font-size: 8px;
-    padding: 1px 5px;
-  }
-
-  .header-actions {
-    gap: 2px;
+    font-size: 12px;
   }
 
   .copy-link-btn,
-  .exit-table-btn,
-  .scoreboard-toggle-btn {
-    padding: 4px 7px;
-    font-size: 9px;
-    min-height: 26px;
+  .exit-table-btn {
+    padding: 8px 10px;
+    font-size: 11px;
   }
 
   .lobby-glass-panel {
@@ -948,11 +929,11 @@
   .submit-join-btn,
   .cancel-join-btn {
     padding: 10px;
-    font-size: 12px;
+    font-size: 12px.
   }
 
   .friend-code-strip {
-    padding: 12px 14px;
+    padding: 12px 14px.
   }
 
   .strip-label {

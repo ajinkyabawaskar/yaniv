@@ -383,6 +383,18 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
             />
           </div>
 
+          {/* Mobile Scoreboard Toggle Button */}
+          {isMobile && (
+            <button
+              className="scoreboard-toggle-btn"
+              onClick={() => setShowScoreboard(!showScoreboard)}
+              aria-label={showScoreboard ? 'Hide Scoreboard' : 'Show Scoreboard'}
+              aria-expanded={showScoreboard}
+            >
+              🏆 {showScoreboard ? 'Hide' : 'Scores'}
+            </button>
+          )}
+
           {/* Mobile Scoreboard Overlay */}
           {isMobile && (
             <div
