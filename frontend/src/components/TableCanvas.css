@@ -391,19 +391,21 @@
   display: block;
 }
 
-/* Zone 3: Discard Pile - Fan Layout (like player hand) */
+/* Zone 3: Discard Pile - Chinese Hand Fan Layout */
 .discard-pile-zone {
-  min-width: 160px;
+  min-width: 0;
+  flex: 1;
 }
 
 .discard-fan-container {
   position: relative;
   min-height: 140px;
-  min-width: 120px;
+  min-width: 0;
   display: flex;
   align-items: flex-end;
   justify-content: center;
   padding-bottom: 8px;
+  overflow: visible;
 }
 
 .discard-empty-box {
@@ -418,13 +420,17 @@
   color: rgba(255, 255, 255, 0.4);
 }
 
+/* Chinese hand fan: tight overlap with slight rotation */
 .discard-cards-fan {
   display: flex;
   justify-content: center;
   align-items: flex-end;
-  gap: 8px; /* gap between cards in fan */
+  /* Negative gap creates the fan overlap - tighter = more cards fit */
+  gap: -24px;
   min-height: 124px;
   width: max-content;
+  /* Center the fan within the zone */
+  margin: 0 auto;
 }
 
 .discard-fan-card {
@@ -437,32 +443,34 @@
   cursor: pointer;
   flex-shrink: 0;
   transform-origin: bottom center;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
 }
 
+/* Z-index stacking for proper fan layering (center on top) */
+.discard-cards-fan .discard-fan-card:nth-child(1) { z-index: 5; }
+.discard-cards-fan .discard-fan-card:nth-child(2) { z-index: 4; }
+.discard-cards-fan .discard-fan-card:nth-child(3) { z-index: 3; }
+.discard-cards-fan .discard-fan-card:nth-child(4) { z-index: 2; }
+.discard-cards-fan .discard-fan-card:nth-child(5) { z-index: 1; }
+
 .discard-fan-card.drawable-eligible {
-  box-shadow: 0 0 16px rgba(212, 175, 55, 0.75), 0 4px 12px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 0 20px rgba(212, 175, 55, 0.9), 0 6px 20px rgba(0, 0, 0, 0.7);
   border: 2px solid var(--gold-primary);
+  /* Subtle lift to indicate interactivity */
+  transform: translateY(-2px);
+}
+
+.discard-fan-card.drawable-eligible:hover,
+.discard-fan-card.drawable-eligible:active {
+  box-shadow: 0 0 28px rgba(212, 175, 55, 1), 0 10px 28px rgba(0, 0, 0, 0.8);
+  border-color: #f6e29d;
+  transform: translateY(-4px) scale(1.02);
 }
 
 .discard-fan-card.locked-ineligible {
-  filter: brightness(0.65) grayscale(0.4);
+  filter: brightness(0.6) grayscale(0.4);
   cursor: not-allowed;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-}
-
-.pick-handle-glow {
-  position: absolute;
-  bottom: 6px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--gold-gradient);
-  color: #102e21;
-  font-weight: 800;
-  font-size: 10px;
-  padding: 2px 6px;
-  border-radius: 10px;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
-  white-space: nowrap;
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .locked-indicator {
@@ -470,13 +478,14 @@
   top: 6px;
   right: 6px;
   font-size: 14px;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0.7);
   border-radius: 50%;
   width: 22px;
   height: 22px;
   display: flex;
   align-items: center;
   justify-content: center;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
 }
 
 .discard-prompt-hint {
@@ -1150,24 +1159,20 @@
     padding: 3px 8px;
   }
 
-  /* Zone 2: Discard Pile - fan layout, scrollable if needed */
+  /* Zone 2: Discard Pile - Chinese hand fan, all 5 cards visible within zone width */
   .discard-pile-zone {
     min-width: 0;
+    flex: 1;
   }
 
   .discard-fan-container {
     min-height: 110px;
     min-width: 0;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
+    overflow: visible;
     padding: 4px 0;
     display: flex;
     align-items: flex-end;
     justify-content: center;
-  }
-
-  .discard-fan-container::-webkit-scrollbar {
-    display: none;
   }
 
   .discard-cards-fan {
@@ -1175,8 +1180,11 @@
     height: 100px;
     min-width: 100%;
     display: flex;
-    gap: 8px;
+    /* Tight negative gap for mobile - all 5 cards fit within draw pile width */
+    gap: -18px;
     align-items: flex-end;
+    justify-content: center;
+    margin: 0 auto;
   }
 
   .discard-fan-card {
@@ -1186,16 +1194,17 @@
     transform-origin: bottom center;
   }
 
+  /* Z-index for mobile fan */
+  .discard-cards-fan .discard-fan-card:nth-child(1) { z-index: 5; }
+  .discard-cards-fan .discard-fan-card:nth-child(2) { z-index: 4; }
+  .discard-cards-fan .discard-fan-card:nth-child(3) { z-index: 3; }
+  .discard-cards-fan .discard-fan-card:nth-child(4) { z-index: 2; }
+  .discard-cards-fan .discard-fan-card:nth-child(5) { z-index: 1; }
+
   .discard-empty-box {
     width: 72px;
     height: 100px;
     flex-shrink: 0;
-  }
-
-  .pick-handle-glow {
-    font-size: 9px;
-    padding: 2px 5px;
-    bottom: 4px;
   }
 
   .locked-indicator {
@@ -1473,6 +1482,32 @@
   .turn-timer-value {
     font-size: 12px;
   }
+
+  /* 480px - even tighter fan for discard pile */
+  .discard-cards-fan {
+    gap: -16px;
+    height: 84px;
+  }
+
+  .discard-fan-card {
+    width: 60px;
+    height: 84px;
+  }
+
+  .discard-empty-box {
+    width: 60px;
+    height: 84px;
+  }
+
+  .deck-stack-3d {
+    width: 60px;
+    height: 84px;
+  }
+
+  .deck-layer {
+    width: 60px;
+    height: 84px;
+  }
 }
 
 /* Landscape mobile adjustments */
@@ -1533,5 +1568,16 @@
 
   .player-hand-fanned {
     justify-content: center;
+  }
+
+  /* Landscape: ensure discard fan fits */
+  .discard-cards-fan {
+    gap: -20px;
+    height: 100px;
+  }
+
+  .discard-fan-card {
+    width: 72px;
+    height: 100px;
   }
 }

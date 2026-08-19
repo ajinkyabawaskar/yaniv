@@ -5,21 +5,37 @@ import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 import org.springframework.http.CacheControl;
 
+import java.util.concurrent.TimeUnit;
+
 /**
  * Web MVC configuration for static resource cache control.
  * <p>
- * All static resources: no cache (must revalidate on every request)
- * This prevents any caching issues where users see stale deployments.
+ * - Immutable assets (images, fonts, SVGs): long-term cache (1 year)
+ *   These are versioned via build hash or don't change between deployments.
+ *   Preloading depends on browser cache working.
+ * - HTML/JS/CSS: no cache (must revalidate) to prevent stale deployments.
+ *   These change frequently and need fresh versions.
  * </p>
  */
 @Configuration
 public class WebMvcConfig implements WebMvcConfigurer {
 
+    private static final CacheControl IMMUTABLE_CACHE = CacheControl.maxAge(365, TimeUnit.DAYS)
+            .cachePublic()
+            .immutable();
+
+    private static final CacheControl NO_CACHE = CacheControl.noStore().mustRevalidate();
+
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
-        // Disable caching for ALL static resources
+        // Card images and other immutable assets - long-term cache
+        registry.addResourceHandler("/cards/**", "/images/**", "/fonts/**", "/favicon.ico", "/manifest.json")
+                .addResourceLocations("classpath:/static/")
+                .setCacheControl(IMMUTABLE_CACHE);
+
+        // HTML, JS, CSS - no cache to ensure fresh deployments
         registry.addResourceHandler("/**")
                 .addResourceLocations("classpath:/static/")
-                .setCacheControl(CacheControl.noStore().mustRevalidate());
+                .setCacheControl(NO_CACHE);
     }
 }

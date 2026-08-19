@@ -757,7 +757,7 @@ export default function TableCanvas({
             )}
           </div>
 
-          {/* Zone 2: Discard Pile (Right) - expanded */}
+          {/* Zone 2: Discard Pile (Right) - Chinese Hand Fan Layout */}
           <div className="zone-column discard-pile-zone">
             <div className="zone-header">
               <span className="zone-title">DISCARD PILE</span>
@@ -777,11 +777,12 @@ export default function TableCanvas({
                       idx > 0 &&
                       idx < discardDisplayCards.length - 1;
 
-                    // Fan layout calculations (similar to player hand)
-                    const totalCards = discardDisplayCards.length;
+                    // Chinese hand fan: tight overlap with slight rotation
+                    // Fan spread based on card count (max 5 cards)
+                    const totalCards = Math.min(discardDisplayCards.length, 5);
                     const centerOffset = idx - (totalCards - 1) / 2;
-                    const rotationDeg = centerOffset * 4; // Slightly more rotation for discard pile
-                    const translateY = Math.abs(centerOffset) * 3;
+                    const rotationDeg = centerOffset * 3; // Gentle fan spread
+                    const translateY = Math.abs(centerOffset) * 2;
                     // Z-index: center card on top, edges behind
                     const zIndex = totalCards - Math.abs(centerOffset);
 
@@ -797,8 +798,8 @@ export default function TableCanvas({
                           rotate: rotationDeg,
                           y: translateY,
                         }}
-                        transition={{ type: 'spring', stiffness: 400, damping: 28 }}
-                        whileHover={isDrawable ? { y: -12, scale: 1.05, rotate: 0 } : { x: [-2, 2, -2, 0] }}
+                        transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                        whileHover={isDrawable ? { y: -8, scale: 1.03, rotate: 0, boxShadow: '0 0 20px rgba(212, 175, 55, 0.8), 0 8px 24px rgba(0, 0, 0, 0.6)' } : { x: [-1, 1, -1, 0] }}
                         onClick={() => handleDrawFromDiscard(card)}
                       >
                         <img
@@ -806,12 +807,6 @@ export default function TableCanvas({
                           alt={`${card.rank} of ${card.suit}`}
                           className="card-img"
                         />
-
-                        {isDrawable && (
-                          <div className="pick-handle-glow" title="Eligible to pick up">
-                            ✨ Pick
-                          </div>
-                        )}
 
                         {isSequenceMiddleLocked && (
                           <div className="locked-indicator" title="Middle sequence cards cannot be drawn">
@@ -828,7 +823,7 @@ export default function TableCanvas({
             {isPlayerTurn && (
               <div className="discard-prompt-hint">
                 {drawableDiscardCards.length > 1
-                  ? 'Tap outer card (ends only) to draw'
+                  ? 'Tap outer cards (ends only) to draw'
                   : 'Tap top card to draw'}
               </div>
             )}
