@@ -19,7 +19,7 @@ const StompContext = createContext<StompContextType | undefined>(undefined);
 const getWsUrl = (): string => {
   const configuredUrl = process.env.REACT_APP_WS_URL;
   let url: string;
-  
+
   if (configuredUrl && configuredUrl.trim() !== '') {
     url = configuredUrl;
   } else {
@@ -41,6 +41,8 @@ export function StompProvider({ children }: { children: React.ReactNode }) {
   const clientRef = useRef<Client | null>(null);
   const pendingMessagesRef = useRef<Array<{ destination: string; body: any }>>([]);
   const subscriptionsRef = useRef<Map<string, StompSubscription>>(new Map());
+  const heartbeatIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const visibilityHandlerRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     if (!jwtToken || !userId) return;
@@ -70,16 +72,7 @@ export function StompProvider({ children }: { children: React.ReactNode }) {
           client.publish({ destination, body: JSON.stringify(body) });
         });
 
-        const notifyOffline = () => {
-          if (client.connected) {
-            client.publish({
-              destination: '/app/presence/offline',
-              body: JSON.stringify({}),
-            });
-          }
-        };
-
-        // Send heartbeat to keep presence alive
+        // Must be less than server's expected client heartbeat (25s from WebSocketConfig)
         const heartbeatInterval = setInterval(() => {
           if (clientRef.current && clientRef.current.connected) {
             clientRef.current.publish({
@@ -87,13 +80,41 @@ export function StompProvider({ children }: { children: React.ReactNode }) {
               body: JSON.stringify({}),
             });
           }
-        }, 30000); // Every 30 seconds
+        }, 20000); // Every 20 seconds (server expects client heartbeat every 25s)
 
-        window.addEventListener('pagehide', notifyOffline);
+        heartbeatIntervalRef.current = heartbeatInterval;
+
+        // Use visibilitychange instead of pagehide for more reliable mobile handling
+        // pagehide may not fire when switching apps/tabs on mobile
+        const handleVisibilityChange = () => {
+          if (document.hidden) {
+            // App went to background - send heartbeat to keep presence alive
+            // Don't send offline message here; let server detect disconnect via heartbeat timeout
+            if (clientRef.current && clientRef.current.connected) {
+              clientRef.current.publish({
+                destination: '/app/presence/heartbeat',
+                body: JSON.stringify({}),
+              });
+            }
+          } else {
+            // App came to foreground - connection should be alive or reconnecting
+            // If reconnected, flushPending will be called by GameView's isConnected effect
+          }
+        };
+
+        visibilityHandlerRef.current = handleVisibilityChange;
+        window.addEventListener('visibilitychange', handleVisibilityChange);
 
         client.onDisconnect = () => {
-          window.clearInterval(heartbeatInterval);
-          window.removeEventListener('pagehide', notifyOffline);
+          if (heartbeatIntervalRef.current) {
+            window.clearInterval(heartbeatIntervalRef.current);
+            heartbeatIntervalRef.current = null;
+          }
+          if (visibilityHandlerRef.current) {
+            window.removeEventListener('visibilitychange', visibilityHandlerRef.current);
+            visibilityHandlerRef.current = null;
+          }
+          console.log('WebSocket disconnected');
           setIsConnected(false);
         };
       };
@@ -102,23 +123,20 @@ export function StompProvider({ children }: { children: React.ReactNode }) {
         console.error('STOMP error:', frame.headers['message'], frame.body);
       };
 
-      client.onDisconnect = () => {
-        console.log('WebSocket disconnected');
-        setIsConnected(false);
-      };
-
       client.activate();
     };
 
     connect();
 
     return () => {
-      if (clientRef.current && clientRef.current.connected) {
-        clientRef.current.publish({
-          destination: '/app/presence/offline',
-          body: JSON.stringify({}),
-        });
+      if (heartbeatIntervalRef.current) {
+        window.clearInterval(heartbeatIntervalRef.current);
       }
+      if (visibilityHandlerRef.current) {
+        window.removeEventListener('visibilitychange', visibilityHandlerRef.current);
+      }
+      // Don't send offline message on unmount - let server detect disconnect via heartbeat timeout
+      // This prevents incorrectly marking user as offline during navigation/reload
       if (clientRef.current && clientRef.current.connected) {
         clientRef.current.deactivate();
       }

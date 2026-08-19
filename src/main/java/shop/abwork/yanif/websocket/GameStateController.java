@@ -107,6 +107,7 @@ public class GameStateController {
     /**
      * Handle WebSocket session connect.
      * If player was previously disconnected in an active game, restore their state.
+     * This handles both new connections and STOMP reconnections.
      */
     @EventListener
     public void handleSessionConnect(SessionConnectedEvent event) {
@@ -116,23 +117,34 @@ public class GameStateController {
             return;
         }
 
-        // Find which room this user is in
+        // Find which room this user is in - check both active game engines and database
         String roomId = findRoomForUser(userId);
         if (roomId == null) {
-            return;
+            // Check if user has an active game in database (e.g., game engine was cleaned up)
+            roomId = findActiveGameRoomForUser(userId);
+            if (roomId == null) {
+                return;
+            }
         }
 
         // Check if there's an active game engine for this room
         YanivGameEngine engine = gameEngines.get(roomId);
         if (engine == null) {
-            // Not in an active game
-            presenceService.setUserOnline(userId);
-            return;
+            // Game engine not in memory - try to rebuild from database
+            engine = rebuildGameEngine(roomId);
+            if (engine == null) {
+                // No active game found
+                presenceService.setUserOnline(userId);
+                return;
+            }
+            gameEngines.put(roomId, engine);
         }
 
         // Check if this player was previously disconnected in this game
         Set<String> disconnected = disconnectedInGame.get(roomId);
-        if (disconnected != null && disconnected.contains(userId)) {
+        boolean wasDisconnected = disconnected != null && disconnected.contains(userId);
+
+        if (wasDisconnected) {
             // Player is reconnecting to an active game
             disconnected.remove(userId);
 
@@ -142,15 +154,19 @@ public class GameStateController {
             // Broadcast reconnected status to other players
             broadcastPlayerDisconnected(roomId, userId, false);
 
-            // NOTE: Do NOT proactively send game state here — race condition!
-            // Frontend will request state via /app/room/{roomId}/state after reconnecting
-            // (sent via flushPending in StompContext.onConnect and GameView effect)
-            // This avoids sending to /user/queue/game-state before frontend subscribes.
+            // Proactively send game state to reconnecting player
+            // This avoids race condition where frontend requests state before subscribing
+            GameStateMessage stateMessage = buildGameStateForPlayers(engine, roomId, userId);
+            messagingTemplate.convertAndSendToUser(userId, "/queue/game-state", stateMessage);
 
-            System.out.println("Player " + userId + " reconnected to active game in room " + roomId + "; waiting for client state request");
+            System.out.println("Player " + userId + " reconnected to active game in room " + roomId + "; game state sent proactively");
         } else {
-            // Normal join
-            presenceService.setUserOnline(userId);
+            // Normal join or new connection to existing game
+            presenceService.setUserInGame(userId);
+
+            // Send current game state to the newly connected player
+            GameStateMessage stateMessage = buildGameStateForPlayers(engine, roomId, userId);
+            messagingTemplate.convertAndSendToUser(userId, "/queue/game-state", stateMessage);
         }
     }
 
@@ -359,7 +375,7 @@ public class GameStateController {
                             Authentication auth) {
         try {
             String userId = auth.getName();
-            
+
             YanivGameEngine engine = gameEngines.get(roomId);
             if (engine == null) {
                 Game game = gameService.getGameById(roomId);
@@ -496,7 +512,7 @@ public class GameStateController {
                          Authentication auth) {
         try {
             String userId = auth.getName();
-            
+
             var game = gameService.getGameById(roomId);
 
             if (game == null) {
@@ -764,6 +780,52 @@ public class GameStateController {
             }
         }
         return null;
+    }
+
+    /**
+     * Find active game room for user by checking database.
+     * Used when game engine is not in memory but game is still active in database.
+     */
+    private String findActiveGameRoomForUser(String userId) {
+        try {
+            // Get all active games from database and check if user is a player
+            List<Game> activeGames = gameService.getActiveGames();
+            for (Game game : activeGames) {
+                var players = gameService.getGamePlayers(game.getId());
+                if (players.stream().anyMatch(gp -> gp.getId().getUserId().equals(userId))) {
+                    return game.getId();
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("Error finding active game for user " + userId + ": " + e.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * Rebuild game engine from database for a room.
+     * Used when game engine was cleaned up from memory but game is still active.
+     */
+    private YanivGameEngine rebuildGameEngine(String roomId) {
+        try {
+            Game game = gameService.getGameById(roomId);
+            if (game == null || game.getStatus() == Game.GameStatus.LOBBY
+                    || game.getStatus() == Game.GameStatus.FINISHED) {
+                return null;
+            }
+
+            var players = gameService.getGamePlayers(roomId);
+            List<String> playerIds = players.stream()
+                    .map(gp -> gp.getId().getUserId())
+                    .toList();
+
+            // Create new engine - note: this won't restore exact game state (hands, discard pile, etc.)
+            // In production, you'd persist full game state to database/Redis
+            return new YanivGameEngine(roomId, (List<String>) playerIds, 7, 200);
+        } catch (Exception e) {
+            System.err.println("Error rebuilding game engine for room " + roomId + ": " + e.getMessage());
+            return null;
+        }
     }
 
     /**
