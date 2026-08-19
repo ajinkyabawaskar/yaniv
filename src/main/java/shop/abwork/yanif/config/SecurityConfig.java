@@ -63,6 +63,7 @@ public class SecurityConfig {
                 .requestMatchers("/ws", "/ws/**").permitAll()
                 .requestMatchers("/api/v1/users/resolve").permitAll()
                 .requestMatchers("/api/v1/rooms/code/**").permitAll()
+                .requestMatchers("/api/v1/version").permitAll()
                 // Actuator endpoints for health checks
                 .requestMatchers("/actuator", "/actuator/**").permitAll()
                 // Static resources and frontend
