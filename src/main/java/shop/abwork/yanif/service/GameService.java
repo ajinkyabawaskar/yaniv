@@ -85,6 +85,18 @@ public class GameService {
     }
 
     /**
+     * Get all active games (IN_PROGRESS status).
+     * Used for reconnection handling when game engine is not in memory.
+     *
+     * @return List of active games
+     */
+    public List<Game> getActiveGames() {
+        return gameRepository.findByStatusIn(List.of(
+                Game.GameStatus.IN_PROGRESS
+        ));
+    }
+
+    /**
      * Add a player to a game.
      *
      * @param gameId Game ID

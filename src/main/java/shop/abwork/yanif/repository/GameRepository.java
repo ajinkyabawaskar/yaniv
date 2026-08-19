@@ -4,6 +4,7 @@ import shop.abwork.yanif.entity.Game;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -13,4 +14,6 @@ import java.util.Optional;
 public interface GameRepository extends JpaRepository<Game, String> {
 
     Optional<Game> findByRoomCode(String roomCode);
+
+    List<Game> findByStatusIn(List<Game.GameStatus> statuses);
 }
