@@ -613,7 +613,7 @@
     gap: 6px;
   }
 
-  .exit-table-btn {
+.exit-table-btn {
     padding: 3px 8px;
     font-size: 10px;
   }
@@ -622,7 +622,7 @@
     height: calc(100% - 48px);
   }
 
-  /* Scoreboard as Mobile Drawer */
+/* Scoreboard as Mobile Drawer */
   .scoreboard-wrapper.mobile-open {
     display: flex !important;
     position: fixed;
@@ -853,7 +853,7 @@
     font-size: 12px;
   }
 
-  .exit-table-btn {
+.exit-table-btn {
     padding: 2px 6px;
     font-size: 10px;
   }
