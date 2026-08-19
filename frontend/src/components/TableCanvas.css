@@ -816,7 +816,7 @@
 }
 
 /* ==========================================================================
-   4b. Yaniv Contest Overlay
+   4b. Yaniv Contest Overlay (Toned Down)
    ========================================================================== */
 .yaniv-contest-overlay {
   position: absolute;
@@ -831,30 +831,7 @@
 .contest-overlay-bg {
   position: absolute;
   inset: 0;
-  background: radial-gradient(ellipse at center, rgba(180, 30, 30, 0.25) 0%, rgba(20, 10, 10, 0.85) 70%);
-  animation: contestPulse 2s ease-in-out infinite;
-}
-
-@keyframes contestPulse {
-  0%, 100% { opacity: 0.6; }
-  50% { opacity: 1; }
-}
-
-.contest-pulse-ring {
-  position: absolute;
-  width: 300px;
-  height: 300px;
-  border: 2px solid rgba(239, 68, 68, 0.4);
-  border-radius: 50%;
-  animation: pulseRingExpand 2s ease-out infinite;
-}
-
-.contest-pulse-ring:nth-child(2) { animation-delay: 0.5s; }
-.contest-pulse-ring:nth-child(3) { animation-delay: 1s; }
-
-@keyframes pulseRingExpand {
-  0% { transform: scale(0.5); opacity: 0.8; }
-  100% { transform: scale(1.5); opacity: 0; }
+  background: radial-gradient(ellipse at center, rgba(212, 175, 55, 0.12) 0%, rgba(20, 15, 8, 0.85) 70%);
 }
 
 .contest-overlay-content {
@@ -863,156 +840,145 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 32px 48px;
-  background: radial-gradient(circle, rgba(40, 15, 15, 0.98) 0%, rgba(15, 5, 5, 0.99) 100%);
-  border: 2px solid var(--crimson-primary);
-  border-radius: 24px;
-  box-shadow: 
-    0 0 80px rgba(239, 68, 68, 0.6),
-    0 0 160px rgba(239, 68, 68, 0.3),
-    0 20px 60px rgba(0, 0, 0, 0.9),
-    inset 0 0 40px rgba(239, 68, 68, 0.1);
+  padding: 24px 36px;
+  background: radial-gradient(circle, rgba(25, 22, 16, 0.95) 0%, rgba(12, 10, 6, 0.98) 100%);
+  border: 1px solid rgba(212, 175, 55, 0.35);
+  border-radius: 16px;
+  box-shadow:
+    0 0 40px rgba(212, 175, 55, 0.15),
+    0 12px 40px rgba(0, 0, 0, 0.7),
+    inset 0 0 20px rgba(212, 175, 55, 0.05);
   text-align: center;
-  backdrop-filter: blur(20px);
+  backdrop-filter: blur(16px);
   pointer-events: auto;
 }
 
 .contest-icon {
-  font-size: 48px;
-  margin-bottom: 8px;
-  animation: contestIconPulse 1s ease-in-out infinite;
-}
-
-@keyframes contestIconPulse {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.15); }
+  font-size: 32px;
+  margin-bottom: 6px;
+  opacity: 0.9;
 }
 
 .contest-title {
   font-family: 'Cinzel', serif;
-  font-size: 42px;
-  font-weight: 900;
-  letter-spacing: 0.08em;
-  background: linear-gradient(135deg, #fca5a5 0%, #ef4444 50%, #fca5a5 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  text-shadow: 0 4px 30px rgba(239, 68, 68, 0.5);
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--gold-light);
+  text-shadow: 0 2px 12px rgba(212, 175, 55, 0.3);
   margin: 0;
 }
 
 .contest-caller-info {
-  margin: 16px 0 8px;
+  margin: 12px 0 6px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
 }
 
 .contest-caller-label {
   font-family: 'DM Mono', monospace;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
-  color: #fca5a5;
-  letter-spacing: 0.1em;
+  color: var(--gold-muted);
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .contest-caller-name {
   font-family: 'Cinzel', serif;
-  font-size: 28px;
-  font-weight: 700;
-  color: #fff;
-  text-shadow: 0 2px 10px rgba(239, 68, 68, 0.5);
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--card-cream);
+  text-shadow: 0 1px 6px rgba(212, 175, 55, 0.25);
 }
 
 .contest-timer {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  margin: 16px 0;
+  gap: 3px;
+  margin: 12px 0;
 }
 
 .contest-timer-value {
   font-family: 'DM Mono', monospace;
-  font-size: 56px;
-  font-weight: 900;
-  color: #fff;
-  text-shadow: 0 0 30px rgba(239, 68, 68, 0.8);
+  font-size: 40px;
+  font-weight: 800;
+  color: var(--gold-primary);
+  text-shadow: 0 0 18px rgba(212, 175, 55, 0.4);
   line-height: 1;
 }
 
 .contest-timer-label {
   font-family: 'DM Mono', monospace;
-  font-size: 13px;
-  font-weight: 600;
-  color: #fca5a5;
-  letter-spacing: 0.08em;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--gold-muted);
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
 .contest-progress-bar {
-  width: 280px;
-  height: 8px;
-  background: rgba(0, 0, 0, 0.5);
-  border-radius: 4px;
+  width: 240px;
+  height: 6px;
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 3px;
   overflow: hidden;
-  margin: 16px 0;
-  border: 1px solid rgba(239, 68, 68, 0.3);
+  margin: 12px 0;
+  border: 1px solid rgba(212, 175, 55, 0.15);
 }
 
 .contest-progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, #ef4444 0%, #f87171 50%, #ef4444 100%);
-  border-radius: 4px;
+  background: linear-gradient(90deg, var(--gold-primary) 0%, var(--gold-light) 50%, var(--gold-primary) 100%);
+  border-radius: 3px;
   transition: width 0.1s linear;
-  box-shadow: 0 0 15px rgba(239, 68, 68, 0.6);
+  box-shadow: 0 0 10px rgba(212, 175, 55, 0.35);
 }
 
 .contest-btn {
-  margin-top: 20px;
-  padding: 16px 40px;
+  margin-top: 16px;
+  padding: 12px 32px;
   font-family: 'Cinzel', serif;
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  color: #fff;
-  background: linear-gradient(135deg, #dc2626 0%, #ef4444 50%, #dc2626 100%);
-  border: 2px solid #fca5a5;
-  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #0a241a;
+  background: var(--gold-gradient);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 10px;
   cursor: pointer;
-  box-shadow: 
-    0 0 20px rgba(239, 68, 68, 0.4),
-    0 8px 25px rgba(0, 0, 0, 0.5),
-    inset 0 1px 0 rgba(255, 255, 255, 0.2);
-  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+  box-shadow:
+    0 0 12px rgba(212, 175, 55, 0.25),
+    0 4px 16px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.1);
   transition: all 0.2s ease;
 }
 
 .contest-btn:hover {
-  transform: scale(1.05);
-  box-shadow: 
-    0 0 30px rgba(239, 68, 68, 0.6),
-    0 12px 35px rgba(0, 0, 0, 0.6),
-    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  transform: translateY(-1px);
+  box-shadow:
+    0 0 18px rgba(212, 175, 55, 0.35),
+    0 6px 20px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 
 .contest-btn:active {
-  transform: scale(0.95);
+  transform: translateY(0) scale(0.98);
 }
 
 .contest-waiting-message {
-  margin-top: 20px;
+  margin-top: 16px;
   font-family: 'DM Mono', monospace;
-  font-size: 14px;
-  color: #fca5a5;
-  letter-spacing: 0.05em;
-  animation: waitingPulse 1.5s ease-in-out infinite;
+  font-size: 12px;
+  color: var(--gold-muted);
+  letter-spacing: 0.04em;
+  opacity: 0.8;
 }
 
-@keyframes waitingPulse {
-  0%, 100% { opacity: 0.6; }
-  50% { opacity: 1; }
-}
+/* Removed: contestPulse, pulseRingExpand, contestIconPulse, waitingPulse animations */
 
 /* ==========================================================================
    5. Responsive Scaling for Mobile Viewports

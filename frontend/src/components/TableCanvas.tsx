@@ -570,60 +570,48 @@ export default function TableCanvas({
           {showYanivContestOverlay && yanivCallerId && yanivCallerName && (
             <motion.div
               className="yaniv-contest-overlay"
-              initial={{ opacity: 0, scale: 0.9 }}
+              initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 1.1 }}
-              transition={{ type: 'spring', damping: 20, stiffness: 200 }}
+              exit={{ opacity: 0, scale: 1.05 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 180 }}
             >
               <div className="contest-overlay-bg" />
               <div className="contest-overlay-content">
-                <div className="contest-pulse-ring" />
-                <div className="contest-pulse-ring" style={{ animationDelay: '0.5s' }} />
-                <div className="contest-pulse-ring" style={{ animationDelay: '1s' }} />
-                
                 <div className="contest-header">
-                  <div className="contest-icon">⚡</div>
-                  <h1 className="contest-title">YANIV CALLED</h1>
+                  <div className="contest-icon">🔔</div>
+                  <h1 className="contest-title">Yaniv Called</h1>
                 </div>
-                
+
                 <div className="contest-caller-info">
                   <span className="contest-caller-label">Called by</span>
                   <span className="contest-caller-name">{yanivCallerName}</span>
                 </div>
-                
+
                 <div className="contest-timer">
                   <span className="contest-timer-value">{yanivContestTimerRemaining}s</span>
                   <span className="contest-timer-label">to Contest (Asaf)</span>
                 </div>
-                
+
                 <div className="contest-progress-bar">
-                  <div 
+                  <div
                     className="contest-progress-fill"
-                    style={{ 
-                      width: `${(yanivContestTimerRemaining / yanivContestTimerSeconds) * 100}%` 
-                    }} 
+                    style={{
+                      width: `${(yanivContestTimerRemaining / yanivContestTimerSeconds) * 100}%`
+                    }}
                   />
                 </div>
-                
+
                 {yanivCallerId !== currentUserId && (
                   <motion.button
                     className="contest-btn"
                     onClick={onContestYaniv}
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    animate={{
-                      boxShadow: [
-                        '0 0 20px rgba(239, 68, 68, 0.4)',
-                        '0 0 40px rgba(239, 68, 68, 0.8)',
-                        '0 0 20px rgba(239, 68, 68, 0.4)',
-                      ],
-                    }}
-                    transition={{ repeat: Infinity, duration: 1.2 }}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
                   >
-                    🛡️ CONTEST (ASAF)
+                    🛡️ Contest (Asaf)
                   </motion.button>
                 )}
-                
+
                 {yanivCallerId === currentUserId && (
                   <div className="contest-waiting-message">
                     Waiting for other players to decide...
