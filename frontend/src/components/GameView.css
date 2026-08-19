@@ -118,30 +118,17 @@
   gap: 10px;
 }
 
-.copy-link-btn {
-  font-family: 'Outfit', sans-serif;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 6px 14px;
-  border-radius: 6px;
-  background: rgba(212, 175, 55, 0.15);
-  border: 1px solid rgba(212, 175, 55, 0.4);
-  color: var(--gold-light);
-}
-
-.copy-link-btn:hover {
-  background: rgba(212, 175, 55, 0.3);
-}
-
 .exit-table-btn {
-  font-family: 'Outfit', sans-serif;
-  font-size: 12px;
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
   font-weight: 600;
-  padding: 6px 14px;
-  border-radius: 6px;
+  padding: 2px 8px;
+  border-radius: 12px;
   background: rgba(239, 68, 68, 0.15);
   border: 1px solid rgba(239, 68, 68, 0.4);
   color: #fca5a5;
+  display: flex;
+  align-items: center;
 }
 
 .exit-table-btn:hover {
@@ -626,40 +613,13 @@
     gap: 6px;
   }
 
-  .copy-link-btn,
   .exit-table-btn {
-    padding: 8px 12px;
-    font-size: 12px;
-    min-height: 44px;
+    padding: 3px 8px;
+    font-size: 10px;
   }
 
   .game-play-layout {
     height: calc(100% - 48px);
-  }
-
-  /* Scoreboard Toggle Button for Mobile */
-  .scoreboard-toggle-btn {
-    display: flex;
-    position: fixed;
-    bottom: 20px;
-    right: 20px;
-    z-index: 50;
-    padding: 10px 14px;
-    border-radius: 24px;
-    background: var(--gold-gradient);
-    color: #0c2b1e;
-    font-family: 'Cinzel', serif;
-    font-size: 12px;
-    font-weight: 700;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-    min-height: 44px;
-    align-items: center;
-    gap: 6px;
-  }
-
-  .scoreboard-toggle-btn:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(212, 175, 55, 0.5);
   }
 
   /* Scoreboard as Mobile Drawer */
@@ -893,10 +853,9 @@
     font-size: 12px;
   }
 
-  .copy-link-btn,
   .exit-table-btn {
-    padding: 8px 10px;
-    font-size: 11px;
+    padding: 2px 6px;
+    font-size: 10px;
   }
 
   .lobby-glass-panel {

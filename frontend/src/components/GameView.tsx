@@ -265,9 +265,6 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
         </div>
 
         <div className="header-actions">
-          <button className="copy-link-btn" onClick={handleCopyInviteLink}>
-            <span>{copiedLink ? '✓ Link Copied' : '🔗 Invite Link'}</span>
-          </button>
           {gameStarted && (
             <button
               className="scoreboard-toggle-btn"
@@ -382,18 +379,6 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
               eliminatedPlayers={gameState.eliminatedPlayers}
             />
           </div>
-
-          {/* Mobile Scoreboard Toggle Button */}
-          {isMobile && (
-            <button
-              className="scoreboard-toggle-btn"
-              onClick={() => setShowScoreboard(!showScoreboard)}
-              aria-label={showScoreboard ? 'Hide Scoreboard' : 'Show Scoreboard'}
-              aria-expanded={showScoreboard}
-            >
-              🏆 {showScoreboard ? 'Hide' : 'Scores'}
-            </button>
-          )}
 
           {/* Mobile Scoreboard Overlay */}
           {isMobile && (
