@@ -665,8 +665,11 @@ export default function TableCanvas({
             const timerProgress = isTurn ? Math.max(0, turnTimerSeconds / 30) : 1;
             const isUrgentTimer = isTurn && turnTimerSeconds <= 5;
             const isDisconnected = opponent.isDisconnected;
-            // Call Yaniv eligibility for current player
-            const isYanivEligibleForPlayer = isCurrentPlayer && isTurn && handScore <= yanivThreshold;
+
+            // Display name: "You" for current player, actual name for others
+            const displayName = isCurrentPlayer ? 'You' : opponent.displayName;
+            // Avatar initials: "YOU" for current player, first 2 letters for others
+            const avatarInitials = isCurrentPlayer ? 'YOU' : opponent.displayName.substring(0, 2).toUpperCase();
 
             return (
               <motion.div
@@ -695,19 +698,19 @@ export default function TableCanvas({
                     </svg>
                   )}
                   <div className={`opponent-avatar ${isDisconnected ? 'disconnected' : ''} ${isCurrentPlayer ? 'current-player-avatar' : ''}`}>
-                    {opponent.displayName.substring(0, 2).toUpperCase()}
+                    {avatarInitials}
                     {isDisconnected && <span className="disconnected-indicator" title="Disconnected">⚡</span>}
                   </div>
-                  {isCurrentPlayer && <span className="you-badge" title="You">YOU</span>}
                   {opponent.isHost && <span className="host-badge" title="Host">👑</span>}
                 </div>
 
                 <div className="opponent-meta">
-                  <span className="opponent-name">{opponent.displayName}</span>
+                  <span className="opponent-name">{displayName}</span>
                   <div className="opponent-score-pill">
                     <span className="score-val">{opponent.score} pts</span>
                   </div>
-                  {isCurrentPlayer && (
+                  {/* Show YOUR TURN only when it's actually this player's turn */}
+                  {isTurn && (
                     <span className="current-player-turn-indicator-small">
                       <span className="turn-label-small">YOUR TURN</span>
                     </span>

@@ -96,23 +96,7 @@
   border-color: var(--gold-primary);
   box-shadow: 0 0 16px rgba(212, 175, 55, 0.6), 0 2px 8px rgba(0, 0, 0, 0.5);
   background: linear-gradient(135deg, #1b4332 0%, #0d281e 100%);
-}
-
-.you-badge {
-  position: absolute;
-  bottom: -20px;
-  left: 50%;
-  transform: translateX(-50%);
-  font-family: 'DM Mono', monospace;
-  font-size: 9px;
-  font-weight: 700;
-  color: #0a241a;
-  background: var(--gold-gradient);
-  padding: 2px 8px;
-  border-radius: 10px;
-  white-space: nowrap;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
-  z-index: 10;
+  font-size: 11px; /* Slightly smaller for 3 letters "YOU" */
 }
 
 /* Small turn indicator in arc for current player */
@@ -1124,15 +1108,13 @@
     padding: 1px 4px;
   }
 
-  .you-badge {
-    font-size: 8px;
-    padding: 1px 5px;
-    bottom: -18px;
-  }
-
   .current-player-turn-indicator-small {
     font-size: 9px;
     padding: 2px 6px;
+  }
+
+  .opponent-avatar.current-player-avatar {
+    font-size: 10px; /* For 3 letters "YOU" on mobile */
   }
 
   .turn-timer-ring {
@@ -1426,15 +1408,13 @@
     padding: 1px 3px;
   }
 
-  .you-badge {
-    font-size: 7px;
-    padding: 1px 4px;
-    bottom: -16px;
-  }
-
   .current-player-turn-indicator-small {
     font-size: 8px;
     padding: 1px 5px;
+  }
+
+  .opponent-avatar.current-player-avatar {
+    font-size: 9px; /* For 3 letters "YOU" on small screens */
   }
 
   .call-yaniv-btn-arc {
