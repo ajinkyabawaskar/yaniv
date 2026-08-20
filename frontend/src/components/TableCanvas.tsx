@@ -668,8 +668,8 @@ export default function TableCanvas({
 
             // Display name: "You" for current player, actual name for others
             const displayName = isCurrentPlayer ? 'You' : opponent.displayName;
-            // Avatar initials: "YOU" for current player, first 2 letters for others
-            const avatarInitials = isCurrentPlayer ? 'YOU' : opponent.displayName.substring(0, 2).toUpperCase();
+            // Avatar initials: first 2 letters for ALL players (including current player)
+            const avatarInitials = opponent.displayName.substring(0, 2).toUpperCase();
 
             return (
               <motion.div
@@ -859,10 +859,10 @@ export default function TableCanvas({
                 ♣ Suit
               </button>
               <button
-                className={`sort-btn hud-btn interactive call-yaniv-btn-hud ${isYanivEligible ? 'eligible' : ''}`}
+                className={`sort-btn hud-btn interactive call-yaniv-btn-hud ${isYanivEligible && isPlayerTurn ? 'eligible' : ''}`}
                 onClick={onCallYaniv}
                 title="Call Yaniv"
-                disabled={!isYanivEligible}
+                disabled={!isYanivEligible || !isPlayerTurn}
               >
                 🔔 Yaniv!
               </button>

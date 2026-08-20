@@ -96,7 +96,6 @@
   border-color: var(--gold-primary);
   box-shadow: 0 0 16px rgba(212, 175, 55, 0.6), 0 2px 8px rgba(0, 0, 0, 0.5);
   background: linear-gradient(135deg, #1b4332 0%, #0d281e 100%);
-  font-size: 11px; /* Slightly smaller for 3 letters "YOU" */
 }
 
 /* Small turn indicator in arc for current player */
@@ -1113,10 +1112,6 @@
     padding: 2px 6px;
   }
 
-  .opponent-avatar.current-player-avatar {
-    font-size: 10px; /* For 3 letters "YOU" on mobile */
-  }
-
   .turn-timer-ring {
     width: 50px;
     height: 50px;
@@ -1411,10 +1406,6 @@
   .current-player-turn-indicator-small {
     font-size: 8px;
     padding: 1px 5px;
-  }
-
-  .opponent-avatar.current-player-avatar {
-    font-size: 9px; /* For 3 letters "YOU" on small screens */
   }
 
   .call-yaniv-btn-arc {
