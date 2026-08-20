@@ -697,8 +697,8 @@ export default function TableCanvas({
                   <div className={`opponent-avatar ${isDisconnected ? 'disconnected' : ''} ${isCurrentPlayer ? 'current-player-avatar' : ''}`}>
                     {opponent.displayName.substring(0, 2).toUpperCase()}
                     {isDisconnected && <span className="disconnected-indicator" title="Disconnected">⚡</span>}
-                    {isCurrentPlayer && <span className="you-badge" title="You">YOU</span>}
                   </div>
+                  {isCurrentPlayer && <span className="you-badge" title="You">YOU</span>}
                   {opponent.isHost && <span className="host-badge" title="Host">👑</span>}
                 </div>
 
