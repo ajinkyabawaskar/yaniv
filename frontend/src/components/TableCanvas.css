@@ -132,29 +132,6 @@
   letter-spacing: 0.05em;
 }
 
-/* Call Yaniv button in arc for current player */
-.call-yaniv-btn-arc {
-  font-family: 'Cinzel', serif;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  color: #0a241a;
-  background: var(--gold-gradient);
-  border: 1px solid #fff;
-  border-radius: 8px;
-  padding: 4px 10px;
-  margin-top: 4px;
-  box-shadow: 0 2px 8px rgba(212, 175, 55, 0.4);
-  cursor: pointer;
-  white-space: nowrap;
-  transition: all 0.2s ease;
-}
-
-.call-yaniv-btn-arc:hover {
-  box-shadow: 0 4px 12px rgba(212, 175, 55, 0.6);
-  transform: translateY(-1px);
-}
-
 .opponent-seat.eliminated {
   opacity: 0.4;
   filter: grayscale(1);
@@ -643,18 +620,23 @@
   /* Same as hud-btn */
 }
 
+.hand-total-btn.outline-only {
+  background: transparent;
+  border: 2px solid rgba(212, 175, 55, 0.5);
+  color: var(--gold-light);
+  cursor: default;
+}
+
+.hand-total-btn.outline-only:hover {
+  background: transparent;
+  border-color: var(--gold-primary);
+}
+
 .hand-total-btn.ready-yaniv {
   background: var(--gold-gradient);
   border-color: #fff;
   color: #0a241a;
   animation: goldPulse 1.8s infinite ease-in-out;
-}
-
-.hand-total-btn .yaniv-badge {
-  font-weight: 800;
-  font-size: 10px;
-  letter-spacing: 0.05em;
-  color: #071c14;
 }
 
 .hand-sort-controls {
@@ -665,6 +647,40 @@
 .sort-btn {
   /* Inherits from hud-btn via class composition */
   min-width: 90px;
+}
+
+/* Call Yaniv button in HUD - 4th button */
+.call-yaniv-btn-hud {
+  font-family: 'Cinzel', serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  min-width: 100px;
+}
+
+.call-yaniv-btn-hud:not(.eligible) {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: rgba(10, 32, 23, 0.5);
+  border-color: rgba(212, 175, 55, 0.2);
+  color: rgba(212, 175, 55, 0.4);
+}
+
+.call-yaniv-btn-hud.eligible {
+  background: var(--gold-gradient);
+  border-color: #fff;
+  color: #0a241a;
+  animation: goldPulse 1.8s infinite ease-in-out;
+  box-shadow: 0 2px 8px rgba(212, 175, 55, 0.4);
+}
+
+.call-yaniv-btn-hud.eligible:hover {
+  box-shadow: 0 4px 12px rgba(212, 175, 55, 0.6);
+  transform: translateY(-1px);
+}
+
+.call-yaniv-btn-hud.eligible:active {
+  transform: translateY(0);
 }
 
 .selected-hint {
@@ -1117,11 +1133,6 @@
   .current-player-turn-indicator-small {
     font-size: 9px;
     padding: 2px 6px;
-  }
-
-  .call-yaniv-btn-arc {
-    font-size: 9px;
-    padding: 3px 8px;
   }
 
   .turn-timer-ring {

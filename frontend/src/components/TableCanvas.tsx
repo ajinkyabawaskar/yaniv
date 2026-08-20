@@ -712,24 +712,6 @@ export default function TableCanvas({
                       <span className="turn-label-small">YOUR TURN</span>
                     </span>
                   )}
-                  {isYanivEligibleForPlayer && (
-                    <motion.button
-                      className="call-yaniv-btn-arc"
-                      onClick={onCallYaniv}
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
-                      animate={{
-                        boxShadow: [
-                          '0 0 15px rgba(212, 175, 55, 0.4)',
-                          '0 0 30px rgba(212, 175, 55, 0.8)',
-                          '0 0 15px rgba(212, 175, 55, 0.4)',
-                        ],
-                      }}
-                      transition={{ repeat: Infinity, duration: 1.5 }}
-                    >
-                      🔔 YANIV
-                    </motion.button>
-                  )}
                   {isDisconnected && (
                     <span className="disconnected-badge" title="Reconnecting...">🔄 Reconnecting</span>
                   )}
@@ -861,10 +843,9 @@ export default function TableCanvas({
         {/* 3. Main Player Dock (Bottom Center) */}
         <div className="main-player-dock">
           <div className="player-hud-bar">
-            <div className={`hand-total-btn hud-btn ${isYanivEligible ? 'ready-yaniv' : ''}`}>
-              <span className="score-label">TOTAL:</span>
+            <div className="hand-total-btn hud-btn outline-only">
+              <span className="score-label">Hand Total:</span>
               <span className="score-digits">{handScore}</span>
-              {isYanivEligible && <span className="yaniv-badge">✨ READY FOR YANIV!</span>}
             </div>
 
             <div className="hand-sort-controls">
@@ -873,6 +854,14 @@ export default function TableCanvas({
               </button>
               <button className="sort-btn hud-btn interactive" onClick={handleSortBySuit} title="Sort hand by suit">
                 ♣ Suit
+              </button>
+              <button
+                className={`sort-btn hud-btn interactive call-yaniv-btn-hud ${isYanivEligible ? 'eligible' : ''}`}
+                onClick={onCallYaniv}
+                title="Call Yaniv"
+                disabled={!isYanivEligible}
+              >
+                🔔 Yaniv!
               </button>
             </div>
           </div>
