@@ -2,6 +2,7 @@ package shop.abwork.yanif.service;
 
 import shop.abwork.yanif.entity.Game;
 import shop.abwork.yanif.entity.GamePlayer;
+import shop.abwork.yanif.entity.RoundHistory;
 import shop.abwork.yanif.repository.GameRepository;
 import shop.abwork.yanif.repository.GamePlayerRepository;
 import shop.abwork.yanif.repository.RoundHistoryRepository;
