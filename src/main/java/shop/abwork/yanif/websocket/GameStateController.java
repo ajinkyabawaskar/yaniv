@@ -550,7 +550,17 @@ public class GameStateController {
                 return;
             }
 
+            if (game.getStatus() == Game.GameStatus.IN_PROGRESS) {
+                // A game is already running (possibly restored after a restart)
+                sendErrorToUser(userId, "Game already in progress");
+                return;
+            }
+
             var players = gameService.getGamePlayers(roomId);
+            if (players.size() < 2) {
+                sendErrorToUser(userId, "Need at least 2 players to start");
+                return;
+            }
 
             gameService.updateGameStatus(roomId, Game.GameStatus.IN_PROGRESS);
 
@@ -916,7 +926,10 @@ public class GameStateController {
         try {
             String snapshotJson = gameService.getGameState(roomId);
             Game dbGame = gameService.getGameById(roomId);
-            return snapshotJson == null && dbGame != null
+            // A corrupt/unparseable snapshot counts as absent - it can never be restored
+            boolean noRestorableSnapshot = snapshotJson == null
+                    || YanivGameEngine.fromSnapshot(snapshotJson) == null;
+            return noRestorableSnapshot && dbGame != null
                     && dbGame.getStatus() == Game.GameStatus.IN_PROGRESS;
         } catch (Exception e) {
             System.err.println("Skipping lobby-abort check for room " + roomId

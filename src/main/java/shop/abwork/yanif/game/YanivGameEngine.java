@@ -212,7 +212,7 @@ public class YanivGameEngine {
         Hand hand = playerHands.get(playerId);
 
         if ("DECK".equalsIgnoreCase(drawSource)) {
-            if (deck.isEmpty()) {
+            if (deck.isEmpty() && !recycleDeck()) {
                 throw new IllegalArgumentException("Deck is empty");
             }
             Card topCard = deck.drawCard();
@@ -378,6 +378,29 @@ public class YanivGameEngine {
         }
 
         applyScores(handScores);
+    }
+
+    /**
+     * Recycle all discard combinations except the top one back into an empty deck.
+     * Keeps long games moving once every card has been drawn. The top combination
+     * stays in place so draw-from-discard rules remain intact.
+     *
+     * @return true if the deck was refilled
+     */
+    private boolean recycleDeck() {
+        List<DiscardCombination> combos = discardPile.getCombinations();
+        if (combos.size() <= 1) {
+            return false; // only the top combination exists - nothing to recycle
+        }
+        List<Card> recycled = new ArrayList<>();
+        for (int i = 0; i < combos.size() - 1; i++) {
+            recycled.addAll(combos.get(i).getCards());
+        }
+        // Drop the recycled combinations from the pile, keeping only the top one
+        discardPile.retainTopCombinations(1);
+        this.deck = new Deck(recycled);
+        this.deck.shuffle();
+        return true;
     }
 
     /**

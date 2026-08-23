@@ -127,6 +127,20 @@ public class DiscardPile {
     }
 
     /**
+     * Keep only the newest {@code count} combinations, dropping older ones.
+     * Used when recycling discarded cards back into an empty deck so the
+     * recycled cards are no longer also sitting in the pile.
+     */
+    public void retainTopCombinations(int count) {
+        if (count < 0) {
+            throw new IllegalArgumentException("count must be >= 0");
+        }
+        if (discards.size() > count) {
+            discards.subList(0, discards.size() - count).clear();
+        }
+    }
+
+    /**
      * Get all combinations in discard order (oldest first).
      * Used for state persistence.
      */

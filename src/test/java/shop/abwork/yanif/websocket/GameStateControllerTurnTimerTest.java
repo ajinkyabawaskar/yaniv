@@ -60,10 +60,14 @@ class GameStateControllerTurnTimerTest {
         when(gameService.getGameState(anyString())).thenAnswer(inv -> snapshotStore.get(inv.getArgument(0)));
         doAnswer(inv -> snapshotStore.remove(inv.getArgument(0))).when(gameService).deleteGameState(anyString());
 
-        // Two-player room, already started (startGame flips status via the mocked service)
+        // Two-player room in LOBBY; status transitions mutate the entity
         Game game = new Game("ABC123", 200, HOST, 6);
-        game.setStatus(Game.GameStatus.IN_PROGRESS);
+        game.setStatus(Game.GameStatus.LOBBY);
         when(gameService.getGameById(ROOM)).thenReturn(game);
+        doAnswer(inv -> {
+            game.setStatus(inv.getArgument(1));
+            return game;
+        }).when(gameService).updateGameStatus(eq(ROOM), any());
         when(gameService.getGamePlayers(ROOM)).thenReturn(List.of(
                 new GamePlayer(ROOM, HOST),
                 new GamePlayer(ROOM, OTHER)));
