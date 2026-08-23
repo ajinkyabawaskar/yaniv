@@ -1,4 +1,5 @@
 import { test, expect, Browser, BrowserContext, Page } from '@playwright/test';
+import { enterLobby } from './test-helpers';
 
 // Test configuration
 const BACKEND_URL = 'http://localhost:8080';
@@ -9,12 +10,8 @@ async function createAuthenticatedPage(browser: Browser, contextIndex: number): 
   const context = await browser.newContext();
   const page = await context.newPage();
 
-  // Navigate to frontend
-  await page.goto(FRONTEND_URL);
-
-  // Wait for login/registration to complete (fingerprint-based auth)
-  // The app uses fingerprint + display name for auth
-  await page.waitForSelector('[data-testid="lobby-view"], .lobby-view-root', { timeout: 10000 });
+  // Navigate and register if it's the first visit (display-name form)
+  await enterLobby(page);
 
   return page;
 }

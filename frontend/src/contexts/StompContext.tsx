@@ -62,6 +62,9 @@ export function StompProvider({ children }: { children: React.ReactNode }) {
         reconnectDelay: 3000,
       });
 
+      // Expose for e2e tests (Playwright waits on this handle)
+      (window as any).__STOMP_CLIENT__ = client;
+
       client.onConnect = () => {
         console.log('WebSocket connected');
         console.log('Client connected state:', client.connected);

@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useSearchParams } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { StompProvider } from './contexts/StompContext';
 import { useAuthStore } from './stores/authStore';
@@ -19,15 +19,23 @@ function RequireAuth({ children }: { children: JSX.Element }) {
   return children;
 }
 
+function LoginRoute() {
+  const { isAuthenticated } = useAuthStore();
+  const [searchParams] = useSearchParams();
+
+  // Already signed in: honor any deep-link redirect instead of dumping users on /home
+  if (isAuthenticated) {
+    return <Navigate to={searchParams.get('redirect') || '/home'} replace />;
+  }
+  return <AuthView />;
+}
+
 function AppContent() {
   const { isAuthenticated } = useAuthStore();
 
   return (
     <Routes>
-      <Route
-        path="/login"
-        element={isAuthenticated ? <Navigate to="/home" replace /> : <AuthView />}
-      />
+      <Route path="/login" element={<LoginRoute />} />
       <Route
         path="/home"
         element={

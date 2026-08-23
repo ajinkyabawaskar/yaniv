@@ -162,3 +162,8 @@ export const useGameStore = create<GameState>((set) => ({
     }),
 }));
 
+// Expose for e2e tests (Playwright reads store state through this handle)
+if (typeof window !== 'undefined') {
+  (window as any).__USE_GAME_STORE__ = useGameStore;
+}
+

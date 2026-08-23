@@ -1,4 +1,5 @@
 import { test, expect, request } from '@playwright/test';
+import { enterLobby } from './test-helpers';
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8080';
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
@@ -246,44 +247,39 @@ test.describe('Yaniv Frontend Integration', () => {
   });
 
   test('Login/Register flow works', async ({ page }) => {
-    await page.goto(FRONTEND_URL);
-
-    // The app uses fingerprint-based auth
-    // Should automatically create/resolve user
-    await expect(page.locator('.lobby-view-root, [data-testid="lobby-view"]')).toBeVisible({ timeout: 10000 });
+    await enterLobby(page);
 
     // Should show friend code
     await expect(page.locator('.friend-code-strip, [data-testid="friend-code"]')).toBeVisible();
   });
 
   test('Create room button navigates to game', async ({ page }) => {
-    await page.goto(FRONTEND_URL);
-    await expect(page.locator('.lobby-view-root')).toBeVisible({ timeout: 10000 });
+    await enterLobby(page);
 
     await page.click('button:has-text("Create Table")');
 
-    // Should navigate to game view
-    await expect(page.locator('.game-view-root, [data-testid="game-view"]')).toBeVisible({ timeout: 10000 });
+    // Should switch into the game table view
+    await expect(page.locator('.game-view-container')).toBeVisible({ timeout: 10000 });
 
-    // URL should contain room code
-    await expect(page).toHaveURL(/\/game\/[A-Z0-9]{6}/);
+    // Room code tag should be shown (ROOM #XXXXXX)
+    await expect(page.locator('.room-code-tag')).toContainText(/ROOM #[A-Z0-9]{6}/);
   });
 
   test('Join room by code', async ({ page, browser }) => {
     // Create room in first page
     const page1 = await browser.newPage();
-    await page1.goto(FRONTEND_URL);
-    await expect(page1.locator('.lobby-view-root')).toBeVisible({ timeout: 10000 });
+    await enterLobby(page1);
     await page1.click('button:has-text("Create Table")');
-    await expect(page1.locator('.game-view-root')).toBeVisible({ timeout: 10000 });
+    await expect(page1.locator('.game-view-container')).toBeVisible({ timeout: 10000 });
 
-    const url = page1.url();
-    const roomMatch = url.match(/\/game\/([A-Z0-9]{6})/);
-    expect(roomMatch).toBeTruthy();
-    const roomCode = roomMatch![1];
+    // Read room code from the header tag
+    const codeTag = await page1.locator('.room-code-tag').textContent();
+    const match = codeTag?.match(/[A-Z0-9]{6}/);
+    expect(match).toBeTruthy();
+    const roomCode = match![0];
 
-    // Join from second page
-    await page.goto(`${FRONTEND_URL}/game/${roomCode}`);
-    await expect(page.locator('.game-view-root')).toBeVisible({ timeout: 10000 });
+    // Join from second page via the invite route
+    await enterLobby(page, `${FRONTEND_URL}/join/${roomCode}`);
+    await expect(page.locator('.game-view-container')).toBeVisible({ timeout: 10000 });
   });
 });

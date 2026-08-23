@@ -57,3 +57,6 @@ src/main/resources/static/*
 dump.rdb
 *.sql
 *.sqlite
+# Playwright artifacts
+frontend/playwright-report/
+frontend/test-results/

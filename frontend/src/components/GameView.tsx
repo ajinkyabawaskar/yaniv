@@ -163,6 +163,9 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
           }
 
           const userId = localStorage.getItem('userId');
+          // Expose for e2e tests (Playwright asserts on these handles)
+          (window as any).__GAME_STATE__ = gameData;
+          (window as any).__CURRENT_USER_ID__ = userId;
           setIsPlayerTurn(gameData.currentTurnPlayerId === userId);
           setGameStarted(gameData.currentState !== 'LOBBY' && gameData.currentState !== 'ROUND_OVER');
           setLoading(false);

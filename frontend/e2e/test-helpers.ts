@@ -1,8 +1,35 @@
-import { Page, BrowserContext } from '@playwright/test';
+import { Page, BrowserContext, expect } from '@playwright/test';
 
 /**
  * Test helpers for Yaniv E2E tests
  */
+
+/**
+ * Navigate to the app and land in the lobby.
+ * Handles first-visit registration (display-name form) as well as
+ * returning visitors who auto-resolve via their stored displayName.
+ */
+export async function enterLobby(page: Page, url?: string): Promise<void> {
+  await page.goto(url || FRONTEND_URL);
+
+  const lobby = page.locator('.lobby-view-root');
+  const authInput = page.locator('#displayName');
+
+  // Either we land straight in the lobby (returning visitor),
+  // or the AuthView asks for a display name on first visit.
+  const target = Promise.race([
+    lobby.waitFor({ state: 'visible', timeout: 15000 }).then(() => 'lobby' as const),
+    authInput.waitFor({ state: 'visible', timeout: 15000 }).then(() => 'auth' as const),
+  ]);
+  const where = await target;
+
+  if (where === 'auth') {
+    const uniqueName = `PW_${Math.random().toString(36).slice(2, 10)}`;
+    await authInput.fill(uniqueName);
+    await page.click('.auth-submit-btn');
+    await expect(lobby).toBeVisible({ timeout: 15000 });
+  }
+}
 
 /**
  * Wait for WebSocket connection to be established
