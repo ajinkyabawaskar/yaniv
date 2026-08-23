@@ -86,7 +86,8 @@ class GameLifecycleScenariosTest {
         when(userService.getUserById(OTHER)).thenReturn(Optional.of(new User("f2", "Other", "BBBBBB")));
 
         controller = new GameStateController(gameService, presenceService, userService,
-                messagingTemplate, 1 /* turn timer seconds */, true /* auto-play */);
+                messagingTemplate, 1 /* turn timer seconds */, true /* auto-play */,
+                1 /* yaniv contest window */);
     }
 
     @AfterEach
@@ -394,7 +395,7 @@ class GameLifecycleScenariosTest {
         snapshotStore.put(ROOM, engine.toSnapshot()); // keep snapshot coherent
 
         boolean finished = waitFor(() -> !enginesMap().containsKey(ROOM)
-                && snapshotStore.get(ROOM) == null, 50_000);
+                && snapshotStore.get(ROOM) == null, 20_000);
         assertTrue(finished, "auto-play chain should drive the all-disconnected game to GAME_OVER");
 
         verify(gameService).finishGame(eq(ROOM), anyString());
@@ -653,8 +654,8 @@ class GameLifecycleScenariosTest {
 
         controller.callYaniv(ROOM, new GameStateController.YanivCallMessage(), auth(caller));
 
-        boolean resolved = waitFor(() -> engineFromSnapshot().isRoundOver(), 20_000);
-        assertTrue(resolved, "15s contest window should auto-resolve to ROUND_OVER");
+        boolean resolved = waitFor(() -> engineFromSnapshot().isRoundOver(), 6_000);
+        assertTrue(resolved, "contest window should auto-resolve to ROUND_OVER");
     }
 
     @Test
@@ -678,7 +679,7 @@ class GameLifecycleScenariosTest {
                 && Boolean.TRUE.equals(isYanivCalledSafe()), 8000);
         assertTrue(called, "bot should call yaniv with a low hand");
 
-        boolean resolved = waitFor(() -> engineFromSnapshot() != null && engineFromSnapshot().isRoundOver(), 20_000);
+        boolean resolved = waitFor(() -> engineFromSnapshot() != null && engineFromSnapshot().isRoundOver(), 6_000);
         assertTrue(resolved, "contest window must be scheduled even for an auto-played caller");
     }
 

@@ -76,7 +76,8 @@ class GameStateControllerTurnTimerTest {
         when(userService.getUserById(OTHER)).thenReturn(Optional.of(new User("fp-other", "Other", "BBBBBB")));
 
         controller = new GameStateController(gameService, presenceService, userService,
-                messagingTemplate, 1 /* turn timer seconds */, true /* auto-play */);
+                messagingTemplate, 1 /* turn timer seconds */, true /* auto-play */,
+                1 /* yaniv contest window */);
     }
 
     @AfterEach

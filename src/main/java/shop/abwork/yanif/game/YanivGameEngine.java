@@ -39,7 +39,7 @@ public class YanivGameEngine {
     private String asafByUserId; // Who caused the Asaf
     private String winnerId; // Final winner
     private long yanivCalledTimestamp; // When Yaniv was called (epoch ms)
-    private static final int YANIV_CONTEST_TIMER_SECONDS = 15;
+    private int yanivContestTimerSeconds = 15; // Configurable via game.yaniv-contest-timer-seconds
 
     public YanivGameEngine(String gameId, List<String> playerIds, Integer yanivThreshold, Integer targetScore) {
         this.gameId = gameId;
@@ -59,6 +59,8 @@ public class YanivGameEngine {
         this.playerIds = new ArrayList<>(snapshot.playerIds);
         this.yanivThreshold = snapshot.yanivThreshold;
         this.targetScore = snapshot.targetScore;
+        this.yanivContestTimerSeconds =
+                snapshot.yanivContestTimerSeconds > 0 ? snapshot.yanivContestTimerSeconds : 15;
 
         this.playerHands = new HashMap<>();
         for (Map.Entry<String, List<GameSnapshot.CardDto>> entry : snapshot.playerHands.entrySet()) {
@@ -116,6 +118,7 @@ public class YanivGameEngine {
         snapshot.roundNumber = roundNumber;
         snapshot.yanivThreshold = yanivThreshold;
         snapshot.targetScore = targetScore;
+        snapshot.yanivContestTimerSeconds = yanivContestTimerSeconds;
         snapshot.callerId = callerId;
         snapshot.roundScores = roundScores != null ? new HashMap<>(roundScores) : null;
         snapshot.isAsaf = isAsaf;
@@ -311,7 +314,18 @@ public class YanivGameEngine {
      * Get the contest timer duration in seconds.
      */
     public int getYanivContestTimerSeconds() {
-        return YANIV_CONTEST_TIMER_SECONDS;
+        return yanivContestTimerSeconds;
+    }
+
+    /**
+     * Set the contest timer duration (from game.yaniv-contest-timer-seconds).
+     * Applied to newly created engines; restored engines read it from their snapshot.
+     */
+    public void setYanivContestTimerSeconds(int seconds) {
+        if (seconds <= 0) {
+            throw new IllegalArgumentException("Contest timer must be positive");
+        }
+        this.yanivContestTimerSeconds = seconds;
     }
 
     /**

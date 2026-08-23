@@ -42,6 +42,8 @@ public class GameSnapshot {
     public int roundNumber;
     public Integer yanivThreshold;
     public Integer targetScore;
+    /** Absent (0) in older snapshots -> engine falls back to the 15s default. */
+    public int yanivContestTimerSeconds;
     public String callerId;
     public Map<String, Integer> roundScores;
     public boolean isAsaf;

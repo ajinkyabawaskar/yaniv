@@ -54,6 +54,8 @@ public class GameStateController {
     // Turn timer configuration (game.turn-timer-seconds / game.auto-play-enabled)
     private final int turnTimerSeconds;
     private final boolean autoPlayEnabled;
+    // Yaniv contest window (game.yaniv-contest-timer-seconds)
+    private final int yanivContestTimerSeconds;
 
     // Action deduplication: track processed action IDs per player per room
     // Format: roomId:playerId:actionId -> timestamp
@@ -68,13 +70,15 @@ public class GameStateController {
                               UserService userService,
                               SimpMessagingTemplate messagingTemplate,
                               @Value("${game.turn-timer-seconds:45}") int turnTimerSeconds,
-                              @Value("${game.auto-play-enabled:true}") boolean autoPlayEnabled) {
+                              @Value("${game.auto-play-enabled:true}") boolean autoPlayEnabled,
+                              @Value("${game.yaniv-contest-timer-seconds:15}") int yanivContestTimerSeconds) {
         this.gameService = gameService;
         this.presenceService = presenceService;
         this.userService = userService;
         this.messagingTemplate = messagingTemplate;
         this.turnTimerSeconds = turnTimerSeconds;
         this.autoPlayEnabled = autoPlayEnabled;
+        this.yanivContestTimerSeconds = yanivContestTimerSeconds;
     }
 
     /**
@@ -570,6 +574,7 @@ public class GameStateController {
             YanivGameEngine engine = new YanivGameEngine(roomId, (List<String>) playerIds,
                     7,
                     game.getTargetScore() != null ? game.getTargetScore() : 200);
+            engine.setYanivContestTimerSeconds(yanivContestTimerSeconds);
             gameEngines.put(roomId, engine);
 
             for (String playerId : playerIds) {
