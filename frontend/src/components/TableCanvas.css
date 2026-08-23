@@ -213,6 +213,23 @@
   font-size: 14px;
 }
 
+.autoplay-badge {
+  position: absolute;
+  bottom: -6px;
+  right: -6px;
+  font-size: 13px;
+  background: rgba(59, 130, 246, 0.9);
+  border-radius: 50%;
+  padding: 3px;
+  box-shadow: 0 0 8px rgba(59, 130, 246, 0.7);
+  animation: autoplay-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes autoplay-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.15); opacity: 0.8; }
+}
+
 .opponent-meta {
   display: flex;
   flex-direction: column;

@@ -10,6 +10,7 @@ import shop.abwork.yanif.service.PresenceService;
 import shop.abwork.yanif.service.UserService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.event.EventListener;
+import tools.jackson.databind.json.JsonMapper;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -29,6 +30,8 @@ import java.util.concurrent.*;
  */
 @Controller
 public class GameStateController {
+
+    private static final JsonMapper JSON_MAPPER = JsonMapper.builder().build();
 
     private final GameService gameService;
     private final PresenceService presenceService;
@@ -318,30 +321,8 @@ public class GameStateController {
             synchronized (engine) {
                 engine.callYaniv(userId);
 
-                // Persist snapshot and broadcast YANIV_CALLED state to all players
+                // Persist snapshot, schedule the contest timer, broadcast YANIV_CALLED
                 finishMutation(engine, roomId);
-
-                // Schedule auto-resolve after contest timer expires
-                int timerSeconds = engine.getYanivContestTimerSeconds();
-                ScheduledFuture<?> future = scheduler.schedule(() -> {
-                    try {
-                        synchronized (engine) {
-                            if (engine.isYanivCalled()) {
-                                engine.resolveYanivCall();
-                                finishMutation(engine, roomId);
-                                System.out.println("Yaniv contest timer expired, round resolved for room: " + roomId);
-                            }
-                        }
-                    } catch (Exception e) {
-                        System.err.println("Error auto-resolving Yaniv: " + e.getMessage());
-                    }
-                }, timerSeconds, TimeUnit.SECONDS);
-
-                // Cancel any previous timer for this room and store the new one
-                ScheduledFuture<?> oldFuture = yanivTimers.put(roomId, future);
-                if (oldFuture != null) {
-                    oldFuture.cancel(false);
-                }
             }
 
         } catch (Exception e) {
@@ -400,10 +381,17 @@ public class GameStateController {
 
             YanivGameEngine engine = gameEngines.get(roomId);
             if (engine == null) {
+                engine = getOrRestoreEngine(roomId);
+            }
+            if (engine == null) {
                 Game game = gameService.getGameById(roomId);
                 if (game == null) {
                     sendErrorToUser(userId, "Game not found");
                     return;
+                }
+                // Live state lost (e.g. pre-snapshot restart): back to lobby
+                if (game.getStatus() == Game.GameStatus.IN_PROGRESS) {
+                    abortStaleGame(roomId);
                 }
 
                 GameStateMessage lobbyState = new GameStateMessage();
@@ -555,7 +543,7 @@ public class GameStateController {
                     .map(gp -> gp.getId().getUserId())
                     .toList();
             YanivGameEngine engine = new YanivGameEngine(roomId, (List<String>) playerIds,
-                    game.getYanivThreshold() != null ? game.getYanivThreshold() : 7,
+                    7,
                     game.getTargetScore() != null ? game.getTargetScore() : 200);
             gameEngines.put(roomId, engine);
 
@@ -579,6 +567,11 @@ public class GameStateController {
      * During ROUND_OVER: include all player hands revealed.
      */
     private GameStateMessage buildGameStateForPlayers(YanivGameEngine engine, String roomId, String userId) {
+        return buildGameStateForPlayers(engine, roomId, userId, null);
+    }
+
+    private GameStateMessage buildGameStateForPlayers(YanivGameEngine engine, String roomId, String userId,
+                                                      String autoPlayedPlayerId) {
         GameStateMessage message = new GameStateMessage();
         message.gameId = roomId;
         var game = gameService.getGameById(roomId);
@@ -708,6 +701,19 @@ public class GameStateController {
             message.roundScores = engine.getRoundScores();
         }
 
+        // Turn countdown for the active player
+        if (engine.getCurrentState() == YanivGameEngine.GameState.WAIT_FOR_TURN) {
+            Long deadline = turnDeadlines.get(roomId);
+            if (deadline != null) {
+                message.turnTimerSeconds = turnTimerSeconds;
+                message.turnEndsAt = deadline;
+            }
+        }
+
+        if (autoPlayedPlayerId != null) {
+            message.autoPlayedPlayerId = autoPlayedPlayerId;
+        }
+
         return message;
     }
 
@@ -731,9 +737,10 @@ public class GameStateController {
                 return;
             }
 
-            engine.startNextRound();
-
-            broadcastGameState(engine, roomId);
+            synchronized (engine) {
+                engine.startNextRound();
+                finishMutation(engine, roomId);
+            }
 
         } catch (Exception e) {
             System.err.println("Error starting next round: " + e.getMessage());
@@ -747,10 +754,14 @@ public class GameStateController {
      * Each player receives their own hand (masked for others).
      */
     private void broadcastGameState(YanivGameEngine engine, String roomId) {
+        broadcastGameState(engine, roomId, null);
+    }
+
+    private void broadcastGameState(YanivGameEngine engine, String roomId, String autoPlayedPlayerId) {
         var players = gameService.getGamePlayers(roomId);
         for (var player : players) {
             String playerId = player.getId().getUserId();
-            GameStateMessage stateMessage = buildGameStateForPlayers(engine, roomId, playerId);
+            GameStateMessage stateMessage = buildGameStateForPlayers(engine, roomId, playerId, autoPlayedPlayerId);
             messagingTemplate.convertAndSendToUser(
                     playerId,
                     "/queue/game-state",
@@ -828,28 +839,262 @@ public class GameStateController {
     }
 
     /**
-     * Rebuild game engine from database for a room.
-     * Used when game engine was cleaned up from memory but game is still active.
+     * Get the engine for a room from memory, or restore it from the Redis snapshot
+     * written after every mutation. Returns null when no restorable state exists.
      */
-    private YanivGameEngine rebuildGameEngine(String roomId) {
+    private YanivGameEngine getOrRestoreEngine(String roomId) {
+        YanivGameEngine engine = gameEngines.get(roomId);
+        if (engine != null) {
+            return engine;
+        }
+
+        String snapshotJson = null;
+        try {
+            snapshotJson = gameService.getGameState(roomId);
+        } catch (Exception e) {
+            System.err.println("Could not read game snapshot for room " + roomId + ": " + e.getMessage());
+        }
+
+        YanivGameEngine restored = YanivGameEngine.fromSnapshot(snapshotJson);
+        if (restored != null) {
+            gameEngines.put(roomId, restored);
+            scheduleTurnTimerIfNeeded(restored, roomId);
+            System.out.println("Restored game engine for room " + roomId + " from snapshot");
+            return restored;
+        }
+        return null;
+    }
+
+    /**
+     * Return a room whose live state was lost to LOBBY so players can start fresh,
+     * instead of silently re-dealing an in-progress game.
+     */
+    private void abortStaleGame(String roomId) {
         try {
             Game game = gameService.getGameById(roomId);
-            if (game == null || game.getStatus() == Game.GameStatus.LOBBY
-                    || game.getStatus() == Game.GameStatus.FINISHED) {
-                return null;
+            if (game != null && game.getStatus() == Game.GameStatus.IN_PROGRESS) {
+                gameService.updateGameStatus(roomId, Game.GameStatus.LOBBY);
+                System.err.println("Game state lost for room " + roomId + "; returned to lobby");
             }
-
-            var players = gameService.getGamePlayers(roomId);
-            List<String> playerIds = players.stream()
-                    .map(gp -> gp.getId().getUserId())
-                    .toList();
-
-            // Create new engine - note: this won't restore exact game state (hands, discard pile, etc.)
-            // In production, you'd persist full game state to database/Redis
-            return new YanivGameEngine(roomId, (List<String>) playerIds, 7, 200);
         } catch (Exception e) {
-            System.err.println("Error rebuilding game engine for room " + roomId + ": " + e.getMessage());
-            return null;
+            System.err.println("Error aborting stale game " + roomId + ": " + e.getMessage());
+        }
+    }
+
+    /**
+     * Complete a successful engine mutation: persist the snapshot, handle round/game
+     * completion bookkeeping, schedule the next turn timer, and broadcast.
+     *
+     * @param autoPlayedPlayerId non-null when this mutation was performed by auto-play
+     */
+    private void finishMutation(YanivGameEngine engine, String roomId) {
+        finishMutation(engine, roomId, null);
+    }
+
+    private void finishMutation(YanivGameEngine engine, String roomId, String autoPlayedPlayerId) {
+        // Persist snapshot (best-effort: a Redis outage must not fail the action)
+        try {
+            gameService.saveGameState(roomId, engine.toSnapshot());
+        } catch (Exception e) {
+            System.err.println("Failed to persist game snapshot for room " + roomId + ": " + e.getMessage());
+        }
+
+        if (engine.isRoundOver()) {
+            persistRoundHistory(engine, roomId);
+        }
+
+        if (engine.isGameOver()) {
+            cancelTurnTimer(roomId);
+            yanivTimers.computeIfPresent(roomId, (k, f) -> {
+                f.cancel(false);
+                return null;
+            });
+            try {
+                gameService.finishGame(roomId, engine.getWinnerId());
+            } catch (Exception e) {
+                System.err.println("Failed to mark game finished for room " + roomId + ": " + e.getMessage());
+            }
+            try {
+                gameService.deleteGameState(roomId);
+            } catch (Exception e) {
+                System.err.println("Failed to delete game snapshot for room " + roomId + ": " + e.getMessage());
+            }
+            gameEngines.remove(roomId);
+        } else if (engine.isYanivCalled()) {
+            // Contest window: someone must be able to resolve it even if the
+            // caller was auto-played and every human is idle
+            scheduleYanivContestTimer(engine, roomId);
+        } else if (engine.isRoundOver()) {
+            // Show results briefly, then advance automatically so an all-AFK
+            // game can keep flowing; a human "next round" click replaces this timer
+            scheduleRoundOverAdvance(engine, roomId);
+        } else {
+            scheduleTurnTimerIfNeeded(engine, roomId);
+        }
+
+        broadcastGameState(engine, roomId, autoPlayedPlayerId);
+    }
+
+    /**
+     * Schedule auto-resolution of the current Yaniv call when the contest window closes.
+     */
+    private void scheduleYanivContestTimer(YanivGameEngine engine, String roomId) {
+        ScheduledFuture<?> old = yanivTimers.remove(roomId);
+        if (old != null) {
+            old.cancel(false);
+        }
+        int timerSeconds = engine.getYanivContestTimerSeconds();
+        ScheduledFuture<?> future = scheduler.schedule(() -> {
+            try {
+                synchronized (engine) {
+                    if (engine.isYanivCalled()) {
+                        engine.resolveYanivCall();
+                        finishMutation(engine, roomId);
+                        System.out.println("Yaniv contest timer expired, round resolved for room: " + roomId);
+                    }
+                }
+            } catch (Exception e) {
+                System.err.println("Error auto-resolving Yaniv: " + e.getMessage());
+            }
+        }, timerSeconds, TimeUnit.SECONDS);
+        yanivTimers.put(roomId, future);
+    }
+
+    /**
+     * Schedule automatic advancement past the ROUND_OVER results screen.
+     */
+    private void scheduleRoundOverAdvance(YanivGameEngine engine, String roomId) {
+        if (!autoPlayEnabled) {
+            return;
+        }
+        ScheduledFuture<?> old = turnTimers.remove(roomId);
+        if (old != null) {
+            old.cancel(false);
+        }
+        final int expectedRoundNumber = engine.getRoundNumber();
+        long delayMs = turnTimerSeconds * 1000L;
+        ScheduledFuture<?> future = scheduler.schedule(() -> runAutoNextRound(roomId, expectedRoundNumber),
+                delayMs, TimeUnit.MILLISECONDS);
+        turnTimers.put(roomId, future);
+    }
+
+    /**
+     * Auto-advance from ROUND_OVER to the next round.
+     */
+    private void runAutoNextRound(String roomId, int expectedRoundNumber) {
+        YanivGameEngine engine = gameEngines.get(roomId);
+        if (engine == null) {
+            return;
+        }
+        try {
+            synchronized (engine) {
+                if (gameEngines.get(roomId) != engine
+                        || !engine.isRoundOver()
+                        || engine.getRoundNumber() != expectedRoundNumber) {
+                    return; // players advanced already
+                }
+                engine.startNextRound();
+                finishMutation(engine, roomId);
+            }
+            System.out.println("Auto-started round " + engine.getRoundNumber() + " in room " + roomId);
+        } catch (Exception e) {
+            System.err.println("Error auto-starting next round in room " + roomId + ": " + e.getMessage());
+        }
+    }
+
+    /**
+     * Persist one RoundHistory row when a round completes.
+     */
+    private void persistRoundHistory(YanivGameEngine engine, String roomId) {
+        if (engine.getCallerId() == null) {
+            return;
+        }
+        try {
+            gameService.saveRoundHistory(
+                    roomId,
+                    engine.getRoundNumber(),
+                    engine.getCallerId(),
+                    engine.isAsaf(),
+                    engine.getAsafByUserId(),
+                    JSON_MAPPER.writeValueAsString(engine.getRoundScores()));
+        } catch (Exception e) {
+            System.err.println("Failed to save round history for room " + roomId + ": " + e.getMessage());
+        }
+    }
+
+    /**
+     * Schedule auto-play for the current player's turn. Cancels any pending timer first.
+     * Applies to all players; disconnected players simply never act before expiry.
+     */
+    private void scheduleTurnTimerIfNeeded(YanivGameEngine engine, String roomId) {
+        ScheduledFuture<?> old = turnTimers.remove(roomId);
+        if (old != null) {
+            old.cancel(false);
+        }
+        turnDeadlines.remove(roomId);
+
+        if (!autoPlayEnabled || engine.isGameOver() || engine.isRoundOver()
+                || engine.getCurrentState() != YanivGameEngine.GameState.WAIT_FOR_TURN) {
+            return;
+        }
+
+        long delayMs = turnTimerSeconds * 1000L;
+        long deadline = System.currentTimeMillis() + delayMs;
+        turnDeadlines.put(roomId, deadline);
+
+        final String expectedPlayer = engine.getCurrentPlayer();
+        ScheduledFuture<?> future = scheduler.schedule(() -> runAutoPlay(roomId, expectedPlayer),
+                delayMs, TimeUnit.MILLISECONDS);
+        turnTimers.put(roomId, future);
+    }
+
+    private void cancelTurnTimer(String roomId) {
+        ScheduledFuture<?> old = turnTimers.remove(roomId);
+        if (old != null) {
+            old.cancel(false);
+        }
+        turnDeadlines.remove(roomId);
+    }
+
+    /**
+     * Auto-play the current turn on behalf of a player whose timer expired.
+     * Re-validates under the engine lock so a human action racing the timer wins safely.
+     */
+    private void runAutoPlay(String roomId, String expectedPlayer) {
+        YanivGameEngine engine = gameEngines.get(roomId);
+        if (engine == null) {
+            return;
+        }
+        try {
+            synchronized (engine) {
+                if (gameEngines.get(roomId) != engine
+                        || engine.getCurrentState() != YanivGameEngine.GameState.WAIT_FOR_TURN
+                        || !expectedPlayer.equals(engine.getCurrentPlayer())) {
+                    return; // human acted first, or game moved on
+                }
+
+                AutoPlayStrategy.Decision decision = AutoPlayStrategy.decide(
+                        engine.getPlayerHand(expectedPlayer), engine.getDiscardPile(), engine.getYanivThreshold());
+
+                if (decision.type() == AutoPlayStrategy.ActionType.CALL_YANIV) {
+                    engine.callYaniv(expectedPlayer);
+                } else {
+                    engine.processDiscard(expectedPlayer, decision.discardCards());
+                    Card drawnCard = null;
+                    if ("DISCARD_PILE".equals(decision.drawSource())) {
+                        drawnCard = engine.getDiscardPile().getDrawableCard(decision.drawnCardId()).orElse(null);
+                        if (drawnCard == null) {
+                            throw new IllegalStateException("Auto-play picked undrawable card: " + decision.drawnCardId());
+                        }
+                    }
+                    engine.processDraw(expectedPlayer, decision.drawSource(), drawnCard);
+                }
+
+                System.out.println("Auto-played turn for player " + expectedPlayer + " in room " + roomId);
+                finishMutation(engine, roomId, expectedPlayer);
+            }
+        } catch (Exception e) {
+            System.err.println("Error auto-playing turn in room " + roomId + ": " + e.getMessage());
         }
     }
 
@@ -945,5 +1190,10 @@ public class GameStateController {
         // Player reconnection status
         public String playerDisconnected;
         public boolean playerDisconnectedStatus;
+
+        // Turn timer / auto-play
+        public int turnTimerSeconds;          // Total allowed seconds per turn
+        public long turnEndsAt;               // Server epoch ms when the current turn expires
+        public String autoPlayedPlayerId;     // Set when this state change was played by auto-play
     }
 }

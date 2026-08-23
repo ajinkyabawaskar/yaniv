@@ -50,6 +50,10 @@ interface TableCanvasProps {
   allPlayerHands?: Record<string, Card[]>;
   // Current user ID for Yaniv contest UI
   currentUserId?: string | null;
+  // Server-driven turn timer / auto-play
+  turnEndsAt?: number | null;
+  turnTimerTotalSeconds?: number;
+  autoPlayedPlayerId?: string | null;
 }
 
 export const getCardImagePath = (rank: string, suit: string): string => {
@@ -225,6 +229,10 @@ export default function TableCanvas({
   allPlayerHands = {},
   // Current user ID for Yaniv contest UI
   currentUserId = null,
+  // Server-driven turn timer / auto-play
+  turnEndsAt = null,
+  turnTimerTotalSeconds = 45,
+  autoPlayedPlayerId = null,
 }: TableCanvasProps) {
   const [selectedCards, setSelectedCards] = useState<string[]>([]);
   const [statusFeedback, setStatusFeedback] = useState<string | null>(null);
@@ -286,28 +294,28 @@ export default function TableCanvas({
     }
   }, [isAsaf]);
 
+  // Turn timer driven by the server's authoritative deadline. The server
+  // performs auto-play on expiry - the client only displays and ticks.
   useEffect(() => {
-    setTurnTimerSeconds(30);
-    const interval = setInterval(() => {
-      setTurnTimerSeconds((prev) => {
-        if (prev <= 1) {
-          // Auto-play: discard first card and draw from deck when timer expires
-          if (isPlayerTurn && hand.length > 0) {
-            const autoDiscard = [hand[0].id];
-            soundEngine.playTimerTick(true);
-            onDiscard(autoDiscard, 'DECK');
-          }
-          return 0;
-        }
-        if (prev <= 6 && prev > 1) {
-          soundEngine.playTimerTick(prev <= 3);
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
+    const total = turnTimerTotalSeconds || 45;
+    if (!turnEndsAt) {
+      setTurnTimerSeconds(total);
+      return;
+    }
+    const updateTimer = () => {
+      setTurnTimerSeconds(Math.max(0, Math.ceil((turnEndsAt - Date.now()) / 1000)));
+    };
+    updateTimer();
+    const interval = setInterval(updateTimer, 250);
     return () => clearInterval(interval);
-  }, [currentTurnPlayerId, isPlayerTurn, hand, onDiscard]);
+  }, [turnEndsAt, turnTimerTotalSeconds]);
+
+  // Final-seconds tick sounds on your own turn
+  useEffect(() => {
+    if (isPlayerTurn && turnEndsAt && turnTimerSeconds > 0 && turnTimerSeconds <= 5) {
+      soundEngine.playTimerTick(turnTimerSeconds <= 2);
+    }
+  }, [turnTimerSeconds, isPlayerTurn, turnEndsAt]);
 
   useEffect(() => {
     if (!isPlayerTurn) {
@@ -662,9 +670,10 @@ export default function TableCanvas({
           {opponents.map((opponent, idx) => {
             const isTurn = opponent.isCurrentTurn;
             const isCurrentPlayer = opponent.isCurrentPlayer;
-            const timerProgress = isTurn ? Math.max(0, turnTimerSeconds / 30) : 1;
+            const timerProgress = isTurn ? Math.max(0, turnTimerSeconds / (turnTimerTotalSeconds || 45)) : 1;
             const isUrgentTimer = isTurn && turnTimerSeconds <= 5;
             const isDisconnected = opponent.isDisconnected;
+            const isAutoPlayed = autoPlayedPlayerId != null && autoPlayedPlayerId === opponent.userId;
 
             // Display name: "You" for current player, actual name for others
             const displayName = isCurrentPlayer ? 'You' : opponent.displayName;
@@ -702,6 +711,11 @@ export default function TableCanvas({
                     {isDisconnected && <span className="disconnected-indicator" title="Disconnected">⚡</span>}
                   </div>
                   {opponent.isHost && <span className="host-badge" title="Host">👑</span>}
+                  {isAutoPlayed && (
+                    <span className="autoplay-badge" title="Turn auto-played by server">
+                      🤖
+                    </span>
+                  )}
                 </div>
 
                 <div className="opponent-meta">

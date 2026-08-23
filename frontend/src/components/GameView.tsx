@@ -26,6 +26,7 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
   const [isMobile, setIsMobile] = useState(false);
   const [showScoreboard, setShowScoreboard] = useState(false);
   const [yanivContestTimerRemaining, setYanivContestTimerRemaining] = useState<number>(0);
+  const [autoPlayNotice, setAutoPlayNotice] = useState<string | null>(null);
 
   const currentUserId = localStorage.getItem('userId') || '';
 
@@ -132,7 +133,17 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
             yanivCalledAt: gameData.yanivCalledAt || null,
             yanivContestTimerSeconds: gameData.yanivContestTimerSeconds || 15,
             allPlayerHands: gameData.allPlayerHands || {},
+            // Turn timer / auto-play fields
+            turnEndsAt: gameData.turnEndsAt || null,
+            turnTimerSeconds: gameData.turnTimerSeconds || 45,
+            autoPlayedPlayerId: gameData.autoPlayedPlayerId || null,
           });
+
+          if (gameData.autoPlayedPlayerId) {
+            const name = (gameData.playerNames || {})[gameData.autoPlayedPlayerId];
+            setAutoPlayNotice(`${name || 'A player'} was auto-played (turn timer expired)`);
+            setTimeout(() => setAutoPlayNotice(null), 4000);
+          }
 
           const userId = localStorage.getItem('userId');
           setIsPlayerTurn(gameData.currentTurnPlayerId === userId);
@@ -264,6 +275,11 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
               ⏱️ {yanivContestTimerRemaining}s
             </span>
           )}
+          {autoPlayNotice && (
+            <span className="autoplay-notice-badge">
+              🤖 {autoPlayNotice}
+            </span>
+          )}
         </div>
 
         <div className="header-actions">
@@ -373,6 +389,9 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
               allPlayerHands={gameState.allPlayerHands}
               serverError={serverError}
               currentUserId={currentUserId}
+              turnEndsAt={gameState.turnEndsAt}
+              turnTimerTotalSeconds={gameState.turnTimerSeconds}
+              autoPlayedPlayerId={gameState.autoPlayedPlayerId}
             />
           </div>
 

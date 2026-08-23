@@ -45,6 +45,11 @@ export interface GameState {
   yanivContestTimerSeconds: number; // Total allowed seconds (e.g., 15)
   allPlayerHands: Record<string, GameCard[]>; // Revealed hands on ROUND_OVER
 
+  // Turn timer / auto-play fields
+  turnEndsAt: number | null; // Server epoch ms when current turn expires
+  turnTimerSeconds: number; // Total allowed seconds per turn
+  autoPlayedPlayerId: string | null; // Player whose last move was auto-played
+
   // Disconnected players tracking for reconnection UI
   disconnectedPlayers: Set<string>; // userIds of disconnected players
 
@@ -89,6 +94,11 @@ export const useGameStore = create<GameState>((set) => ({
   yanivCalledAt: null,
   yanivContestTimerSeconds: 15,
   allPlayerHands: {},
+
+  // Turn timer / auto-play initial values
+  turnEndsAt: null,
+  turnTimerSeconds: 45,
+  autoPlayedPlayerId: null,
 
   // Disconnected players
   disconnectedPlayers: new Set(),
@@ -145,6 +155,9 @@ export const useGameStore = create<GameState>((set) => ({
       yanivCalledAt: null,
       yanivContestTimerSeconds: 15,
       allPlayerHands: {},
+      turnEndsAt: null,
+      turnTimerSeconds: 45,
+      autoPlayedPlayerId: null,
       disconnectedPlayers: new Set(),
     }),
 }));

@@ -21,7 +21,7 @@ This document describes the complete automated testing suite for the Yaniv card 
 
 ```bash
 # From project root
-cd /Users/ajinkya/repos/yanif/.claude/worktrees/auto-test-implementation
+cd /Users/ajinkya/repos/yanif
 
 # Run specific integration test
 mvn test -Dtest=FullGameFlowIntegrationTest
@@ -43,7 +43,7 @@ BUILD SUCCESS
 #### 1. Start Backend (Terminal 1)
 
 ```bash
-cd /Users/ajinkya/repos/yanif/.claude/worktrees/auto-test-implementation
+cd /Users/ajinkya/repos/yanif
 
 # Requires MySQL on localhost:3306 (database: yanif) and Redis on localhost:6379
 mvn spring-boot:run
@@ -56,7 +56,7 @@ curl http://localhost:8080/actuator/health
 #### 2. Start Frontend (Terminal 2)
 
 ```bash
-cd /Users/ajinkya/repos/yanif/.claude/worktrees/auto-test-implementation/frontend
+cd /Users/ajinkya/repos/yanif/frontend
 
 # Install dependencies (first time only)
 npm install
@@ -71,7 +71,7 @@ curl http://localhost:3000
 #### 3. Run Playwright Tests (Terminal 3)
 
 ```bash
-cd /Users/ajinkya/repos/yanif/.claude/worktrees/auto-test-implementation/frontend
+cd /Users/ajinkya/repos/yanif/frontend
 
 # Headless (CI mode)
 npm run test:e2e
@@ -88,7 +88,7 @@ npm run test:e2e:ui
 ## Complete Test Suite (All-in-One Script)
 
 ```bash
-cd /Users/ajinkya/repos/yanif/.claude/worktrees/auto-test-implementation
+cd /Users/ajinkya/repos/yanif
 
 # Makes script executable (first time)
 chmod +x scripts/run-all-tests.sh
@@ -103,7 +103,7 @@ chmod +x scripts/run-all-tests.sh
 
 ```
 yanif/
-├── .claude/worktrees/auto-test-implementation/
+├── (project root)/
 │   ├── src/test/java/shop/abwork/yanif/integration/
 │   │   └── FullGameFlowIntegrationTest.java    # Backend integration tests
 │   ├── frontend/
