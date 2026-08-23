@@ -44,6 +44,10 @@ export const useAuthStore = create<AuthState>((set) => ({
     localStorage.removeItem('jwtToken');
     localStorage.removeItem('userId');
     localStorage.removeItem('user');
+    // Also drop the stored display name: AuthView auto-resolves via device
+    // fingerprint whenever it finds one, which would instantly log the user
+    // back in after an explicit logout.
+    localStorage.removeItem('displayName');
     set({
       user: null,
       jwtToken: null,
