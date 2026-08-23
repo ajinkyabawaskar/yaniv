@@ -1,12 +1,14 @@
 package shop.abwork.yanif.websocket;
 
 import shop.abwork.yanif.entity.Game;
+import shop.abwork.yanif.game.AutoPlayStrategy;
 import shop.abwork.yanif.game.YanivGameEngine;
 import shop.abwork.yanif.game.model.Card;
 import shop.abwork.yanif.game.model.Hand;
 import shop.abwork.yanif.service.GameService;
 import shop.abwork.yanif.service.PresenceService;
 import shop.abwork.yanif.service.UserService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.event.EventListener;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.MessageMapping;
@@ -33,12 +35,22 @@ public class GameStateController {
     private final UserService userService;
     private final SimpMessagingTemplate messagingTemplate;
 
-    // In-memory game engines (in production, would use Redis or database)
+    // In-memory game engines (authoritative while the server runs; snapshots
+    // are persisted to Redis after every mutation so restarts can restore)
     private final Map<String, YanivGameEngine> gameEngines = new HashMap<>();
 
-    // Scheduled executor for Yaniv contest timers
+    // Scheduled executor for Yaniv contest timers and turn timers
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2);
     private final Map<String, ScheduledFuture<?>> yanivTimers = new ConcurrentHashMap<>();
+
+    // Turn timers: auto-play for the current player when their timer expires
+    private final Map<String, ScheduledFuture<?>> turnTimers = new ConcurrentHashMap<>();
+    // roomId -> epoch ms when the current player's timer expires (for client display)
+    private final Map<String, Long> turnDeadlines = new ConcurrentHashMap<>();
+
+    // Turn timer configuration (game.turn-timer-seconds / game.auto-play-enabled)
+    private final int turnTimerSeconds;
+    private final boolean autoPlayEnabled;
 
     // Action deduplication: track processed action IDs per player per room
     // Format: roomId:playerId:actionId -> timestamp
@@ -51,17 +63,21 @@ public class GameStateController {
     public GameStateController(GameService gameService,
                               PresenceService presenceService,
                               UserService userService,
-                              SimpMessagingTemplate messagingTemplate) {
+                              SimpMessagingTemplate messagingTemplate,
+                              @Value("${game.turn-timer-seconds:45}") int turnTimerSeconds,
+                              @Value("${game.auto-play-enabled:true}") boolean autoPlayEnabled) {
         this.gameService = gameService;
         this.presenceService = presenceService;
         this.userService = userService;
         this.messagingTemplate = messagingTemplate;
+        this.turnTimerSeconds = turnTimerSeconds;
+        this.autoPlayEnabled = autoPlayEnabled;
     }
 
     /**
      * Handle WebSocket session disconnect.
      * If player is in an active game, mark them as disconnected but keep game state.
-     * Pause turn timer for that player.
+     * Their turn timer keeps running; auto-play takes over when it expires.
      */
     @EventListener
     public void handleSessionDisconnect(SessionDisconnectEvent event) {
@@ -127,17 +143,15 @@ public class GameStateController {
             }
         }
 
-        // Check if there's an active game engine for this room
-        YanivGameEngine engine = gameEngines.get(roomId);
+        // Check if there's an active game engine for this room (memory or Redis snapshot)
+        YanivGameEngine engine = getOrRestoreEngine(roomId);
         if (engine == null) {
-            // Game engine not in memory - try to rebuild from database
-            engine = rebuildGameEngine(roomId);
-            if (engine == null) {
-                // No active game found
-                presenceService.setUserOnline(userId);
-                return;
-            }
-            gameEngines.put(roomId, engine);
+            // No restorable game - if the DB still says IN_PROGRESS the state is lost
+            // (e.g. pre-snapshot server restart): return the room to the lobby.
+            abortStaleGame(roomId);
+            presenceService.setUserOnline(userId);
+            broadcastLobbyState(roomId);
+            return;
         }
 
         // Check if this player was previously disconnected in this game
@@ -211,68 +225,66 @@ public class GameStateController {
                 processedActions.entrySet().removeIf(e -> e.getValue() < cutoff);
             }
 
-            // Get or create game engine
-            YanivGameEngine engine = gameEngines.computeIfAbsent(roomId, k -> {
-                var game = gameService.getGameById(roomId);
-                if (game == null) {
-                    throw new RuntimeException("Game not found: " + roomId);
-                }
-                var players = gameService.getGamePlayers(roomId).stream()
-                        .map(gp -> gp.getId().getUserId())
-                        .toList();
-                return new YanivGameEngine(roomId, (List<String>) players, 7, 200);
-            });
-
-            // Check if it's this player's turn
-            if (!userId.equals(engine.getCurrentPlayer()) && !"CALL_YANIV".equals(action.actionType)) {
-                sendErrorToUser(userId, "Not your turn");
+            // Get or restore game engine (never silently re-deal a lost game)
+            YanivGameEngine engine = getOrRestoreEngine(roomId);
+            if (engine == null) {
+                abortStaleGame(roomId);
+                sendErrorToUser(userId, "Game not found");
                 return;
             }
 
-            // Process action
-            switch (action.actionType) {
-                case "DISCARD_AND_DRAW" -> {
-                    Hand playerHand = engine.getPlayerHand(userId);
-                    if (playerHand == null) {
-                        sendErrorToUser(userId, "Player hand not found");
-                        return;
-                    }
+            synchronized (engine) {
+                // Check if it's this player's turn
+                if (!userId.equals(engine.getCurrentPlayer()) && !"CALL_YANIV".equals(action.actionType)) {
+                    sendErrorToUser(userId, "Not your turn");
+                    return;
+                }
 
-                    List<Card> discardedCards = action.discardedCardIds.stream()
-                            .map(id -> playerHand.getCardById(id).orElse(null))
-                            .filter(Objects::nonNull)
-                            .toList();
-
-                    if (discardedCards.size() != action.discardedCardIds.size()) {
-                        sendErrorToUser(userId, "Some discarded cards not found in hand");
-                        return;
-                    }
-
-                    engine.processDiscard(userId, discardedCards);
-
-                    Card drawnCard;
-                    if ("DECK".equalsIgnoreCase(action.drawSource)) {
-                        drawnCard = null;
-                    } else if ("DISCARD_PILE".equalsIgnoreCase(action.drawSource)) {
-                        drawnCard = engine.getDiscardPile().getDrawableCard(action.drawnCardId).orElse(null);
-                        if (drawnCard == null) {
-                            sendErrorToUser(userId, "Card not drawable from discard pile: " + action.drawnCardId);
+                // Process action
+                switch (action.actionType) {
+                    case "DISCARD_AND_DRAW" -> {
+                        Hand playerHand = engine.getPlayerHand(userId);
+                        if (playerHand == null) {
+                            sendErrorToUser(userId, "Player hand not found");
                             return;
                         }
-                    } else {
-                        sendErrorToUser(userId, "Invalid draw source: " + action.drawSource);
-                        return;
+
+                        List<Card> discardedCards = action.discardedCardIds.stream()
+                                .map(id -> playerHand.getCardById(id).orElse(null))
+                                .filter(Objects::nonNull)
+                                .toList();
+
+                        if (discardedCards.size() != action.discardedCardIds.size()) {
+                            sendErrorToUser(userId, "Some discarded cards not found in hand");
+                            return;
+                        }
+
+                        engine.processDiscard(userId, discardedCards);
+
+                        Card drawnCard;
+                        if ("DECK".equalsIgnoreCase(action.drawSource)) {
+                            drawnCard = null;
+                        } else if ("DISCARD_PILE".equalsIgnoreCase(action.drawSource)) {
+                            drawnCard = engine.getDiscardPile().getDrawableCard(action.drawnCardId).orElse(null);
+                            if (drawnCard == null) {
+                                sendErrorToUser(userId, "Card not drawable from discard pile: " + action.drawnCardId);
+                                return;
+                            }
+                        } else {
+                            sendErrorToUser(userId, "Invalid draw source: " + action.drawSource);
+                            return;
+                        }
+
+                        engine.processDraw(userId, action.drawSource, drawnCard);
                     }
+                    case "CALL_YANIV" -> {
+                        engine.callYaniv(userId);
+                    }
+                }
 
-                    engine.processDraw(userId, action.drawSource, drawnCard);
-                }
-                case "CALL_YANIV" -> {
-                    engine.callYaniv(userId);
-                }
+                // Persist snapshot and broadcast game state to all players
+                finishMutation(engine, roomId);
             }
-
-            // Broadcast game state to all players
-            broadcastGameState(engine, roomId);
             System.out.println("Game action processed, state broadcasted");
 
         } catch (Exception e) {
@@ -295,35 +307,41 @@ public class GameStateController {
 
             YanivGameEngine engine = gameEngines.get(roomId);
             if (engine == null) {
+                engine = getOrRestoreEngine(roomId);
+            }
+            if (engine == null) {
+                abortStaleGame(roomId);
                 sendErrorToUser(userId, "Game not found");
                 return;
             }
 
-            engine.callYaniv(userId);
+            synchronized (engine) {
+                engine.callYaniv(userId);
 
-            // Broadcast YANIV_CALLED state to all players
-            broadcastGameState(engine, roomId);
+                // Persist snapshot and broadcast YANIV_CALLED state to all players
+                finishMutation(engine, roomId);
 
-            // Schedule auto-resolve after contest timer expires
-            int timerSeconds = engine.getYanivContestTimerSeconds();
-            ScheduledFuture<?> future = scheduler.schedule(() -> {
-                try {
-                    synchronized (engine) {
-                        if (engine.isYanivCalled()) {
-                            engine.resolveYanivCall();
-                            broadcastGameState(engine, roomId);
-                            System.out.println("Yaniv contest timer expired, round resolved for room: " + roomId);
+                // Schedule auto-resolve after contest timer expires
+                int timerSeconds = engine.getYanivContestTimerSeconds();
+                ScheduledFuture<?> future = scheduler.schedule(() -> {
+                    try {
+                        synchronized (engine) {
+                            if (engine.isYanivCalled()) {
+                                engine.resolveYanivCall();
+                                finishMutation(engine, roomId);
+                                System.out.println("Yaniv contest timer expired, round resolved for room: " + roomId);
+                            }
                         }
+                    } catch (Exception e) {
+                        System.err.println("Error auto-resolving Yaniv: " + e.getMessage());
                     }
-                } catch (Exception e) {
-                    System.err.println("Error auto-resolving Yaniv: " + e.getMessage());
-                }
-            }, timerSeconds, TimeUnit.SECONDS);
+                }, timerSeconds, TimeUnit.SECONDS);
 
-            // Cancel any previous timer for this room and store the new one
-            ScheduledFuture<?> oldFuture = yanivTimers.put(roomId, future);
-            if (oldFuture != null) {
-                oldFuture.cancel(false);
+                // Cancel any previous timer for this room and store the new one
+                ScheduledFuture<?> oldFuture = yanivTimers.put(roomId, future);
+                if (oldFuture != null) {
+                    oldFuture.cancel(false);
+                }
             }
 
         } catch (Exception e) {
@@ -344,22 +362,26 @@ public class GameStateController {
 
             YanivGameEngine engine = gameEngines.get(roomId);
             if (engine == null) {
+                engine = getOrRestoreEngine(roomId);
+            }
+            if (engine == null) {
+                abortStaleGame(roomId);
                 sendErrorToUser(userId, "Game not found");
                 return;
             }
 
             synchronized (engine) {
                 engine.contestYaniv(userId);
-            }
 
-            // Cancel the scheduled auto-resolve timer
-            ScheduledFuture<?> future = yanivTimers.remove(roomId);
-            if (future != null) {
-                future.cancel(false);
-            }
+                // Cancel the scheduled auto-resolve timer
+                ScheduledFuture<?> future = yanivTimers.remove(roomId);
+                if (future != null) {
+                    future.cancel(false);
+                }
 
-            // Broadcast resolved state to all players
-            broadcastGameState(engine, roomId);
+                // Persist snapshot and broadcast resolved state to all players
+                finishMutation(engine, roomId);
+            }
             System.out.println("Yaniv contested by " + userId + " in room " + roomId);
 
         } catch (Exception e) {
@@ -532,14 +554,17 @@ public class GameStateController {
             List<String> playerIds = players.stream()
                     .map(gp -> gp.getId().getUserId())
                     .toList();
-            YanivGameEngine engine = new YanivGameEngine(roomId, (List<String>) playerIds, 7, 200);
+            YanivGameEngine engine = new YanivGameEngine(roomId, (List<String>) playerIds,
+                    game.getYanivThreshold() != null ? game.getYanivThreshold() : 7,
+                    game.getTargetScore() != null ? game.getTargetScore() : 200);
             gameEngines.put(roomId, engine);
 
             for (String playerId : playerIds) {
                 presenceService.setUserInGame(playerId);
             }
 
-            broadcastGameState(engine, roomId);
+            // Persist initial snapshot, schedule first turn timer, broadcast
+            finishMutation(engine, roomId);
 
         } catch (Exception e) {
             System.err.println("Error starting game: " + e.getMessage());

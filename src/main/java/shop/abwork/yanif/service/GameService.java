@@ -201,6 +201,26 @@ public class GameService {
     }
 
     /**
+     * Delete persisted game state (called when a game finishes or is aborted).
+     *
+     * @param gameId Game ID
+     */
+    public void deleteGameState(String gameId) {
+        redisTemplate.delete(getGameStateKey(gameId));
+    }
+
+    /**
+     * Persist one completed round to history.
+     *
+     * @param roundScoresJson JSON map of playerId -> round score
+     */
+    public void saveRoundHistory(String gameId, Integer roundNumber, String callerId,
+                                 Boolean isAsaf, String asafByUserId, String roundScoresJson) {
+        roundHistoryRepository.save(
+                new RoundHistory(gameId, roundNumber, callerId, isAsaf, asafByUserId, roundScoresJson));
+    }
+
+    /**
      * Get Redis key for game state.
      *
      * @param gameId Game ID

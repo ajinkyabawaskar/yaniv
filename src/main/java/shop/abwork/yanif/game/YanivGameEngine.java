@@ -51,6 +51,91 @@ public class YanivGameEngine {
     }
 
     /**
+     * Restore an engine from a snapshot (no re-deal).
+     * Used to survive server restarts; see {@link #toSnapshot()}.
+     */
+    private YanivGameEngine(GameSnapshot snapshot) {
+        this.gameId = snapshot.gameId;
+        this.playerIds = new ArrayList<>(snapshot.playerIds);
+        this.yanivThreshold = snapshot.yanivThreshold;
+        this.targetScore = snapshot.targetScore;
+
+        this.playerHands = new HashMap<>();
+        for (Map.Entry<String, List<GameSnapshot.CardDto>> entry : snapshot.playerHands.entrySet()) {
+            this.playerHands.put(entry.getKey(), new Hand(GameSnapshot.toCards(entry.getValue())));
+        }
+        this.playerScores = new HashMap<>(snapshot.playerScores);
+        this.eliminatedPlayers = new HashSet<>(snapshot.eliminatedPlayers);
+        this.deck = new Deck(GameSnapshot.toCards(snapshot.deckRemaining));
+        this.discardPile = new DiscardPile();
+        if (snapshot.discardCombinations != null) {
+            for (GameSnapshot.DiscardCombinationDto dto : snapshot.discardCombinations) {
+                this.discardPile.addCombination(
+                        GameSnapshot.toCards(dto.cards),
+                        DiscardCombination.Type.valueOf(dto.type),
+                        dto.handSizeAtDiscard);
+            }
+        }
+        this.pendingDiscard = new ArrayList<>(GameSnapshot.toCards(snapshot.pendingDiscard));
+        this.pendingDiscardHandSize = snapshot.pendingDiscardHandSize;
+        this.currentState = GameState.valueOf(snapshot.currentState);
+        this.currentPlayerIndex = snapshot.currentPlayerIndex;
+        this.roundNumber = snapshot.roundNumber;
+        this.callerId = snapshot.callerId;
+        this.roundScores = snapshot.roundScores != null ? new HashMap<>(snapshot.roundScores) : null;
+        this.isAsaf = snapshot.isAsaf;
+        this.asafByUserId = snapshot.asafByUserId;
+        this.winnerId = snapshot.winnerId;
+        this.yanivCalledTimestamp = snapshot.yanivCalledTimestamp;
+    }
+
+    /**
+     * Serialize the complete engine state to JSON for persistence.
+     */
+    public String toSnapshot() {
+        GameSnapshot snapshot = new GameSnapshot();
+        snapshot.gameId = gameId;
+        snapshot.playerIds = new ArrayList<>(playerIds);
+        snapshot.playerHands = GameSnapshot.ofHands(playerHands);
+        snapshot.playerScores = new HashMap<>(playerScores);
+        snapshot.eliminatedPlayers = new HashSet<>(eliminatedPlayers);
+        snapshot.deckRemaining = GameSnapshot.ofCards(deck.getRemainingCards());
+        snapshot.discardCombinations = new ArrayList<>();
+        // Rebuild combinations from the pile via its public API
+        for (DiscardCombination combo : discardPile.getCombinations()) {
+            GameSnapshot.DiscardCombinationDto dto = new GameSnapshot.DiscardCombinationDto();
+            dto.cards = GameSnapshot.ofCards(combo.getCards());
+            dto.type = combo.getType().name();
+            dto.handSizeAtDiscard = combo.getHandSizeAtDiscard();
+            snapshot.discardCombinations.add(dto);
+        }
+        snapshot.pendingDiscard = GameSnapshot.ofCards(pendingDiscard);
+        snapshot.pendingDiscardHandSize = pendingDiscardHandSize;
+        snapshot.currentState = currentState.name();
+        snapshot.currentPlayerIndex = currentPlayerIndex;
+        snapshot.roundNumber = roundNumber;
+        snapshot.yanivThreshold = yanivThreshold;
+        snapshot.targetScore = targetScore;
+        snapshot.callerId = callerId;
+        snapshot.roundScores = roundScores != null ? new HashMap<>(roundScores) : null;
+        snapshot.isAsaf = isAsaf;
+        snapshot.asafByUserId = asafByUserId;
+        snapshot.winnerId = winnerId;
+        snapshot.yanivCalledTimestamp = yanivCalledTimestamp;
+        return snapshot.toJson();
+    }
+
+    /**
+     * Restore an engine from a JSON snapshot.
+     *
+     * @return engine, or null if the snapshot is missing/corrupt/from a different schema version
+     */
+    public static YanivGameEngine fromSnapshot(String json) {
+        GameSnapshot snapshot = GameSnapshot.fromJson(json);
+        return snapshot != null ? new YanivGameEngine(snapshot) : null;
+    }
+
+    /**
      * Initialize the game: shuffle deck, deal hands, set initial state.
      */
     private void initializeGame() {
@@ -227,6 +312,13 @@ public class YanivGameEngine {
      */
     public int getYanivContestTimerSeconds() {
         return YANIV_CONTEST_TIMER_SECONDS;
+    }
+
+    /**
+     * Get the maximum hand score for which calling Yaniv is legal.
+     */
+    public int getYanivThreshold() {
+        return yanivThreshold;
     }
 
     /**

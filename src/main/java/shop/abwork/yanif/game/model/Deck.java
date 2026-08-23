@@ -17,6 +17,15 @@ public class Deck {
     }
 
     /**
+     * Create a deck with a specific remaining card order (no shuffle).
+     * Used to restore a persisted game state; index 0 is the next card drawn.
+     */
+    public Deck(List<Card> remainingCards) {
+        this.cards = new ArrayList<>(remainingCards);
+        this.random = new Random();
+    }
+
+    /**
      * Initialize a standard 52-card deck (no Jokers).
      */
     private void initializeDeck() {
@@ -66,6 +75,14 @@ public class Deck {
      */
     public int getRemainingCount() {
         return cards.size();
+    }
+
+    /**
+     * Get remaining cards in draw order (index 0 is the next card drawn).
+     * Used for state persistence.
+     */
+    public List<Card> getRemainingCards() {
+        return new ArrayList<>(cards);
     }
 
     /**

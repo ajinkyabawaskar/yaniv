@@ -127,6 +127,14 @@ public class DiscardPile {
     }
 
     /**
+     * Get all combinations in discard order (oldest first).
+     * Used for state persistence.
+     */
+    public List<DiscardCombination> getCombinations() {
+        return new ArrayList<>(discards);
+    }
+
+    /**
      * Get all discarded cards (flattened).
      */
     public List<Card> getAllDiscardedCards() {
