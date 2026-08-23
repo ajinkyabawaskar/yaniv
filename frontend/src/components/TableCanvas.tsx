@@ -31,7 +31,6 @@ interface TableCanvasProps {
   deckCount: number;
   opponents?: OpponentInfo[];
   roundNumber?: number;
-  scores?: Record<string, number>;
   onDiscard: (cardIds: string[], drawSource: string, drawnCardId?: string) => void;
   onCallYaniv: () => void;
   onContestYaniv: () => void;
@@ -210,7 +209,6 @@ export default function TableCanvas({
   deckCount,
   opponents = [],
   roundNumber = 1,
-  scores = {},
   onDiscard,
   onCallYaniv,
   onContestYaniv,
@@ -674,6 +672,9 @@ export default function TableCanvas({
             const isUrgentTimer = isTurn && turnTimerSeconds <= 5;
             const isDisconnected = opponent.isDisconnected;
             const isAutoPlayed = autoPlayedPlayerId != null && autoPlayedPlayerId === opponent.userId;
+            // Center the mini card-back stack on the actual count, not a fixed 5-card layout
+            const stackCount = Math.min(opponent.cardCount, 5);
+            const stackCenter = (stackCount - 1) / 2;
 
             // Display name: "You" for current player, actual name for others
             const displayName = isCurrentPlayer ? 'You' : opponent.displayName;
@@ -735,12 +736,12 @@ export default function TableCanvas({
                 </div>
 
                 <div className="opponent-card-stack" title={`${opponent.cardCount} cards in hand`}>
-                  {Array.from({ length: Math.min(opponent.cardCount, 5) }).map((_, cIdx) => (
+                  {Array.from({ length: stackCount }).map((_, cIdx) => (
                     <div
                       key={cIdx}
                       className="mini-card-back"
                       style={{
-                        transform: `translateX(${(cIdx - 2) * 4}px) rotate(${(cIdx - 2) * 6}deg)`,
+                        transform: `translateX(${(cIdx - stackCenter) * 4}px) rotate(${(cIdx - stackCenter) * 6}deg)`,
                       }}
                     />
                   ))}
@@ -860,7 +861,7 @@ export default function TableCanvas({
         {/* 3. Main Player Dock (Bottom Center) */}
         <div className="main-player-dock">
           <div className="player-hud-bar">
-            <div className="hand-total-btn hud-btn outline-only">
+            <div className={`hand-total-btn hud-btn outline-only ${isYanivEligible && isPlayerTurn ? 'ready-yaniv' : ''}`}>
               <span className="score-label">Hand Total:</span>
               <span className="score-digits">{handScore}</span>
             </div>
@@ -924,7 +925,7 @@ export default function TableCanvas({
                       onDragLeave={() => handleHandCardDragLeave(card.id)}
                       onDrop={(e) => handleHandCardDrop(e as any, card.id)}
                       onClick={() => handleCardClick(card)}
-                      whileHover={{ y: isSelected ? -28 : -14, scale: 1.05 }}
+                      whileHover={{ y: isSelected ? -28 : -14, scale: 1.05, zIndex: 60 }}
                     >
                       <img
                         src={getCardImagePath(card.rank, card.suit)}

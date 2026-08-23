@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useStomp } from '../contexts/StompContext';
 import { useGameStore } from '../stores/gameStore';
 import { gameApi } from '../utils/api';
@@ -36,6 +36,23 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
     checkMobile();
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  // Keep --game-header-h in sync with the real header height (it can wrap to
+  // multiple rows on mobile); fixed-position drawer/overlay offset by this.
+  const containerRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const container = containerRef.current;
+    const header = headerRef.current;
+    if (!container || !header) return;
+    const update = () =>
+      container.style.setProperty('--game-header-h', `${header.offsetHeight}px`);
+    update();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(update);
+    observer.observe(header);
+    return () => observer.disconnect();
   }, []);
 
   // Handle visibility change for robust reconnection on mobile
@@ -264,9 +281,9 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
   }
 
   return (
-    <div className="game-view-container">
+    <div className="game-view-container" ref={containerRef}>
       {/* Header Bar */}
-      <div className="game-view-header">
+      <div className="game-view-header" ref={headerRef}>
         <div className="header-left">
           <span className="room-code-tag">ROOM #{roomCode}</span>
           <span className="round-badge">ROUND {gameState.roundNumber || 1}</span>
@@ -373,7 +390,6 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
               deckCount={gameState.deckCount}
               opponents={allPlayersList}
               roundNumber={gameState.roundNumber}
-              scores={gameState.scores}
               onDiscard={handleDiscard}
               onCallYaniv={handleCallYaniv}
               onContestYaniv={handleContestYaniv}
@@ -403,18 +419,6 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
               eliminatedPlayers={gameState.eliminatedPlayers}
             />
           </div>
-
-          {/* Mobile Scoreboard Toggle Button */}
-          {isMobile && (
-            <button
-              className="scoreboard-toggle-btn"
-              onClick={() => setShowScoreboard(!showScoreboard)}
-              aria-label={showScoreboard ? 'Hide Scoreboard' : 'Show Scoreboard'}
-              aria-expanded={showScoreboard}
-            >
-              🏆 {showScoreboard ? 'Hide' : 'Scores'}
-            </button>
-          )}
 
           {/* Mobile Scoreboard Overlay */}
           {isMobile && (
