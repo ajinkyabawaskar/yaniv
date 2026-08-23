@@ -60,8 +60,9 @@ class GameStateControllerTurnTimerTest {
         when(gameService.getGameState(anyString())).thenAnswer(inv -> snapshotStore.get(inv.getArgument(0)));
         doAnswer(inv -> snapshotStore.remove(inv.getArgument(0))).when(gameService).deleteGameState(anyString());
 
-        // Two-player room
+        // Two-player room, already started (startGame flips status via the mocked service)
         Game game = new Game("ABC123", 200, HOST, 6);
+        game.setStatus(Game.GameStatus.IN_PROGRESS);
         when(gameService.getGameById(ROOM)).thenReturn(game);
         when(gameService.getGamePlayers(ROOM)).thenReturn(List.of(
                 new GamePlayer(ROOM, HOST),
@@ -84,6 +85,14 @@ class GameStateControllerTurnTimerTest {
         Field enginesField = GameStateController.class.getDeclaredField("gameEngines");
         enginesField.setAccessible(true);
         ((Map<?, ?>) enginesField.get(controller)).clear();
+    }
+
+    @SuppressWarnings("unchecked")
+    private void markDisconnected(String userId) throws Exception {
+        Field field = GameStateController.class.getDeclaredField("disconnectedInGame");
+        field.setAccessible(true);
+        Map<String, java.util.Set<String>> map = (Map<String, java.util.Set<String>>) field.get(controller);
+        map.computeIfAbsent(ROOM, k -> ConcurrentHashMap.newKeySet()).add(userId);
     }
 
     private Authentication auth(String userId) {
@@ -147,7 +156,9 @@ class GameStateControllerTurnTimerTest {
     }
 
     @Test
-    void turnTimerAutoPlaysWhenExpired() {
+    void turnTimerAutoPlaysWhenExpired() throws Exception {
+        markDisconnected(HOST);
+        markDisconnected(OTHER);
         controller.startGame(ROOM, auth(HOST));
 
         String firstPlayer = engineFromSnapshot().getCurrentPlayer();
@@ -161,7 +172,29 @@ class GameStateControllerTurnTimerTest {
     }
 
     @Test
-    void humanActionBeforeExpiryIsRespected() {
+    void connectedPlayersAreNeverAutoPlayed() throws Exception {
+        // Nobody disconnected: timers must never arm, game waits indefinitely
+        controller.startGame(ROOM, auth(HOST));
+
+        try {
+            Thread.sleep(2000); // > 2x the 1s timer
+        } catch (InterruptedException ignored) {
+        }
+
+        long autoPlayedMessages = messagesFor(HOST).stream()
+                .filter(m -> m.autoPlayedPlayerId != null)
+                .count();
+        assertEquals(0, autoPlayedMessages, "connected players must never be auto-played");
+
+        YanivGameEngine.GameState stillWaiting = engineFromSnapshot().getCurrentState();
+        assertEquals(YanivGameEngine.GameState.WAIT_FOR_TURN, stillWaiting,
+                "game should sit waiting on the connected player's turn");
+    }
+
+    @Test
+    void humanActionBeforeExpiryIsRespected() throws Exception {
+        markDisconnected(HOST);
+        markDisconnected(OTHER);
         controller.startGame(ROOM, auth(HOST));
 
         String firstPlayer = engineFromSnapshot().getCurrentPlayer();

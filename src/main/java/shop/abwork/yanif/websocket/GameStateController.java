@@ -117,6 +117,12 @@ public class GameStateController {
         // Update presence to DISCONNECTED_IN_GAME status (extended TTL)
         presenceService.setUserDisconnectedInGame(userId);
 
+        // If it is already this player's turn, arm their auto-play timer now
+        if (engine.getCurrentState() == YanivGameEngine.GameState.WAIT_FOR_TURN
+                && userId.equals(engine.getCurrentPlayer())) {
+            scheduleTurnTimerIfNeeded(engine, roomId);
+        }
+
         // Broadcast disconnected status to other players
         broadcastPlayerDisconnected(roomId, userId, true);
 
@@ -148,9 +154,8 @@ public class GameStateController {
 
         // Check if there's an active game engine for this room (memory or Redis snapshot)
         YanivGameEngine engine = getOrRestoreEngine(roomId);
-        if (engine == null) {
-            // No restorable game - if the DB still says IN_PROGRESS the state is lost
-            // (e.g. pre-snapshot server restart): return the room to the lobby.
+        if (engine == null && shouldAbortToLobby(roomId)) {
+            // No restorable game and storage confirms it: return the room to the lobby
             abortStaleGame(roomId);
             presenceService.setUserOnline(userId);
             broadcastLobbyState(roomId);
@@ -185,6 +190,10 @@ public class GameStateController {
             GameStateMessage stateMessage = buildGameStateForPlayers(engine, roomId, userId);
             messagingTemplate.convertAndSendToUser(userId, "/queue/game-state", stateMessage);
         }
+
+        // Roster changed: drop any auto-play timer armed for the returning player
+        // and re-arm one if a still-disconnected player now holds the turn
+        scheduleTurnTimerIfNeeded(engine, roomId);
     }
 
     /**
@@ -231,7 +240,9 @@ public class GameStateController {
             // Get or restore game engine (never silently re-deal a lost game)
             YanivGameEngine engine = getOrRestoreEngine(roomId);
             if (engine == null) {
-                abortStaleGame(roomId);
+                if (shouldAbortToLobby(roomId)) {
+                    abortStaleGame(roomId);
+                }
                 sendErrorToUser(userId, "Game not found");
                 return;
             }
@@ -313,7 +324,9 @@ public class GameStateController {
                 engine = getOrRestoreEngine(roomId);
             }
             if (engine == null) {
-                abortStaleGame(roomId);
+                if (shouldAbortToLobby(roomId)) {
+                    abortStaleGame(roomId);
+                }
                 sendErrorToUser(userId, "Game not found");
                 return;
             }
@@ -346,7 +359,9 @@ public class GameStateController {
                 engine = getOrRestoreEngine(roomId);
             }
             if (engine == null) {
-                abortStaleGame(roomId);
+                if (shouldAbortToLobby(roomId)) {
+                    abortStaleGame(roomId);
+                }
                 sendErrorToUser(userId, "Game not found");
                 return;
             }
@@ -390,7 +405,7 @@ public class GameStateController {
                     return;
                 }
                 // Live state lost (e.g. pre-snapshot restart): back to lobby
-                if (game.getStatus() == Game.GameStatus.IN_PROGRESS) {
+                if (game.getStatus() == Game.GameStatus.IN_PROGRESS && shouldAbortToLobby(roomId)) {
                     abortStaleGame(roomId);
                 }
 
@@ -841,6 +856,11 @@ public class GameStateController {
     /**
      * Get the engine for a room from memory, or restore it from the Redis snapshot
      * written after every mutation. Returns null when no restorable state exists.
+     *
+     * A snapshot is only honored when the DB still marks the game IN_PROGRESS -
+     * snapshots of finished/aborted games are stale and must not resurrect old
+     * games into a lobby. Transient storage errors return null WITHOUT letting
+     * callers abort the room (only a confirmed miss may do that).
      */
     private YanivGameEngine getOrRestoreEngine(String roomId) {
         YanivGameEngine engine = gameEngines.get(roomId);
@@ -855,14 +875,54 @@ public class GameStateController {
             System.err.println("Could not read game snapshot for room " + roomId + ": " + e.getMessage());
         }
 
+        // Only trust the DB as the tombstone when it is readable
+        Game dbGame = null;
+        try {
+            dbGame = gameService.getGameById(roomId);
+        } catch (Exception e) {
+            System.err.println("Could not read game record for room " + roomId + ": " + e.getMessage());
+        }
+        boolean dbSaysInProgress = dbGame != null && dbGame.getStatus() == Game.GameStatus.IN_PROGRESS;
+
         YanivGameEngine restored = YanivGameEngine.fromSnapshot(snapshotJson);
+        if (restored != null && !dbSaysInProgress) {
+            // Stale snapshot (game finished/aborted earlier): discard it
+            System.out.println("Discarding stale snapshot for room " + roomId
+                    + " (status=" + (dbGame != null ? dbGame.getStatus() : "unknown") + ")");
+            try {
+                gameService.deleteGameState(roomId);
+            } catch (Exception ignored) {
+            }
+            restored = null;
+        }
+
         if (restored != null) {
             gameEngines.put(roomId, restored);
             scheduleTurnTimerIfNeeded(restored, roomId);
             System.out.println("Restored game engine for room " + roomId + " from snapshot");
             return restored;
         }
+
+        // Confirmed miss or unreadable storage - never a reason to abort here
         return null;
+    }
+
+    /**
+     * True when it is safe to declare the room's live state permanently lost
+     * (storage reachable, both snapshot and DB checked). Redis/DB outages must
+     * never dump a live table back to the lobby.
+     */
+    private boolean shouldAbortToLobby(String roomId) {
+        try {
+            String snapshotJson = gameService.getGameState(roomId);
+            Game dbGame = gameService.getGameById(roomId);
+            return snapshotJson == null && dbGame != null
+                    && dbGame.getStatus() == Game.GameStatus.IN_PROGRESS;
+        } catch (Exception e) {
+            System.err.println("Skipping lobby-abort check for room " + roomId
+                    + " (storage unreachable): " + e.getMessage());
+            return false;
+        }
     }
 
     /**
@@ -874,6 +934,12 @@ public class GameStateController {
             Game game = gameService.getGameById(roomId);
             if (game != null && game.getStatus() == Game.GameStatus.IN_PROGRESS) {
                 gameService.updateGameStatus(roomId, Game.GameStatus.LOBBY);
+                // Remove any stale snapshot - it must not resurrect this game later
+                try {
+                    gameService.deleteGameState(roomId);
+                } catch (Exception e) {
+                    System.err.println("Could not delete stale snapshot for room " + roomId + ": " + e.getMessage());
+                }
                 System.err.println("Game state lost for room " + roomId + "; returned to lobby");
             }
         } catch (Exception e) {
@@ -947,11 +1013,13 @@ public class GameStateController {
         ScheduledFuture<?> future = scheduler.schedule(() -> {
             try {
                 synchronized (engine) {
-                    if (engine.isYanivCalled()) {
-                        engine.resolveYanivCall();
-                        finishMutation(engine, roomId);
-                        System.out.println("Yaniv contest timer expired, round resolved for room: " + roomId);
+                    // Only act if this engine is still the room's live one
+                    if (gameEngines.get(roomId) != engine || !engine.isYanivCalled()) {
+                        return;
                     }
+                    engine.resolveYanivCall();
+                    finishMutation(engine, roomId);
+                    System.out.println("Yaniv contest timer expired, round resolved for room: " + roomId);
                 }
             } catch (Exception e) {
                 System.err.println("Error auto-resolving Yaniv: " + e.getMessage());
@@ -961,10 +1029,22 @@ public class GameStateController {
     }
 
     /**
-     * Schedule automatic advancement past the ROUND_OVER results screen.
+     * Schedule automatic advancement past the ROUND_OVER results screen - but only
+     * when every active player is disconnected. Connected players advance manually.
      */
     private void scheduleRoundOverAdvance(YanivGameEngine engine, String roomId) {
         if (!autoPlayEnabled) {
+            return;
+        }
+        Set<String> disconnected = disconnectedInGame.getOrDefault(roomId, java.util.Set.of());
+        boolean allActivePlayersGone = engine.getAllPlayerIds().stream()
+                .filter(p -> !engine.getEliminatedPlayers().contains(p))
+                .allMatch(disconnected::contains);
+        if (!allActivePlayersGone) {
+            ScheduledFuture<?> old = turnTimers.remove(roomId);
+            if (old != null) {
+                old.cancel(false);
+            }
             return;
         }
         ScheduledFuture<?> old = turnTimers.remove(roomId);
@@ -1023,8 +1103,8 @@ public class GameStateController {
     }
 
     /**
-     * Schedule auto-play for the current player's turn. Cancels any pending timer first.
-     * Applies to all players; disconnected players simply never act before expiry.
+     * Schedule auto-play for the current player's turn - only when that player is
+     * disconnected. Cancels any pending timer first.
      */
     private void scheduleTurnTimerIfNeeded(YanivGameEngine engine, String roomId) {
         ScheduledFuture<?> old = turnTimers.remove(roomId);
@@ -1036,6 +1116,11 @@ public class GameStateController {
         if (!autoPlayEnabled || engine.isGameOver() || engine.isRoundOver()
                 || engine.getCurrentState() != YanivGameEngine.GameState.WAIT_FOR_TURN) {
             return;
+        }
+
+        Set<String> disconnected = disconnectedInGame.get(roomId);
+        if (disconnected == null || !disconnected.contains(engine.getCurrentPlayer())) {
+            return; // connected players keep unlimited thinking time
         }
 
         long delayMs = turnTimerSeconds * 1000L;
@@ -1067,6 +1152,10 @@ public class GameStateController {
         }
         try {
             synchronized (engine) {
+                Set<String> disconnected = disconnectedInGame.get(roomId);
+                if (disconnected == null || !disconnected.contains(expectedPlayer)) {
+                    return; // player came back before the timer fired
+                }
                 if (gameEngines.get(roomId) != engine
                         || engine.getCurrentState() != YanivGameEngine.GameState.WAIT_FOR_TURN
                         || !expectedPlayer.equals(engine.getCurrentPlayer())) {
