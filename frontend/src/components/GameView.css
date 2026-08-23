@@ -146,13 +146,14 @@
   background: rgba(239, 68, 68, 0.3);
 }
 
-/* Play Layout */
+/* Play Layout - height tracks the real header height via --game-header-h
+   (set from GameView.tsx; header can wrap taller on mobile) */
 .game-play-layout {
   position: relative;
   flex: 1;
   display: flex;
   overflow: hidden;
-  height: calc(100% - 48px);
+  height: calc(100% - var(--game-header-h, 48px));
 }
 
 .table-area-wrapper {
@@ -589,16 +590,16 @@
   font-weight: 700;
 }
 
-@media (max-width: 900px) {
-  .scoreboard-wrapper {
-    display: none;
-  }
-}
-
 /* ==========================================================================
    Mobile Responsive Styles
    ========================================================================== */
 @media (max-width: 768px) {
+  /* Sidebar hidden; the header Scores button opens it as a drawer below.
+     Same breakpoint as isMobile in GameView.tsx so the toggle works everywhere. */
+  .scoreboard-wrapper {
+    display: none;
+  }
+
   .game-view-header {
     padding: 8px 12px;
     flex-wrap: wrap;
@@ -630,14 +631,14 @@
   }
 
   .game-play-layout {
-    height: calc(100% - 48px);
+    height: calc(100% - var(--game-header-h, 48px));
   }
 
-/* Scoreboard as Mobile Drawer */
+/* Scoreboard as Mobile Drawer - offset by the real header height */
   .scoreboard-wrapper.mobile-open {
     display: flex !important;
     position: fixed;
-    top: 48px;
+    top: var(--game-header-h, 48px);
     right: 0;
     bottom: 0;
     width: 280px;
@@ -662,7 +663,7 @@
   .scoreboard-overlay {
     display: none;
     position: fixed;
-    top: 48px;
+    top: var(--game-header-h, 48px);
     left: 0;
     right: 0;
     bottom: 0;

@@ -480,12 +480,15 @@
   display: flex;
   justify-content: center;
   align-items: flex-end;
-  /* Negative gap creates the fan overlap - tighter = more cards fit */
-  gap: -24px;
   min-height: 124px;
   width: max-content;
   /* Center the fan within the zone */
   margin: 0 auto;
+}
+
+/* Negative margin creates the fan overlap - CSS gap cannot be negative */
+.discard-cards-fan .discard-fan-card + .discard-fan-card {
+  margin-left: -24px;
 }
 
 .discard-fan-card {
@@ -501,25 +504,18 @@
   transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
 }
 
-/* Z-index stacking for proper fan layering (center on top) */
-.discard-cards-fan .discard-fan-card:nth-child(1) { z-index: 5; }
-.discard-cards-fan .discard-fan-card:nth-child(2) { z-index: 4; }
-.discard-cards-fan .discard-fan-card:nth-child(3) { z-index: 3; }
-.discard-cards-fan .discard-fan-card:nth-child(4) { z-index: 2; }
-.discard-cards-fan .discard-fan-card:nth-child(5) { z-index: 1; }
+/* Fan layering (center on top) is applied via inline z-index from TableCanvas.tsx */
 
 .discard-fan-card.drawable-eligible {
   box-shadow: 0 0 20px rgba(212, 175, 55, 0.9), 0 6px 20px rgba(0, 0, 0, 0.7);
   border: 2px solid var(--gold-primary);
-  /* Subtle lift to indicate interactivity */
-  transform: translateY(-2px);
+  /* Lift on hover/active is handled by framer-motion whileHover */
 }
 
 .discard-fan-card.drawable-eligible:hover,
 .discard-fan-card.drawable-eligible:active {
   box-shadow: 0 0 28px rgba(212, 175, 55, 1), 0 10px 28px rgba(0, 0, 0, 0.8);
   border-color: #f6e29d;
-  transform: translateY(-4px) scale(1.02);
 }
 
 .discard-fan-card.locked-ineligible {
@@ -597,11 +593,6 @@
   text-overflow: ellipsis;
 }
 
-.hud-btn:hover {
-  background: rgba(212, 175, 55, 0.2);
-  border-color: var(--gold-primary);
-}
-
 .hud-btn.interactive {
   cursor: pointer;
 }
@@ -616,10 +607,6 @@
   transform: translateY(0);
 }
 
-.hand-total-btn {
-  /* Same as hud-btn */
-}
-
 .hand-total-btn.outline-only {
   background: transparent;
   border: 2px solid rgba(212, 175, 55, 0.5);
@@ -627,12 +614,9 @@
   cursor: default;
 }
 
-.hand-total-btn.outline-only:hover {
-  background: transparent;
-  border-color: var(--gold-primary);
-}
-
-.hand-total-btn.ready-yaniv {
+/* Static readout - no hover affordance unless Yaniv is ready */
+.hand-total-btn.ready-yaniv,
+.hand-total-btn.ready-yaniv:hover {
   background: var(--gold-gradient);
   border-color: #fff;
   color: #0a241a;
@@ -681,16 +665,6 @@
 
 .call-yaniv-btn-hud.eligible:active {
   transform: translateY(0);
-}
-
-.selected-hint {
-  font-family: 'DM Mono', monospace;
-  font-size: 10px;
-  color: rgba(212, 175, 55, 0.7);
-  padding: 4px 8px;
-  background: rgba(0, 0, 0, 0.3);
-  border-radius: 4px;
-  border: 1px solid rgba(212, 175, 55, 0.2);
 }
 
 /* Player Hand Fanned Display */
@@ -745,47 +719,6 @@
 /* ==========================================================================
    4. Dramatic Banners & Modals
    ========================================================================== */
-.dramatic-yaniv-overlay {
-  position: absolute;
-  top: 30%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  z-index: 100;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 24px 48px;
-  background: radial-gradient(circle, rgba(20, 50, 36, 0.96) 0%, rgba(6, 20, 14, 0.98) 100%);
-  border: 2px solid var(--gold-primary);
-  border-radius: 20px;
-  box-shadow: 0 0 80px rgba(212, 175, 55, 0.8), 0 20px 60px rgba(0, 0, 0, 0.9);
-  text-align: center;
-  backdrop-filter: blur(16px);
-}
-
-.yaniv-bell-icon {
-  font-size: 54px;
-  margin-bottom: 8px;
-  animation: timerHeartbeat 1s infinite;
-}
-
-.yaniv-title {
-  font-family: 'Cinzel', serif;
-  font-size: 48px;
-  font-weight: 900;
-  letter-spacing: 0.1em;
-  background: var(--gold-gradient);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  text-shadow: 0 4px 20px rgba(212, 175, 55, 0.6);
-}
-
-.yaniv-caller {
-  font-size: 16px;
-  color: var(--gold-light);
-  margin-top: 6px;
-}
-
 .dramatic-asaf-overlay {
   position: absolute;
   inset: 0;
@@ -1231,11 +1164,14 @@
     height: 100px;
     min-width: 100%;
     display: flex;
-    /* Tight negative gap for mobile - all 5 cards fit within draw pile width */
-    gap: -18px;
     align-items: flex-end;
     justify-content: center;
     margin: 0 auto;
+  }
+
+  /* Tight negative margin for mobile - all 5 cards fit within draw pile width */
+  .discard-cards-fan .discard-fan-card + .discard-fan-card {
+    margin-left: -18px;
   }
 
   .discard-fan-card {
@@ -1244,13 +1180,6 @@
     flex-shrink: 0;
     transform-origin: bottom center;
   }
-
-  /* Z-index for mobile fan */
-  .discard-cards-fan .discard-fan-card:nth-child(1) { z-index: 5; }
-  .discard-cards-fan .discard-fan-card:nth-child(2) { z-index: 4; }
-  .discard-cards-fan .discard-fan-card:nth-child(3) { z-index: 3; }
-  .discard-cards-fan .discard-fan-card:nth-child(4) { z-index: 2; }
-  .discard-cards-fan .discard-fan-card:nth-child(5) { z-index: 1; }
 
   .discard-empty-box {
     width: 72px;
@@ -1290,51 +1219,27 @@
     justify-content: center;
   }
 
-  /* Player Hand - overlapping fan layout, all 5 cards visible */
+  /* Player Hand - overlapping fan layout, all 5 cards visible.
+     Overlap via negative margin (CSS gap cannot be negative);
+     stacking comes from inline z-index in TableCanvas.tsx. */
   .player-hand-container {
     padding-bottom: 8px;
   }
 
   .player-hand-fanned {
-    gap: -20px; /* negative gap for overlap */
     padding: 8px 16px 4px;
     justify-content: center;
     align-items: flex-end;
+  }
+
+  .player-hand-fanned .hand-card + .hand-card {
+    margin-left: -20px;
   }
 
   .hand-card {
     width: clamp(72px, 14vw, 92px);
     height: clamp(100px, 18vw, 128px);
     flex-shrink: 0;
-    z-index: var(--card-index, 1);
-  }
-
-  /* Ensure proper z-index stacking for fan */
-  .player-hand-fanned .hand-card:nth-child(1) { --card-index: 5; }
-  .player-hand-fanned .hand-card:nth-child(2) { --card-index: 4; }
-  .player-hand-fanned .hand-card:nth-child(3) { --card-index: 3; }
-  .player-hand-fanned .hand-card:nth-child(4) { --card-index: 2; }
-  .player-hand-fanned .hand-card:nth-child(5) { --card-index: 1; }
-
-  /* Banners - responsive */
-  .dramatic-yaniv-overlay {
-    top: 25%;
-    padding: 16px 24px;
-    left: 5%;
-    right: 5%;
-    max-width: 90vw;
-  }
-
-  .yaniv-title {
-    font-size: 32px;
-  }
-
-  .yaniv-bell-icon {
-    font-size: 40px;
-  }
-
-  .yaniv-caller {
-    font-size: 14px;
   }
 
   .dramatic-asaf-overlay .asaf-strike-card {
@@ -1425,11 +1330,6 @@
     padding: 1px 5px;
   }
 
-  .call-yaniv-btn-arc {
-    font-size: 8px;
-    padding: 2px 6px;
-  }
-
   .turn-timer-ring {
     width: 46px;
     height: 46px;
@@ -1458,7 +1358,6 @@
   }
 
   .discard-cards-fan {
-    gap: 8px;
     height: 84px;
   }
 
@@ -1474,26 +1373,16 @@
 
   /* Overlapping fan for 480px */
   .player-hand-fanned {
-    gap: -18px;
     padding: 6px 12px 4px;
+  }
+
+  .player-hand-fanned .hand-card + .hand-card {
+    margin-left: -18px;
   }
 
   .hand-card {
     width: clamp(60px, 16vw, 78px);
     height: clamp(84px, 20vw, 110px);
-  }
-
-  .player-hand-fanned .hand-card:nth-child(1) { --card-index: 5; }
-  .player-hand-fanned .hand-card:nth-child(2) { --card-index: 4; }
-  .player-hand-fanned .hand-card:nth-child(3) { --card-index: 3; }
-  .player-hand-fanned .hand-card:nth-child(4) { --card-index: 2; }
-  .player-hand-fanned .hand-card:nth-child(5) { --card-index: 1; }
-
-  .call-yaniv-btn {
-    font-size: 10px;
-    padding: 2px 6px;
-    min-height: 32px;
-    min-width: 36px;
   }
 
   .sort-btn {
@@ -1510,46 +1399,9 @@
     font-size: 10px;
   }
 
-  .you-badge {
-    font-size: 7px;
-    padding: 1px 4px;
-    bottom: -10px;
-  }
-
-  .current-player-turn-indicator-small {
-    font-size: 8px;
-    padding: 1px 5px;
-  }
-
-  .call-yaniv-btn-arc {
-    font-size: 8px;
-    padding: 2px 6px;
-  }
-
   /* 480px - even tighter fan for discard pile */
-  .discard-cards-fan {
-    gap: -16px;
-    height: 84px;
-  }
-
-  .discard-fan-card {
-    width: 60px;
-    height: 84px;
-  }
-
-  .discard-empty-box {
-    width: 60px;
-    height: 84px;
-  }
-
-  .deck-stack-3d {
-    width: 60px;
-    height: 84px;
-  }
-
-  .deck-layer {
-    width: 60px;
-    height: 84px;
+  .discard-cards-fan .discard-fan-card + .discard-fan-card {
+    margin-left: -16px;
   }
 }
 
@@ -1596,9 +1448,8 @@
   }
 
   /* Landscape: ensure discard fan fits */
-  .discard-cards-fan {
-    gap: -20px;
-    height: 100px;
+  .discard-cards-fan .discard-fan-card + .discard-fan-card {
+    margin-left: -20px;
   }
 
   .discard-fan-card {
