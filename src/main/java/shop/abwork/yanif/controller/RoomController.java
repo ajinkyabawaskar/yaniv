@@ -103,16 +103,18 @@ public class RoomController {
                 return ResponseEntity.notFound().build();
             }
 
-            // Check game status (must be in LOBBY)
-            if (game.getStatus() != Game.GameStatus.LOBBY) {
+            // Existing members may re-enter at any time (reconnection via invite link)
+            boolean alreadyMember = gameService.getGamePlayers(game.getId()).stream()
+                    .anyMatch(player -> player.getId().getUserId().equals(userId));
+
+            // New joins are only allowed while the room is in LOBBY
+            if (game.getStatus() != Game.GameStatus.LOBBY && !alreadyMember) {
                 return ResponseEntity.badRequest()
                         .body(Map.of("error", "Game is not in lobby state"));
             }
 
             // Joining is idempotent so a player can re-enter a room after leaving its UI.
-            boolean alreadyJoined = gameService.getGamePlayers(game.getId()).stream()
-                    .anyMatch(player -> player.getId().getUserId().equals(userId));
-            if (!alreadyJoined) {
+            if (!alreadyMember) {
                 // Check max players limit
                 int currentPlayerCount = gameService.getGamePlayers(game.getId()).size();
                 int maxPlayers = game.getMaxPlayers() != null ? game.getMaxPlayers() : 6;
@@ -129,8 +131,8 @@ public class RoomController {
             result.put("status", game.getStatus().toString());
             result.put("targetScore", game.getTargetScore());
             result.put("hostUserId", game.getHostUserId());
-            result.put("alreadyJoined", alreadyJoined);
-            result.put("message", alreadyJoined ? "Already in room" : "Successfully joined room");
+            result.put("alreadyJoined", alreadyMember);
+            result.put("message", alreadyMember ? "Already in room" : "Successfully joined room");
 
             return ResponseEntity.ok(result);
         } catch (RuntimeException e) {

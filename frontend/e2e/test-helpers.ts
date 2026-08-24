@@ -98,24 +98,6 @@ export async function setAuthToken(page: Page, token: string): Promise<void> {
 }
 
 /**
- * Wait for game to be in specific state
- */
-export async function waitForGameState(
-  page: Page,
-  expectedState: string,
-  timeout = 10000
-): Promise<void> {
-  await page.waitForFunction(
-    (state) => {
-      const gs = (window as any).__GAME_STATE__;
-      return gs?.currentState === state;
-    },
-    expectedState,
-    { timeout }
-  );
-}
-
-/**
  * Simulate a player turn: discard first card and draw from deck
  */
 export async function playSimpleTurn(page: Page): Promise<void> {
@@ -211,6 +193,229 @@ export async function isMyTurn(page: Page): Promise<boolean> {
   });
 }
 
+
+export interface ApiUser { userId: string; jwtToken: string; displayName: string; }
+
+/** Create a distinct user via the REST API (UI registration collapses all
+ *  Playwright contexts onto one fingerprint-shared account). */
+export async function createApiUser(fingerprint: string, name: string): Promise<ApiUser> {
+  const response = await fetch(`${BACKEND_URL}/api/v1/users/resolve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fingerprintHash: fingerprint, displayName: name }),
+  });
+  const data = await response.json();
+  return { userId: data.userId, jwtToken: data.jwtToken, displayName: data.displayName };
+}
+
 // Backend URL for API calls
 export const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8080';
 export const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+
+// ---------------------------------------------------------------------------
+// Seating & gameplay helpers (current DOM: .game-view-container, .hand-card,
+// .draw-pile-zone, .call-yaniv-btn-hud, .contest-btn, .continue-round-btn)
+// ---------------------------------------------------------------------------
+
+export interface SeatedUser {
+  userId: string;
+  jwtToken: string;
+  displayName?: string;
+}
+
+/**
+ * Open a page authenticated as an API-created user (token injected into
+ * localStorage) and optionally seat them at a room via the /join deep link.
+ */
+/**
+ * Deterministically populate __GAME_STATE__ on a seated page by requesting a
+ * state push over STOMP (the proactive connect-push can race subscriptions).
+ */
+export async function pullGameState(page: Page): Promise<void> {
+  await page.waitForFunction(
+    () => {
+      const st = (window as any).__USE_GAME_STORE__?.getState();
+      return !!(st?.gameId && (window as any).__STOMP_CLIENT__?.connected);
+    },
+    undefined,
+    { timeout: 20000 }
+  );
+  const gameId = await page.evaluate(() => (window as any).__USE_GAME_STORE__.getState().gameId);
+
+  // Clear any stale snapshot so the wait below proves FRESH state arrived
+  await page.evaluate(() => { delete (window as any).__GAME_STATE__; });
+  await page.evaluate((dest) => (window as any).__STOMP_CLIENT__?.publish({
+    destination: dest, body: JSON.stringify({}),
+  }), '/app/room/' + gameId + '/state');
+  await page.waitForFunction(() => !!((window as any).__GAME_STATE__), undefined, { timeout: 20000 });
+}
+
+/**
+ * Wait for the game to start; if the start push was lost, force a refresh and retry.
+ */
+export async function waitForGameStartedReliable(page: Page, timeout = 20000): Promise<void> {
+  try {
+    await waitForGameStarted(page, Math.min(timeout, 15000));
+  } catch {
+    await pullGameState(page);
+    await waitForGameStarted(page, 10000);
+  }
+}
+
+/** Pull state only when the page currently has none. */
+export async function ensureGameState(page: Page): Promise<void> {
+  if (!(await getState(page))) {
+    await pullGameState(page);
+  }
+}
+
+export async function openSeatedPage(
+  browser: import('@playwright/test').Browser,
+  user: SeatedUser,
+  roomCode?: string
+): Promise<Page> {
+  const page = await browser.newPage();
+  await page.goto(FRONTEND_URL); // boot the app once
+  await page.evaluate((u) => {
+    localStorage.setItem('jwtToken', u.jwtToken);
+    localStorage.setItem('userId', u.userId);
+    localStorage.setItem('user', JSON.stringify({ userId: u.userId, displayName: u.displayName || 'Player' }));
+  }, user);
+  await page.goto(roomCode ? `${FRONTEND_URL}/join/${roomCode}` : FRONTEND_URL);
+  if (roomCode) {
+    const container = page.locator('.game-view-container');
+    try {
+      await container.waitFor({ state: 'visible', timeout: 20000 });
+    } catch {
+      // Occasional lost join round-trip: reload the deep link once
+      await page.goto(`${FRONTEND_URL}/join/${roomCode}`);
+      await container.waitFor({ state: 'visible', timeout: 20000 });
+    }
+
+    // The server's proactive connect-push can race our subscription - pull
+    // state explicitly so __GAME_STATE__ is populated deterministically.
+    try {
+      await pullGameState(page);
+    } catch {
+      await pullGameState(page);
+    }
+  } else {
+    await page.locator('.lobby-view-root').waitFor({ state: 'visible', timeout: 20000 });
+  }
+  return page;
+}
+
+export async function getState(page: Page): Promise<any> {
+  return page.evaluate(() => (window as any).__GAME_STATE__ ?? null);
+}
+
+export async function waitForGameState(page: Page, expected: string, timeout = 20000): Promise<void> {
+  await page.waitForFunction(
+    (s) => (window as any).__GAME_STATE__?.currentState === s,
+    expected,
+    { timeout }
+  );
+}
+
+
+/** Engine broadcasts never say "IN_PROGRESS" (that's the DB status) - a dealt
+ *  hand plus any non-lobby engine state means the game is underway. */
+export async function waitForGameStarted(page: Page, timeout = 20000): Promise<void> {
+  await page.waitForFunction(
+    () => {
+      const gs = (window as any).__GAME_STATE__;
+      return !!gs && gs.hand?.length > 0 && gs.currentState !== 'LOBBY';
+    },
+    undefined,
+    { timeout }
+  );
+}
+
+/** Wait until it is this page's player's turn and the table accepts actions. */
+export async function waitForMyTurn(page: Page, timeout = 30000): Promise<void> {
+  await page.waitForFunction(
+    () => {
+      const gs = (window as any).__GAME_STATE__;
+      const me = (window as any).__CURRENT_USER_ID__;
+      return !!gs && !!me && gs.currentState === 'WAIT_FOR_TURN' && gs.currentTurnPlayerId === me;
+    },
+    undefined,
+    { timeout }
+  );
+}
+
+/** Wait until the turn moved off `prevPlayerId` back to a normal waiting state. */
+export async function waitForTurnChange(page: Page, prevPlayerId: string, timeout = 20000): Promise<void> {
+  await page.waitForFunction(
+    (prev) => {
+      const gs = (window as any).__GAME_STATE__;
+      return !!gs && gs.currentState === 'WAIT_FOR_TURN' && gs.currentTurnPlayerId !== prev;
+    },
+    prevPlayerId,
+    { timeout }
+  );
+}
+
+/** Select the first hand card, then tap the deck: one atomic discard+draw. */
+export async function playTurnFromDeck(page: Page): Promise<void> {
+  const stale = page.locator('.hand-card.selected-lift');
+  const staleCount = await stale.count();
+  for (let i = 0; i < staleCount; i++) {
+    await stale.first().click();
+  }
+  await page.locator('.hand-card').first().click();
+  await page.locator('.draw-pile-zone').click();
+}
+
+/**
+ * Discard the largest same-rank group when possible (shrinks the hand toward
+ * a callable Yaniv), otherwise fall back to a single card. A full 5-card hand
+ * can never score <= 7 - its minimum is A+A+2+2+3 = 9.
+ */
+export async function playSmartTurn(page: Page): Promise<void> {
+  // Deselect anything left over from previous tests - leftover selections
+  // silently corrupt every later discard
+  const stale = page.locator('.hand-card.selected-lift');
+  const staleCount = await stale.count();
+  for (let i = 0; i < staleCount; i++) {
+    await stale.first().click();
+  }
+
+  const hand: Array<{ id: string; rank: string }> = (await getState(page))?.hand ?? [];
+  const byRank = new Map<string, number[]>();
+  hand.forEach((card, index) => {
+    const list = byRank.get(card.rank) ?? [];
+    list.push(index);
+    byRank.set(card.rank, list);
+  });
+  const groups = [...byRank.values()].filter((g) => g.length >= 2).sort((a, b) => b.length - a.length);
+  const targets = groups[0] ?? [0];
+
+  for (const index of targets) {
+    await page.locator('.hand-card').nth(index).click();
+  }
+  await page.locator('.draw-pile-zone').click();
+}
+
+/** Click the Yaniv HUD button when it is enabled (eligible + my turn). */
+export async function tryCallYanivUi(page: Page): Promise<boolean> {
+  const btn = page.locator('button.call-yaniv-btn-hud:not([disabled])');
+  if (await btn.isVisible({ timeout: 500 }).catch(() => false)) {
+    await btn.click();
+    return true;
+  }
+  return false;
+}
+
+/** Click through the round-over results screen. */
+export async function continueNextRound(page: Page): Promise<void> {
+  await page.locator('.continue-round-btn').click();
+}
+
+/** Read the 6-char room code from the in-game header tag. */
+export async function readRoomCode(page: Page): Promise<string> {
+  const text = await page.locator('.room-code-tag').textContent();
+  const match = text?.match(/[A-Z0-9]{6}/);
+  if (!match) throw new Error('Could not read room code from header: ' + text);
+  return match[0];
+}

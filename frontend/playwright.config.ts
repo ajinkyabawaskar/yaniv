@@ -6,10 +6,13 @@ import { defineConfig, devices } from '@playwright/test';
  */
 export default defineConfig({
   testDir: './e2e',
-  fullyParallel: true,
+  // Suites share seated pages across tests (host seats, others join) - keep
+  // tests within a file strictly ordered; only files run in parallel.
+  fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 1 : 2,
+  timeout: 120_000,
   reporter: 'html',
   use: {
     baseURL: 'http://localhost:3000',

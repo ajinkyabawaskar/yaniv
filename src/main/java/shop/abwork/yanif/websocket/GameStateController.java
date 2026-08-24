@@ -476,6 +476,18 @@ public class GameStateController {
                 return;
             }
 
+            // An active game must never receive lobby-shaped state (it would
+            // blank every seated client) - answer the requester personally.
+            YanivGameEngine engine = gameEngines.get(roomId);
+            if (engine != null && !engine.isGameOver()) {
+                messagingTemplate.convertAndSendToUser(
+                        userId,
+                        "/queue/game-state",
+                        buildGameStateForPlayers(engine, roomId, userId)
+                );
+                return;
+            }
+
             broadcastLobbyState(roomId);
 
         } catch (Exception e) {
