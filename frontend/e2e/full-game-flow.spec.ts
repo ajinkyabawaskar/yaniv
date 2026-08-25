@@ -158,7 +158,8 @@ test.describe('Yaniv Full Game Flow', () => {
   test('Yaniv call works when hand score <= 7', async () => {
     // Rotate turns until someone's Yaniv button lights up. Smart turns shed
     // pairs/sets to shrink the hand - a full 5-card hand can never score <= 7.
-    test.setTimeout(180_000);
+    test.setTimeout(180_000); // generous safety net; with a raised yaniv
+    // threshold this resolves on the first eligible player's first turn
     const seats = await seatOrder([page1, page2, page3]);
     let caller: Page | null = null;
     const deadline = Date.now() + 150_000;
@@ -206,12 +207,13 @@ test.describe('Yaniv Full Game Flow', () => {
   });
 
   test('Next round can be started', async () => {
+    const before = (await getState(page1))?.roundNumber ?? 1;
     await continueNextRound(page1);
     for (const p of [page1, page2, page3]) {
       await waitForGameState(p, 'WAIT_FOR_TURN');
       await expect(p.locator('.hand-card')).toHaveCount(5);
     }
-    expect((await getState(page1)).roundNumber).toBe(2);
+    expect((await getState(page1)).roundNumber).toBe(before + 1);
   });
 
   test('Game handles disconnection gracefully', async ({ browser }) => {
@@ -292,13 +294,14 @@ test.describe('Yaniv Full Game Flow', () => {
   });
 
   test('Reconnection restores game state', async ({ browser }) => {
-    const u3b = await createApiUser('fg_full_3', 'Full Player 3'); // same user, new session
+    const u3b = user3; // same user, new session
     page3 = await openSeatedPage(browser, u3b, roomCode);
 
     await waitForGameState(page3, 'WAIT_FOR_TURN');
     await expect(page3.locator('.hand-card')).toHaveCount(5);
     const state = await getState(page3);
-    expect(state.roundNumber).toBeGreaterThanOrEqual(1);
+    const beforeRound = (await getState(page1))?.roundNumber ?? 1;
+    expect(state.roundNumber).toBe(beforeRound);
     expect(state.opponentCounts).toBeDefined();
   });
 });

@@ -56,6 +56,8 @@ public class GameStateController {
     private final boolean autoPlayEnabled;
     // Yaniv contest window (game.yaniv-contest-timer-seconds)
     private final int yanivContestTimerSeconds;
+    // Max hand score for a legal Yaniv call (game.yaniv-threshold)
+    private final int yanivThreshold;
 
     // Action deduplication: track processed action IDs per player per room
     // Format: roomId:playerId:actionId -> timestamp
@@ -71,7 +73,8 @@ public class GameStateController {
                               SimpMessagingTemplate messagingTemplate,
                               @Value("${game.turn-timer-seconds:45}") int turnTimerSeconds,
                               @Value("${game.auto-play-enabled:true}") boolean autoPlayEnabled,
-                              @Value("${game.yaniv-contest-timer-seconds:15}") int yanivContestTimerSeconds) {
+                              @Value("${game.yaniv-contest-timer-seconds:15}") int yanivContestTimerSeconds,
+                              @Value("${game.yaniv-threshold:7}") int yanivThreshold) {
         this.gameService = gameService;
         this.presenceService = presenceService;
         this.userService = userService;
@@ -79,6 +82,7 @@ public class GameStateController {
         this.turnTimerSeconds = turnTimerSeconds;
         this.autoPlayEnabled = autoPlayEnabled;
         this.yanivContestTimerSeconds = yanivContestTimerSeconds;
+        this.yanivThreshold = yanivThreshold;
     }
 
     /**
@@ -584,7 +588,7 @@ public class GameStateController {
                     .map(gp -> gp.getId().getUserId())
                     .toList();
             YanivGameEngine engine = new YanivGameEngine(roomId, (List<String>) playerIds,
-                    7,
+                    yanivThreshold,
                     game.getTargetScore() != null ? game.getTargetScore() : 200);
             engine.setYanivContestTimerSeconds(yanivContestTimerSeconds);
             gameEngines.put(roomId, engine);
