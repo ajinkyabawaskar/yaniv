@@ -247,15 +247,21 @@ test.describe('Yaniv Reconnection', () => {
     await waitForGameStarted(page1);
     await waitForGameStarted(page2);
 
-    // Hand the turn to player 1 so we can disconnect player 2 mid-game
-    for (let i = 0; i < 12; i++) {
-      const state = await getState(page1);
-      const me1 = await page1.evaluate(() => (window as any).__CURRENT_USER_ID__);
-      if (state.currentTurnPlayerId === me1 && state.currentState === 'WAIT_FOR_TURN') break;
-      if ((await getState(page2)).currentTurnPlayerId !== me1) break;
-      await playTurnFromDeck(page2);
-      await waitForTurnChange(page2, state.currentTurnPlayerId);
+    // Hand the turn to player 1 so we can disconnect player 2 mid-game.
+    // With auto-play off, stranding the turn on the departing player would
+    // (correctly) stall the game forever.
+    const me1 = await page1.evaluate(() => (window as any).__CURRENT_USER_ID__);
+    const handoverDeadline = Date.now() + 60_000;
+    let isP1Turn = false;
+    while (Date.now() < handoverDeadline && !isP1Turn) {
+      const st = await getState(page1);
+      isP1Turn = !!st && st.currentState === 'WAIT_FOR_TURN' && st.currentTurnPlayerId === me1;
+      if (!isP1Turn) {
+        await playTurnFromDeck(page2);
+        await waitForTurnChange(page2, (await getState(page2))?.currentTurnPlayerId ?? '', 15000).catch(() => {});
+      }
     }
+    expect(isP1Turn).toBe(true);
   });
 
   test('Disconnect and reconnect restores state', async ({ browser }) => {

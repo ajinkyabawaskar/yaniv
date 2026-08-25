@@ -66,7 +66,16 @@ test.describe('Yaniv Full Game Flow', () => {
     roomCode = await createRoom(page1);
 
     // Distinct API identities: UI registration collapses every context onto
-    // one fingerprint-shared account, making all players the same person
+    // one fingerprint-shared account, making all players the same person.
+    // Membership is guaranteed via the API - the deep links below are then
+    // pure view navigation and cannot race the join
+    const joinViaApi = (u: any) => fetch(
+      `${process.env.BACKEND_URL || 'http://localhost:8080'}/api/v1/rooms/${roomCode}/join`,
+      { method: 'POST', headers: { Authorization: `Bearer ${u.jwtToken}` } }
+    );
+    expect((await joinViaApi(u2)).status).toBe(200);
+    expect((await joinViaApi(u3)).status).toBe(200);
+
     page2 = await openSeatedPage(browser, u2, roomCode);
     page3 = await openSeatedPage(browser, u3, roomCode);
 
