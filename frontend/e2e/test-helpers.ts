@@ -12,22 +12,30 @@ import { Page, BrowserContext, expect } from '@playwright/test';
 export async function enterLobby(page: Page, url?: string): Promise<void> {
   await page.goto(url || FRONTEND_URL);
 
-  const lobby = page.locator('.lobby-view-root');
+  const landed = page.locator('.lobby-view-root, .game-view-container');
   const authInput = page.locator('#displayName');
 
-  // Either we land straight in the lobby (returning visitor),
-  // or the AuthView asks for a display name on first visit.
+  // Either we land straight in the app (returning visitor - lobby OR an
+  // already-joined game table), or the AuthView asks for a display name.
   const target = Promise.race([
-    lobby.waitFor({ state: 'visible', timeout: 15000 }).then(() => 'lobby' as const),
+    landed.waitFor({ state: 'visible', timeout: 15000 }).then(() => 'app' as const),
     authInput.waitFor({ state: 'visible', timeout: 15000 }).then(() => 'auth' as const),
   ]);
   const where = await target;
 
   if (where === 'auth') {
-    const uniqueName = `PW_${Math.random().toString(36).slice(2, 10)}`;
-    await authInput.fill(uniqueName);
-    await page.click('.auth-submit-btn');
-    await expect(lobby).toBeVisible({ timeout: 15000 });
+    for (let attempt = 0; attempt < 3 && !(await landed.isVisible({ timeout: 1000 }).catch(() => false)); attempt++) {
+      const uniqueName = `PW_${Math.random().toString(36).slice(2, 10)}_${attempt}`;
+      try {
+        await authInput.fill(uniqueName, { timeout: 5000 });
+        await page.click('.auth-submit-btn', { timeout: 5000 });
+      } catch {
+        break; // form vanished - app view likely won the race
+      }
+      // Registration may race the fingerprint agent on cold boots - retry
+      await landed.waitFor({ state: 'visible', timeout: 12000 }).catch(() => {});
+    }
+    await expect(landed).toBeVisible({ timeout: 15000 });
   }
 }
 
@@ -356,15 +364,28 @@ export async function waitForTurnChange(page: Page, prevPlayerId: string, timeou
   );
 }
 
+
+/**
+ * Dispatch a native DOM click - immune to framer-motion instability
+ * (whileHover keeps cards perpetually "moving" under the virtual cursor,
+ * which makes Playwright's actionability wait time out).
+ */
+export async function domClick(page: Page, selector: string, index = 0): Promise<void> {
+  await page.evaluate(([sel, i]) => {
+    const el = document.querySelectorAll(sel)[i] as HTMLElement | undefined;
+    if (!el) throw new Error(`domClick: no element for ${sel}[${i}]`);
+    el.click();
+  }, [selector, index]);
+}
+
 /** Select the first hand card, then tap the deck: one atomic discard+draw. */
 export async function playTurnFromDeck(page: Page): Promise<void> {
-  const stale = page.locator('.hand-card.selected-lift');
-  const staleCount = await stale.count();
-  for (let i = 0; i < staleCount; i++) {
-    await stale.first().click();
-  }
-  await page.locator('.hand-card').first().click();
-  await page.locator('.draw-pile-zone').click();
+  // Clear leftovers natively so React state (not just classes) updates
+  await page.evaluate(() =>
+    [...document.querySelectorAll('.hand-card.selected-lift')].forEach((el) => (el as HTMLElement).click())
+  );
+  await domClick(page, '.hand-card');
+  await domClick(page, '.draw-pile-zone');
 }
 
 /**
@@ -375,11 +396,9 @@ export async function playTurnFromDeck(page: Page): Promise<void> {
 export async function playSmartTurn(page: Page): Promise<void> {
   // Deselect anything left over from previous tests - leftover selections
   // silently corrupt every later discard
-  const stale = page.locator('.hand-card.selected-lift');
-  const staleCount = await stale.count();
-  for (let i = 0; i < staleCount; i++) {
-    await stale.first().click();
-  }
+  await page.evaluate(() =>
+    [...document.querySelectorAll('.hand-card.selected-lift')].forEach((el) => (el as HTMLElement).click())
+  );
 
   const hand: Array<{ id: string; rank: string }> = (await getState(page))?.hand ?? [];
   const byRank = new Map<string, number[]>();
@@ -392,16 +411,19 @@ export async function playSmartTurn(page: Page): Promise<void> {
   const targets = groups[0] ?? [0];
 
   for (const index of targets) {
-    await page.locator('.hand-card').nth(index).click();
+    await domClick(page, '.hand-card', index);
   }
-  await page.locator('.draw-pile-zone').click();
+  await domClick(page, '.draw-pile-zone');
 }
 
 /** Click the Yaniv HUD button when it is enabled (eligible + my turn). */
 export async function tryCallYanivUi(page: Page): Promise<boolean> {
-  const btn = page.locator('button.call-yaniv-btn-hud:not([disabled])');
-  if (await btn.isVisible({ timeout: 500 }).catch(() => false)) {
-    await btn.click();
+  const enabled = await page.evaluate(() => {
+    const btn = document.querySelector('button.call-yaniv-btn-hud') as HTMLButtonElement | null;
+    return !!btn && !btn.disabled;
+  });
+  if (enabled) {
+    await domClick(page, 'button.call-yaniv-btn-hud');
     return true;
   }
   return false;
@@ -409,7 +431,7 @@ export async function tryCallYanivUi(page: Page): Promise<boolean> {
 
 /** Click through the round-over results screen. */
 export async function continueNextRound(page: Page): Promise<void> {
-  await page.locator('.continue-round-btn').click();
+  await domClick(page, '.continue-round-btn');
 }
 
 /** Read the 6-char room code from the in-game header tag. */

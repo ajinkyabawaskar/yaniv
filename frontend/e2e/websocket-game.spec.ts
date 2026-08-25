@@ -84,20 +84,22 @@ test.describe('Yaniv WebSocket Game Flow', () => {
   let roomCode: string;
   let page1: Page;
 
-  test.beforeAll(async () => {
+  test.beforeAll(async ({ browser }) => {
     user1 = await createUser('ws_test_1', 'WS Player 1');
     user2 = await createUser('ws_test_2', 'WS Player 2');
     const room = await createRoomApi(user1);
     roomCode = room.roomCode;
     await joinRoomApi(user2, roomCode);
-  });
 
-  test('Host opens table via invite link and starts game', async ({ browser }) => {
+    // Seat and deal in beforeAll so a worker restart can't cascade
+    // undefined pages through the remaining tests
     page1 = await openSeatedPage(browser, user1, roomCode);
-
     await page1.waitForFunction(() => (window as any).__STOMP_CLIENT__?.connected === true, undefined, { timeout: 15000 });
     await page1.click('button:has-text("Deal & Start")');
     await waitForGameStarted(page1);
+  });
+
+  test('Host opens table via invite link and starts game', async () => {
 
     const state = await getState(page1);
     expect(state.roundNumber).toBe(1);

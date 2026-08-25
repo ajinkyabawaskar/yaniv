@@ -8,9 +8,9 @@
     "build": "./build-version.sh && cp -r build/* ../src/main/resources/static/",
     "build:local": "REACT_APP_VERSION=dev react-scripts build",
     "test": "react-scripts test",
-    "test:e2e": "playwright test",
+    "test:e2e": "tsc -p tsconfig.json --noEmit || exit 1 && npx playwright test api-game-flow --project=chromium --workers=1 && npx playwright test full-game-flow --project=chromium --workers=1 && npx playwright test websocket-game --project=chromium --workers=1 --reporter=line",
     "test:e2e:ui": "playwright test --ui",
-    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:headed": "tsc -p tsconfig.json --noEmit || exit 1 && npx playwright test api-game-flow --project=chromium --workers=1 && npx playwright test full-game-flow --project=chromium --workers=1 && npx playwright test websocket-game --project=chromium --workers=1",
     "eject": "react-scripts eject"
   },
   "dependencies": {
