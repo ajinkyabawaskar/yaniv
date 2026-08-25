@@ -1,6 +1,7 @@
 import { test, expect, Page } from '@playwright/test';
 import {
   openSeatedPage,
+  pullGameState,
   getState,
   waitForGameState,
   waitForGameStarted,
@@ -112,8 +113,17 @@ test.describe('Yaniv WebSocket Game Flow', () => {
     await page2.waitForFunction(() => (window as any).__STOMP_CLIENT__?.connected === true, undefined, { timeout: 15000 });
     await waitForGameStarted(page2);
 
-    const state1 = await getState(page1);
-    const state2 = await getState(page2);
+    // A concurrent refresh can transiently wipe the debug mirror - re-pull
+    const ensureFresh = async (p: Page) => {
+      let st = await getState(p);
+      if (!st?.currentState) {
+        await pullGameState(p);
+        st = await getState(p);
+      }
+      return st;
+    };
+    const state1 = await ensureFresh(page1);
+    const state2 = await ensureFresh(page2);
 
     expect(state1.currentState).toBe(state2.currentState);
     expect(state1.roundNumber).toBe(state2.roundNumber);
