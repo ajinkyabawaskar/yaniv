@@ -728,22 +728,23 @@ class GameLifecycleScenariosTest {
     }
 
     @Test
-    void D6_invalidCombination_rejected_noMutation() {
+    void D6_invalidCombination_rejected_noMutation() throws Exception {
         startStartedGame();
         String current = engineFromSnapshot().getCurrentPlayer();
-        var hand = engineFromSnapshot().getPlayerHand(current).getCards();
-        // two cards with different ranks AND different suits are never a valid combo
-        List<String> badPair = hand.stream()
-                .filter(a -> hand.stream().anyMatch(b -> b != a
-                        && b.getValue() >= 5 && a.getValue() >= 5
-                        && b.getRank() != a.getRank()
-                        && b.getSuit() != a.getSuit()))
-                .map(c -> c.getId())
-                .distinct()
-                .limit(2)
-                .toList();
-        org.junit.jupiter.api.Assumptions.assumeTrue(badPair.size() == 2,
-                "need two mismatched high cards for this case");
+        YanivGameEngine engine = liveEngine();
+        // Force deterministic hand so CI (JDK 21) and local (JDK 26) behave identically;
+        // 5H + 9D are different rank, different suit, not consecutive -> never a valid set/run.
+        Hand forcedHand = new Hand(List.of(
+                new shop.abwork.yanif.game.model.Card("c1", shop.abwork.yanif.game.model.Card.Suit.HEARTS, shop.abwork.yanif.game.model.Card.Rank.FIVE),
+                new shop.abwork.yanif.game.model.Card("c2", shop.abwork.yanif.game.model.Card.Suit.DIAMONDS, shop.abwork.yanif.game.model.Card.Rank.NINE),
+                new shop.abwork.yanif.game.model.Card("c3", shop.abwork.yanif.game.model.Card.Suit.CLUBS, shop.abwork.yanif.game.model.Card.Rank.KING),
+                new shop.abwork.yanif.game.model.Card("c4", shop.abwork.yanif.game.model.Card.Suit.SPADES, shop.abwork.yanif.game.model.Card.Rank.ACE),
+                new shop.abwork.yanif.game.model.Card("c5", shop.abwork.yanif.game.model.Card.Suit.HEARTS, shop.abwork.yanif.game.model.Card.Rank.TWO)
+        ));
+        engineHands(engine).put(current, forcedHand);
+        snapshotStore.put(ROOM, engine.toSnapshot());
+
+        List<String> badPair = List.of("c1", "c2");
 
         controller.handleGameAction(ROOM, discardAction(current, badPair), auth(current));
 
