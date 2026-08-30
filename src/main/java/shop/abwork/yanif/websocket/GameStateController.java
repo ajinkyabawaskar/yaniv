@@ -161,7 +161,11 @@ public class GameStateController {
         }
 
         // Check if there's an active game engine for this room (memory or Redis snapshot)
+        // Track whether we restored from snapshot (as opposed to finding in memory)
+        boolean engineWasInMemory = gameEngines.containsKey(roomId);
         YanivGameEngine engine = getOrRestoreEngine(roomId);
+        boolean engineRestoredFromSnapshot = !engineWasInMemory && engine != null;
+
         if (engine == null && shouldAbortToLobby(roomId)) {
             // No restorable game and storage confirms it: return the room to the lobby
             abortStaleGame(roomId);
@@ -298,6 +302,14 @@ public class GameStateController {
                         }
 
                         engine.processDraw(userId, action.drawSource, drawnCard);
+                    }
+                    case "BONUS_DISCARD" -> {
+                        if (!engine.isBonusDiscardActive()) {
+                            sendErrorToUser(userId, "No bonus discard available");
+                            return;
+                        }
+                        boolean shouldDiscard = action.bonusDiscard != null && action.bonusDiscard;
+                        engine.processBonusDiscard(userId, shouldDiscard);
                     }
                     case "CALL_YANIV" -> {
                         engine.callYaniv(userId);
@@ -483,6 +495,9 @@ public class GameStateController {
             // An active game must never receive lobby-shaped state (it would
             // blank every seated client) - answer the requester personally.
             YanivGameEngine engine = gameEngines.get(roomId);
+            if (engine == null) {
+                engine = getOrRestoreEngine(roomId);
+            }
             if (engine != null && !engine.isGameOver()) {
                 messagingTemplate.convertAndSendToUser(
                         userId,
@@ -492,6 +507,7 @@ public class GameStateController {
                 return;
             }
 
+            // No active game engine (or game is over) - broadcast lobby state to all players
             broadcastLobbyState(roomId);
 
         } catch (Exception e) {
@@ -502,13 +518,10 @@ public class GameStateController {
     }
 
     /**
-     * Broadcast lobby state to all players in a room.
+     * Build lobby state message for a game.
      */
-    private void broadcastLobbyState(String roomId) {
-        Game game = gameService.getGameById(roomId);
-        if (game == null) return;
-
-        var players = gameService.getGamePlayers(roomId);
+    private GameStateMessage buildLobbyStateMessage(Game game) {
+        var players = gameService.getGamePlayers(game.getId());
         Map<String, String> playerNames = new HashMap<>();
         List<PlayerInfo> playerInfos = new ArrayList<>();
         for (var player : players) {
@@ -525,7 +538,7 @@ public class GameStateController {
         }
 
         GameStateMessage lobbyState = new GameStateMessage();
-        lobbyState.gameId = roomId;
+        lobbyState.gameId = game.getId();
         lobbyState.roomCode = game.getRoomCode();
         lobbyState.maxPlayers = game.getMaxPlayers();
         lobbyState.currentState = game.getStatus().toString();
@@ -538,7 +551,19 @@ public class GameStateController {
         lobbyState.players = playerInfos;
         lobbyState.drawableDiscardCards = new ArrayList<>();
         lobbyState.topDiscardCards = new ArrayList<>();
+        return lobbyState;
+    }
 
+    /**
+     * Broadcast lobby state to all players in a room.
+     */
+    private void broadcastLobbyState(String roomId) {
+        Game game = gameService.getGameById(roomId);
+        if (game == null) return;
+
+        GameStateMessage lobbyState = buildLobbyStateMessage(game);
+
+        var players = gameService.getGamePlayers(roomId);
         for (var player : players) {
             String playerUserId = player.getId().getUserId();
             messagingTemplate.convertAndSendToUser(
@@ -589,7 +614,7 @@ public class GameStateController {
                     .toList();
             YanivGameEngine engine = new YanivGameEngine(roomId, (List<String>) playerIds,
                     yanivThreshold,
-                    game.getTargetScore() != null ? game.getTargetScore() : 200);
+                    game.getTargetScore() != null ? game.getTargetScore() : 100);
             engine.setYanivContestTimerSeconds(yanivContestTimerSeconds);
             gameEngines.put(roomId, engine);
 
@@ -623,6 +648,7 @@ public class GameStateController {
         var game = gameService.getGameById(roomId);
         message.roomCode = game != null ? game.getRoomCode() : "";
         message.maxPlayers = game != null ? game.getMaxPlayers() : 6;
+        message.targetScore = game != null ? game.getTargetScore() : 100;
         message.roundNumber = engine.getRoundNumber();
         message.currentState = engine.getCurrentState().toString();
         message.currentTurnPlayerId = engine.getCurrentPlayer();
@@ -758,6 +784,19 @@ public class GameStateController {
 
         if (autoPlayedPlayerId != null) {
             message.autoPlayedPlayerId = autoPlayedPlayerId;
+        }
+
+        // Bonus discard state
+        if (engine.isBonusDiscardActive()) {
+            message.bonusDiscardActive = true;
+            Card bonusCard = engine.getPendingBonusCard();
+            if (bonusCard != null) {
+                Map<String, Object> cardMap = new HashMap<>();
+                cardMap.put("id", bonusCard.getId());
+                cardMap.put("rank", bonusCard.getRank().toString());
+                cardMap.put("suit", bonusCard.getSuit().toString());
+                message.pendingBonusCard = cardMap;
+            }
         }
 
         return message;
@@ -1153,11 +1192,13 @@ public class GameStateController {
         }
 
         Set<String> disconnected = disconnectedInGame.get(roomId);
-        if (disconnected == null || !disconnected.contains(engine.getCurrentPlayer())) {
+        boolean currentPlayerDisconnected = disconnected != null && disconnected.contains(engine.getCurrentPlayer());
+        if (!currentPlayerDisconnected) {
             return; // connected players keep unlimited thinking time
         }
 
-        long delayMs = turnTimerSeconds * 1000L;
+        // Disconnected player: auto-play immediately (no wait)
+        long delayMs = 800L; // Small delay to allow reconnect handling to complete
         long deadline = System.currentTimeMillis() + delayMs;
         turnDeadlines.put(roomId, deadline);
 
@@ -1211,6 +1252,11 @@ public class GameStateController {
                         }
                     }
                     engine.processDraw(expectedPlayer, decision.drawSource(), drawnCard);
+
+                    // Handle bonus discard if triggered - auto-play chooses to keep the card (not discard)
+                    if (engine.getCurrentState() == YanivGameEngine.GameState.BONUS_DISCARD) {
+                        engine.processBonusDiscard(expectedPlayer, false);
+                    }
                 }
 
                 System.out.println("Auto-played turn for player " + expectedPlayer + " in room " + roomId);
@@ -1246,12 +1292,13 @@ public class GameStateController {
      * Request DTOs
      */
     public static class GameActionMessage {
-        public String actionType;       // DISCARD_AND_DRAW, CALL_YANIV
+        public String actionType;       // DISCARD_AND_DRAW, CALL_YANIV, BONUS_DISCARD
         public String playerId;
         public List<String> discardedCardIds;
         public String drawSource;       // DECK or DISCARD_PILE
         public String drawnCardId;
         public String actionId;         // For deduplication (client-generated unique ID)
+        public Boolean bonusDiscard;    // For BONUS_DISCARD action: true to discard, false to keep
     }
 
     public static class YanivCallMessage {
@@ -1306,6 +1353,7 @@ public class GameStateController {
 
         // Max players in room
         public Integer maxPlayers;
+        public Integer targetScore;
 
         // All player hands revealed on ROUND_OVER
         public Map<String, List<Map<String, Object>>> allPlayerHands;
@@ -1318,5 +1366,9 @@ public class GameStateController {
         public int turnTimerSeconds;          // Total allowed seconds per turn
         public long turnEndsAt;               // Server epoch ms when the current turn expires
         public String autoPlayedPlayerId;     // Set when this state change was played by auto-play
+
+        // Bonus discard state
+        public boolean bonusDiscardActive;    // True when player can do bonus discard
+        public Map<String, Object> pendingBonusCard; // The card drawn that matches discarded rank
     }
 }

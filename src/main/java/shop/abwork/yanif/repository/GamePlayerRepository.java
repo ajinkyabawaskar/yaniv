@@ -3,6 +3,7 @@ package shop.abwork.yanif.repository;
 import shop.abwork.yanif.entity.GamePlayer;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -30,4 +31,10 @@ public interface GamePlayerRepository extends JpaRepository<GamePlayer, GamePlay
      */
     @Query("SELECT gp FROM GamePlayer gp WHERE gp.id.userId = :userId")
     List<GamePlayer> findByUserId(String userId);
+
+    /**
+     * Count players per game for a list of game IDs.
+     */
+    @Query("SELECT gp.id.gameId, COUNT(gp) FROM GamePlayer gp WHERE gp.id.gameId IN :gameIds GROUP BY gp.id.gameId")
+    List<Object[]> countByGameIdIn(@Param("gameIds") List<String> gameIds);
 }

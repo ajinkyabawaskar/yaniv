@@ -53,6 +53,10 @@ interface TableCanvasProps {
   turnEndsAt?: number | null;
   turnTimerTotalSeconds?: number;
   autoPlayedPlayerId?: string | null;
+  // Bonus discard fields
+  bonusDiscardActive?: boolean;
+  pendingBonusCard?: Card | null;
+  onBonusDiscard?: ((shouldDiscard: boolean) => void) | null;
 }
 
 export const getCardImagePath = (rank: string, suit: string): string => {
@@ -231,6 +235,10 @@ export default function TableCanvas({
   turnEndsAt = null,
   turnTimerTotalSeconds = 45,
   autoPlayedPlayerId = null,
+  // Bonus discard fields
+  bonusDiscardActive = false,
+  pendingBonusCard = null,
+  onBonusDiscard = null,
 }: TableCanvasProps) {
   const [selectedCards, setSelectedCards] = useState<string[]>([]);
   const [statusFeedback, setStatusFeedback] = useState<string | null>(null);
@@ -724,10 +732,15 @@ export default function TableCanvas({
                   <div className="opponent-score-pill">
                     <span className="score-val">{opponent.score} pts</span>
                   </div>
-                  {/* Show YOUR TURN only when it's actually this player's turn */}
-                  {isTurn && (
+                  {/* Show YOUR TURN only when it's actually this player's turn AND it's the current user */}
+                  {isTurn && isCurrentPlayer && (
                     <span className="current-player-turn-indicator-small">
                       <span className="turn-label-small">YOUR TURN</span>
+                    </span>
+                  )}
+                  {isTurn && !isCurrentPlayer && (
+                    <span className="current-player-turn-indicator-small opponent-turn">
+                      <span className="turn-label-small">{displayName}'s Turn</span>
                     </span>
                   )}
                   {isDisconnected && (
@@ -857,6 +870,48 @@ export default function TableCanvas({
             )}
           </div>
         </div>
+
+        {/* Bonus Discard UI - shown when player draws a matching rank card from deck */}
+        {bonusDiscardActive && pendingBonusCard && onBonusDiscard && (
+          <div className="bonus-discard-overlay">
+            <div className="bonus-discard-panel">
+              <div className="bonus-discard-header">
+                <span className="bonus-icon">✨</span>
+                <span className="bonus-title">Matching Rank Bonus!</span>
+              </div>
+              <div className="bonus-discard-explanation">
+                You discarded a <strong>{pendingBonusCard.rank} of {pendingBonusCard.suit}</strong> and drew a <strong>{pendingBonusCard.rank} of {pendingBonusCard.suit}</strong>!
+              </div>
+              <div className="bonus-card-display">
+                <img
+                  src={getCardImagePath(pendingBonusCard.rank, pendingBonusCard.suit)}
+                  alt={`${pendingBonusCard.rank} of ${pendingBonusCard.suit}`}
+                  className="bonus-card-img"
+                />
+                <span className="bonus-card-label">{pendingBonusCard.rank} of {pendingBonusCard.suit}</span>
+              </div>
+              <div className="bonus-discard-actions">
+                <button
+                  className="bonus-btn bonus-btn-discard"
+                  onClick={() => onBonusDiscard(true)}
+                  disabled={!isPlayerTurn}
+                >
+                  🗑️ Discard (End Turn)
+                </button>
+                <button
+                  className="bonus-btn bonus-btn-keep"
+                  onClick={() => onBonusDiscard(false)}
+                  disabled={!isPlayerTurn}
+                >
+                  🤚 Keep in Hand
+                </button>
+              </div>
+              <div className="bonus-discard-hint">
+                {isPlayerTurn ? '' : 'Waiting for your turn...'}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* 3. Main Player Dock (Bottom Center) */}
         <div className="main-player-dock">

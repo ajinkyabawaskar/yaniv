@@ -49,32 +49,37 @@
   min-height: 48px;
 }
 
-/* Scoreboard Toggle Button in Header */
-.scoreboard-toggle-btn {
+/* Header action buttons (Scores, Exit Table) */
+.header-btn {
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: var(--ink-light);
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border-radius: 20px;
-  background: var(--gold-gradient);
-  color: #0c2b1e;
-  font-family: 'Cinzel', serif;
-  font-size: 11px;
-  font-weight: 700;
-  box-shadow: 0 2px 8px rgba(212, 175, 55, 0.4);
-  min-height: 36px;
-  white-space: nowrap;
+  transition: all 0.15s ease;
 }
 
-.scoreboard-toggle-btn:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(212, 175, 55, 0.5);
+.header-btn:hover {
+  background: rgba(0, 0, 0, 0.4);
+  border-color: rgba(255, 255, 255, 0.3);
 }
 
 .header-left {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.table-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1;
 }
 
 .room-code-tag {
@@ -88,11 +93,9 @@
 .round-badge {
   font-family: 'DM Mono', monospace;
   font-size: 11px;
-  background: rgba(212, 175, 55, 0.15);
-  border: 1px solid rgba(212, 175, 55, 0.35);
   color: var(--gold-light);
-  padding: 2px 8px;
-  border-radius: 12px;
+  opacity: 0.7;
+  padding-left: 0;
 }
 
 .yaniv-timer-badge {
@@ -129,23 +132,6 @@
   gap: 10px;
 }
 
-.exit-table-btn {
-  font-family: 'DM Mono', monospace;
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 12px;
-  background: rgba(239, 68, 68, 0.15);
-  border: 1px solid rgba(239, 68, 68, 0.4);
-  color: #fca5a5;
-  display: flex;
-  align-items: center;
-}
-
-.exit-table-btn:hover {
-  background: rgba(239, 68, 68, 0.3);
-}
-
 /* Play Layout - height tracks the real header height via --game-header-h
    (set from GameView.tsx; header can wrap taller on mobile) */
 .game-play-layout {
@@ -172,7 +158,7 @@
 }
 
 /* ==========================================================================
-   Lobby Waiting Room
+   Lobby Waiting Table
    ========================================================================== */
 .game-lobby-wrapper {
   flex: 1;
@@ -208,31 +194,6 @@
   font-size: 13px;
   color: var(--ink-light);
   margin-top: -10px;
-}
-
-.invite-link-box {
-  display: flex;
-  gap: 8px;
-}
-
-.invite-url-input {
-  flex: 1;
-  padding: 10px 14px;
-  border-radius: 8px;
-  background: rgba(0, 0, 0, 0.4);
-  border: 1px solid rgba(212, 175, 55, 0.3);
-  color: var(--gold-light);
-  font-family: 'DM Mono', monospace;
-  font-size: 12px;
-}
-
-.copy-btn {
-  padding: 0 16px;
-  border-radius: 8px;
-  background: var(--gold-gradient);
-  color: #0c2b1e;
-  font-weight: 700;
-  font-size: 12px;
 }
 
 .lobby-players-grid h4 {
@@ -404,6 +365,31 @@
   font-size: 15px;
   font-weight: 700;
   color: var(--gold-light);
+}
+
+.winner-name.game-winner {
+  font-size: 18px;
+  color: var(--gold-primary);
+  animation: winnerPulse 2s ease-in-out infinite;
+}
+
+@keyframes winnerPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.02); }
+}
+
+.game-over-final {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(212, 175, 55, 0.2);
+  text-align: center;
+}
+
+.game-over-final p {
+  font-family: 'Cinzel', serif;
+  font-size: 16px;
+  color: var(--gold-light);
+  margin: 0 0 16px;
 }
 
 .scorecard-table {
@@ -618,7 +604,6 @@
 
   .round-badge {
     font-size: 10px;
-    padding: 3px 8px;
   }
 
   .header-actions {

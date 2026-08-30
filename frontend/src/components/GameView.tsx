@@ -22,7 +22,7 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
   const [startMessage, setStartMessage] = useState<string | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
   const [showRoundOver, setShowRoundOver] = useState(false);
-  const [copiedLink, setCopiedLink] = useState(false);
+  
   const [isMobile, setIsMobile] = useState(false);
   const [showScoreboard, setShowScoreboard] = useState(false);
   const [yanivContestTimerRemaining, setYanivContestTimerRemaining] = useState<number>(0);
@@ -118,9 +118,11 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
             } else {
               gameState.removeDisconnectedPlayer(gameData.playerDisconnected);
             }
+            return; // Don't process the rest - this message only has disconnected info
           }
 
-          const isRoundOverState = gameData.currentState === 'ROUND_OVER';
+          const isRoundOverState = gameData.currentState === 'ROUND_OVER' || gameData.currentState === 'GAME_OVER';
+          const isGameOverState = gameData.currentState === 'GAME_OVER';
           setShowRoundOver(isRoundOverState);
 
           gameState.setGame({
@@ -144,6 +146,7 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
             isAsaf: gameData.isAsaf || false,
             asafByUserId: gameData.asafByUserId || null,
             isRoundOver: isRoundOverState,
+            isGameOver: isGameOverState,
             // Yaniv contest timer fields
             yanivCallerId: gameData.yanivCallerId || null,
             yanivCallerName: gameData.yanivCallerName || null,
@@ -154,6 +157,8 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
             turnEndsAt: gameData.turnEndsAt || null,
             turnTimerSeconds: gameData.turnTimerSeconds || 45,
             autoPlayedPlayerId: gameData.autoPlayedPlayerId || null,
+            maxPlayers: gameData.maxPlayers || 6,
+            targetScore: gameData.targetScore || 100,
           });
 
           if (gameData.autoPlayedPlayerId) {
@@ -167,7 +172,7 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
           (window as any).__GAME_STATE__ = gameData;
           (window as any).__CURRENT_USER_ID__ = userId;
           setIsPlayerTurn(gameData.currentTurnPlayerId === userId);
-          setGameStarted(gameData.currentState !== 'LOBBY' && gameData.currentState !== 'ROUND_OVER');
+          setGameStarted(gameData.currentState !== 'LOBBY' && gameData.currentState !== 'ROUND_OVER' && gameData.currentState !== 'GAME_OVER');
           setLoading(false);
         })
       : null;
@@ -185,12 +190,13 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
           roomCode: gameData.roomCode,
           currentState: gameData.status,
           players: gameData.players || [],
+          maxPlayers: gameData.maxPlayers || 6,
         });
         const userId = localStorage.getItem('userId');
         setIsHost(gameData.hostUserId === userId);
         setGameStarted(gameData.status !== 'LOBBY');
       })
-      .catch((err) => console.error('Failed to load game room:', err))
+      .catch((err) => console.error('Failed to load game table:', err))
       .finally(() => setLoading(false));
 
     return () => {
@@ -234,6 +240,15 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
     });
   };
 
+  const handleBonusDiscard = (shouldDiscard: boolean) => {
+    const userId = localStorage.getItem('userId');
+    send('/app/room/' + gameId + '/action', {
+      actionType: 'BONUS_DISCARD',
+      playerId: userId,
+      bonusDiscard: shouldDiscard,
+    });
+  };
+
   const handleCallYaniv = () => {
     const userId = localStorage.getItem('userId');
     send('/app/room/' + gameId + '/call-yaniv', {
@@ -246,13 +261,6 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
     send('/app/room/' + gameId + '/contest-yaniv', {
       playerId: userId,
     });
-  };
-
-  const handleCopyInviteLink = () => {
-    const joinUrl = `${window.location.origin}/join/${roomCode}`;
-    navigator.clipboard.writeText(joinUrl);
-    setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2500);
   };
 
   // Compute all players for TableCanvas radial layout (including current player)
@@ -288,8 +296,10 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
       {/* Header Bar */}
       <div className="game-view-header" ref={headerRef}>
         <div className="header-left">
-          <span className="room-code-tag">ROOM #{roomCode}</span>
-          <span className="round-badge">ROUND {gameState.roundNumber || 1}</span>
+          <div className="table-info">
+            <span className="room-code-tag">TABLE #{roomCode}</span>
+            <span className="round-badge">ROUND {gameState.roundNumber || 1}</span>
+          </div>
           {gameState.yanivCallerId && yanivContestTimerRemaining > 0 && (
             <span className="yaniv-timer-badge">
               ⏱️ {yanivContestTimerRemaining}s
@@ -303,20 +313,17 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
         </div>
 
         <div className="header-actions">
-          <button className="copy-link-btn" onClick={handleCopyInviteLink}>
-            <span>{copiedLink ? '✓ Link Copied' : '🔗 Invite Link'}</span>
-          </button>
           {gameStarted && (
             <button
-              className="scoreboard-toggle-btn"
+              className="header-btn"
               onClick={() => setShowScoreboard(!showScoreboard)}
               aria-label={showScoreboard ? 'Hide Scoreboard' : 'Show Scoreboard'}
               aria-expanded={showScoreboard}
             >
-              <span>🏆 {showScoreboard ? 'Hide' : 'Scores'}</span>
+              <span>{showScoreboard ? 'Hide' : 'Scores'}</span>
             </button>
           )}
-          <button className="exit-table-btn" onClick={onExit}>
+          <button className="header-btn" onClick={onExit}>
             <span>Exit Table</span>
           </button>
         </div>
@@ -326,23 +333,11 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
       {!gameStarted ? (
         <div className="game-lobby-wrapper">
           <div className="lobby-glass-panel">
-            <h2 className="lobby-title">Game Lobby #{roomCode}</h2>
-            <p className="lobby-desc">Share room code or link to assemble your table (2–4 players)</p>
-
-            <div className="invite-link-box">
-              <input
-                type="text"
-                readOnly
-                value={`${window.location.origin}/join/${roomCode}`}
-                className="invite-url-input"
-              />
-              <button className="copy-btn" onClick={handleCopyInviteLink}>
-                {copiedLink ? 'Copied!' : 'Copy'}
-              </button>
-            </div>
+            <h2 className="lobby-title">Game Table #{roomCode}</h2>
+            <p className="lobby-desc">Share table code or link to assemble your table (2–{gameState.maxPlayers} players)</p>
 
             <div className="lobby-players-grid">
-              <h4>Joined Players ({gameState.players?.length || 0}/4)</h4>
+              <h4>Joined Players ({gameState.players?.length || 0}/{gameState.maxPlayers})</h4>
               <div className="players-list">
                 {gameState.players?.map((player) => (
                   <div key={player.userId} className="lobby-player-card">
@@ -411,6 +406,9 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
               turnEndsAt={gameState.turnEndsAt}
               turnTimerTotalSeconds={gameState.turnTimerSeconds}
               autoPlayedPlayerId={gameState.autoPlayedPlayerId}
+              bonusDiscardActive={gameState.bonusDiscardActive}
+              pendingBonusCard={gameState.pendingBonusCard}
+              onBonusDiscard={handleBonusDiscard}
             />
           </div>
 
@@ -420,6 +418,7 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
               scores={gameState.scores}
               currentTurnPlayerId={gameState.currentTurnPlayerId}
               eliminatedPlayers={gameState.eliminatedPlayers}
+              targetScore={gameState.targetScore}
             />
           </div>
 
@@ -434,13 +433,15 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
         </div>
       )}
 
-      {/* Round Over Modal & Scorecard */}
+      {/* Round Over / Game Over Modal & Scorecard */}
       {showRoundOver && (
         <div className="round-over-overlay">
           <div className="round-over-card">
             <div className="round-complete-header">
               <span className="trophy-icon">🏆</span>
-              <h2>Round {gameState.roundNumber} Complete!</h2>
+              <h2>
+                {gameState.isGameOver ? 'Game Over!' : `Round {gameState.roundNumber} Complete!`}
+              </h2>
             </div>
 
             {gameState.isAsaf && (
@@ -450,7 +451,31 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
             )}
 
             <div className="round-winner-banner">
-              {gameState.roundWinners && gameState.roundWinners.length > 0
+              {gameState.isGameOver
+                ? (() => {
+                    // For game over, find the winner from scores (lowest score wins)
+                    const scores = gameState.scores || {};
+                    const activePlayers = gameState.players?.filter(p => !gameState.eliminatedPlayers?.includes(p.userId)) || [];
+                    if (activePlayers.length === 1) {
+                      return (
+                        <span className="winner-name game-winner">
+                          🌟 {gameState.playerNames?.[activePlayers[0].userId] || activePlayers[0].userId} wins the game!
+                        </span>
+                      );
+                    }
+                    // Fallback: use roundWinners
+                    if (gameState.roundWinners && gameState.roundWinners.length > 0) {
+                      return gameState.roundWinners.map((winnerId, idx) => (
+                        <span key={winnerId} className="winner-name">
+                          {idx > 0 ? ' & ' : '🌟 '}
+                          {gameState.playerNames?.[winnerId] || winnerId}
+                          {gameState.isAsaf && winnerId === gameState.asafByUserId ? ' (ASAF)' : ''}
+                        </span>
+                      ));
+                    }
+                    return <span className="winner-name">🏆 Game Over!</span>;
+                  })()
+                : gameState.roundWinners && gameState.roundWinners.length > 0
                 ? gameState.roundWinners.map((winnerId, idx) => (
                     <span key={winnerId} className="winner-name">
                       {idx > 0 ? ' & ' : '🌟 '}
@@ -558,9 +583,19 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
               </table>
             </div>
 
-            <button className="continue-round-btn" onClick={handleNextRound}>
-              Continue to Next Round →
-            </button>
+            {!gameState.isGameOver && (
+              <button className="continue-round-btn" onClick={handleNextRound}>
+                Continue to Next Round →
+              </button>
+            )}
+            {gameState.isGameOver && (
+              <div className="game-over-final">
+                <p>Thanks for playing! 🎉</p>
+                <button className="continue-round-btn" onClick={onExit}>
+                  Exit Table
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

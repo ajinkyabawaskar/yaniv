@@ -52,7 +52,7 @@ public class InviteController {
      * {
      *   "friendUserId": "usr_771",
      *   "gameId": "game_123",
-     *   "roomCode": "RMX92A"
+     *   "roomCode": "ACE"
      * }
      */
     @MessageMapping("/app/game/invite")

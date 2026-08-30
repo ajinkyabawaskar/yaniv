@@ -18,9 +18,53 @@ import java.util.*;
 @CrossOrigin(origins = "*", maxAge = 3600)
 public class RoomController {
 
-    private static final int ROOM_CODE_LENGTH = 6;
-    private static final String ROOM_CODE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     private static final Random RANDOM = new Random();
+    private static final List<String> ROOM_CODE_WORDS = List.of(
+            "ace", "act", "add", "age", "ago", "aid", "aim", "air", "all", "and",
+            "ant", "any", "ape", "apt", "arc", "are", "ark", "arm", "art", "ash",
+            "ask", "asp", "ate", "awe", "axe", "aye", "bad", "bag", "ban", "bar",
+            "bat", "bay", "bed", "bee", "beg", "bet", "bid", "big", "bin", "bit",
+            "bob", "bog", "box", "boy", "bud", "bug", "bun", "bus", "but", "buy",
+            "bye", "cab", "cad", "cam", "can", "cap", "car", "cat", "caw", "cay",
+            "cob", "cod", "cog", "con", "coo", "cop", "cot", "cow", "coy", "cry",
+            "cub", "cue", "cup", "cut", "dab", "dad", "dam", "day", "den", "dew",
+            "did", "die", "dig", "dim", "din", "dip", "doc", "dog", "don", "dot",
+            "dry", "dub", "dug", "dun", "ear", "eat", "ebb", "eco", "egg", "ego",
+            "elf", "elk", "elm", "end", "era", "eve", "eye", "fab", "fad", "fan",
+            "far", "fat", "fax", "fay", "fed", "fee", "fen", "few", "fib", "fig",
+            "fin", "fir", "fit", "fix", "fla", "fly", "foe", "fog", "for", "fry",
+            "fun", "fur", "gab", "gad", "gap", "gas", "gay", "gem", "get", "gig",
+            "gin", "git", "god", "got", "gum", "gun", "gut", "guy", "gym", "gyp",
+            "had", "ham", "has", "hat", "hay", "hep", "her", "hew", "hex", "hey",
+            "hid", "him", "hip", "his", "hit", "hob", "hog", "hop", "hot", "how",
+            "hub", "hue", "hug", "hum", "hun", "hut", "ice", "icy", "ill", "imp",
+            "ink", "inn", "ion", "ire", "irk", "its", "ivy", "jab", "jag", "jam",
+            "jar", "jaw", "jay", "jet", "job", "jog", "joy", "jug", "jut", "keg",
+            "ken", "key", "kid", "kin", "kit", "lab", "lad", "lag", "lap", "law",
+            "lay", "lea", "led", "leg", "let", "lib", "lid", "lie", "lip", "lit",
+            "lob", "log", "lot", "low", "lug", "mad", "man", "map", "mar", "mat",
+            "maw", "may", "men", "met", "mid", "mil", "mix", "mob", "mod", "mom",
+            "mop", "mow", "mud", "mug", "mum", "nab", "nag", "nap", "nay", "net",
+            "new", "nib", "nod", "nor", "not", "now", "nun", "nut", "oak", "oar",
+            "oat", "odd", "off", "oil", "old", "one", "opt", "orb", "ore", "our",
+            "out", "ova", "owe", "owl", "own", "pad", "pal", "pan", "pap", "par",
+            "pas", "pat", "paw", "pay", "pea", "peg", "pen", "pep", "per", "pet",
+            "pie", "pig", "pin", "pip", "pit", "pla", "pod", "poe", "pop", "pot",
+            "pow", "pro", "pry", "pub", "pug", "pun", "pup", "put", "rag", "ram",
+            "ran", "rap", "rat", "raw", "ray", "red", "rep", "ret", "rib", "rid",
+            "rig", "rim", "rip", "rob", "rod", "roe", "rot", "row", "rub", "rug",
+            "run", "rut", "rye", "sad", "sag", "sat", "saw", "say", "sea", "see",
+            "set", "sew", "sex", "shy", "sin", "sip", "sir", "sit", "six", "ski",
+            "sky", "sly", "sob", "sod", "son", "sow", "soy", "spa", "spy", "sri",
+            "stg", "sty", "sub", "sue", "sum", "sun", "sup", "tab", "tad", "tag",
+            "tan", "tap", "tar", "tat", "tax", "tea", "ted", "tee", "ten", "the",
+            "thy", "tie", "tin", "tip", "toe", "tog", "tom", "ton", "too", "top",
+            "tot", "tow", "toy", "try", "tub", "tug", "tun", "tut", "two", "use",
+            "van", "vat", "vet", "vie", "vow", "wan", "war", "was", "wax", "way",
+            "web", "wed", "wee", "wet", "who", "why", "wig", "win", "wit", "woe",
+            "wok", "won", "woo", "wow", "wry", "yen", "yes", "yet", "yew", "you",
+            "zap", "zip", "zoo"
+    );
 
     private final GameService gameService;
     private final UserService userService;
@@ -51,8 +95,8 @@ public class RoomController {
             // Generate unique room code
             String roomCode = generateUniqueRoomCode();
 
-            // Determine target score (default 200)
-            Integer targetScore = request.targetScore != null ? request.targetScore : 200;
+            // Determine target score (default 100)
+            Integer targetScore = request.targetScore != null ? request.targetScore : 100;
             // Determine max players (default 6)
             Integer maxPlayers = request.maxPlayers != null ? request.maxPlayers : 6;
 
@@ -83,7 +127,7 @@ public class RoomController {
      * Join an existing game room using room code.
      * Requires JWT authentication.
      *
-     * @param roomCode Room code (6 characters)
+     * @param roomCode Room code (3 letters)
      * @param auth     Spring security authentication (contains userId)
      * @return Game room info
      */
@@ -146,7 +190,7 @@ public class RoomController {
     /**
      * Get game info by room code (public endpoint, no JWT required).
      *
-     * @param roomCode Room code (6 characters)
+     * @param roomCode Room code (3 letters)
      * @return Game info including players
      */
     @GetMapping("/code/{roomCode}")
@@ -169,6 +213,32 @@ public class RoomController {
             result.put("createdAt", game.getCreatedAt());
 
             return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError()
+                    .body(Map.of("error", "An error occurred: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * Get open lobbies (games in LOBBY status) - public endpoint, no JWT required.
+     * Returns up to 5 most recent open lobbies with player counts.
+     *
+     * @return List of open lobbies
+     */
+    @GetMapping("/open")
+    public ResponseEntity<?> getOpenLobbies() {
+        try {
+            List<Map<String, Object>> lobbies = gameService.getOpenLobbies();
+            
+            // Enrich with host display names
+            for (Map<String, Object> lobby : lobbies) {
+                String hostUserId = (String) lobby.get("hostUserId");
+                userService.getUserById(hostUserId).ifPresent(u -> {
+                    lobby.put("hostDisplayName", u.getDisplayName());
+                });
+            }
+
+            return ResponseEntity.ok(lobbies);
         } catch (Exception e) {
             return ResponseEntity.internalServerError()
                     .body(Map.of("error", "An error occurred: " + e.getMessage()));
@@ -267,18 +337,13 @@ public class RoomController {
     }
 
     /**
-     * Generate a unique 6-character room code.
-     * (In production, should check database for uniqueness)
+     * Generate a unique 3-letter room code from a word list.
      *
-     * @return Random 6-character room code
+     * @return Random 3-letter room code
      */
     private String generateUniqueRoomCode() {
         for (int i = 0; i < 10; i++) { // Retry up to 10 times
-            StringBuilder code = new StringBuilder(ROOM_CODE_LENGTH);
-            for (int j = 0; j < ROOM_CODE_LENGTH; j++) {
-                code.append(ROOM_CODE_CHARS.charAt(RANDOM.nextInt(ROOM_CODE_CHARS.length())));
-            }
-            String roomCode = code.toString();
+            String roomCode = ROOM_CODE_WORDS.get(RANDOM.nextInt(ROOM_CODE_WORDS.size())).toUpperCase();
             if (gameService.getGameByRoomCode(roomCode) == null) {
                 return roomCode;
             }

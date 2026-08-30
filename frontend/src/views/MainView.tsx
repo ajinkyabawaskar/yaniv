@@ -7,6 +7,7 @@ import FriendsSidebar, { FriendInfo } from '../components/FriendsSidebar';
 import InviteNotificationToast from '../components/InviteNotificationToast';
 import LobbyView from '../components/LobbyView';
 import GameView from '../components/GameView';
+import Avatar from '../components/Avatar';
 import './MainView.css';
 
 interface MainViewProps {
@@ -95,7 +96,7 @@ export default function MainView({ initialRoomCode }: MainViewProps) {
       setActiveView('game');
     } catch (err) {
       console.error('Failed to join game:', err);
-      alert('Could not join room #' + code + '. It may be full or invalid.');
+      alert('Could not join table #' + code + '. It may be full or invalid.');
     }
   }, []);
 
@@ -108,7 +109,7 @@ export default function MainView({ initialRoomCode }: MainViewProps) {
 
   const handleCreateGame = async () => {
     try {
-      const response = await gameApi.createRoom(200, 6);
+      const response = await gameApi.createRoom(100, 6);
       setCurrentGameId(response.gameId);
       setCurrentRoomCode(response.roomCode);
       setActiveView('game');
@@ -185,24 +186,24 @@ export default function MainView({ initialRoomCode }: MainViewProps) {
         </div>
 
         <div className="nav-right">
+          {FRONTEND_VERSION && FRONTEND_VERSION !== 'dev' && (
+            <span className="version-text" title="Frontend Version">
+              v{FRONTEND_VERSION}
+            </span>
+          )}
+
           <div className="user-profile-badge" onClick={() => setShowEditProfileModal(true)}>
-            <div className="user-avatar">{user?.displayName?.substring(0, 2).toUpperCase() || 'U'}</div>
             <div className="user-info">
               <span className="user-name">{user?.displayName}</span>
               <span className="edit-hint">✎ Edit Nickname</span>
             </div>
+            <Avatar
+              name={user?.displayName}
+              presence={isConnected ? 'ONLINE' : 'OFFLINE'}
+              size="xs"
+              className="nav-avatar"
+            />
           </div>
-
-          <div className="connection-pill">
-            <span className={`status-light ${isConnected ? 'online' : 'offline'}`} />
-            <span className="status-label">{isConnected ? 'LIVE' : 'OFFLINE'}</span>
-          </div>
-
-          {FRONTEND_VERSION && FRONTEND_VERSION !== 'dev' && (
-            <span className="version-badge" title="Frontend Version">
-              v{FRONTEND_VERSION}
-            </span>
-          )}
 
           <button onClick={handleLogout} className="nav-logout-btn">
             Logout

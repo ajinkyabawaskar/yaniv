@@ -6,12 +6,14 @@ interface ScoreboardViewProps {
   scores: Record<string, number>;
   currentTurnPlayerId: string | null;
   eliminatedPlayers: string[];
+  targetScore?: number;
 }
 
 export default function ScoreboardView({
   scores,
   currentTurnPlayerId,
   eliminatedPlayers,
+  targetScore,
 }: ScoreboardViewProps) {
   const playerNames = useGameStore((state) => state.playerNames);
 
@@ -59,7 +61,7 @@ export default function ScoreboardView({
       </div>
 
       <div className="scoreboard-footer-tip">
-        <span>Target Limit: 200 pts</span>
+        <span>Target Limit: {targetScore || 100} pts</span>
       </div>
     </div>
   );

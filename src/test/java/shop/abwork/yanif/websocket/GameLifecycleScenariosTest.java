@@ -71,6 +71,7 @@ class GameLifecycleScenariosTest {
 
         // updateGameStatus mutates the entity so later reads observe transitions
         roomGame = new Game("XYZ789", 200, HOST, 6);
+        roomGame.setId(ROOM); // Use test's ROOM constant as game ID for consistency
         roomGame.setStatus(Game.GameStatus.LOBBY);
         when(gameService.getGameById(ROOM)).thenReturn(roomGame);
         doAnswer(inv -> {
@@ -81,13 +82,18 @@ class GameLifecycleScenariosTest {
         when(gameService.getGamePlayers(ROOM)).thenReturn(List.of(
                 new GamePlayer(ROOM, HOST),
                 new GamePlayer(ROOM, OTHER)));
+        when(gameService.getGamePlayers(anyString())).thenReturn(List.of(
+                new GamePlayer(ROOM, HOST),
+                new GamePlayer(ROOM, OTHER)));
 
         when(userService.getUserById(HOST)).thenReturn(Optional.of(new User("f1", "Host", "AAAAAA")));
         when(userService.getUserById(OTHER)).thenReturn(Optional.of(new User("f2", "Other", "BBBBBB")));
 
+        when(gameService.getActiveGames()).thenReturn(List.of(roomGame));
+
         controller = new GameStateController(gameService, presenceService, userService,
                 messagingTemplate, 1 /* turn timer seconds */, true /* auto-play */,
-                1 /* yaniv contest window */);
+                1 /* yaniv contest window */, 7 /* yaniv threshold */);
     }
 
     @AfterEach
@@ -207,6 +213,14 @@ class GameLifecycleScenariosTest {
         return action;
     }
 
+    private GameStateController.GameActionMessage bonusDiscardAction(String playerId, boolean shouldDiscard) {
+        GameStateController.GameActionMessage action = new GameStateController.GameActionMessage();
+        action.actionType = "BONUS_DISCARD";
+        action.playerId = playerId;
+        action.bonusDiscard = shouldDiscard;
+        return action;
+    }
+
     /** Drive the game to ROUND_OVER quickly: force a legal yaniv call + contest. */
     private void reachRoundOverViaContest() throws Exception {
         startStartedGame();
@@ -243,6 +257,53 @@ class GameLifecycleScenariosTest {
         try { Thread.sleep(1500); } catch (InterruptedException ignored) { }
         assertTrue(messagesFor(HOST).stream().noneMatch(m -> m.autoPlayedPlayerId != null),
                 "connected players must not be auto-played");
+    }
+
+    @Test
+    void A1b_hostStarts_otherPlayerReceivesGameState() {
+        startStartedGame();
+
+        // Other player should receive game state broadcast (not just lobby state)
+        List<GameStateController.GameStateMessage> otherMsgs = messagesFor(OTHER);
+        assertFalse(otherMsgs.isEmpty(), "other player should receive at least one message");
+        
+        // Find the game state message (not lobby state)
+        GameStateController.GameStateMessage gameStateMsg = otherMsgs.stream()
+                .filter(m -> "WAIT_FOR_TURN".equals(m.currentState))
+                .findFirst()
+                .orElse(null);
+        
+        assertNotNull(gameStateMsg, "other player should receive WAIT_FOR_TURN game state");
+        assertNotNull(gameStateMsg.hand, "other player should receive their hand");
+        assertEquals(5, gameStateMsg.hand.size(), "other player should have 5 cards");
+        assertEquals(1, gameStateMsg.roundNumber);
+    }
+
+    @Test
+    void A1c_hostReentersThenStarts_otherPlayerReceivesGameState() throws Exception {
+        // Host creates and starts game
+        startStartedGame();
+        
+        // Host disconnects and reconnects (simulates exit/re-enter)
+        controller.handleSessionDisconnect(disconnectEvent(HOST));
+        controller.handleSessionConnect(connectEvent(HOST));
+        
+        // Host clicks start game
+        controller.startGame(ROOM, auth(HOST));
+        
+        // Other player should receive game state broadcast
+        List<GameStateController.GameStateMessage> otherMsgs = messagesFor(OTHER);
+        
+        // Find the game state message (not lobby state or disconnected messages)
+        GameStateController.GameStateMessage gameStateMsg = otherMsgs.stream()
+                .filter(m -> "WAIT_FOR_TURN".equals(m.currentState))
+                .findFirst()
+                .orElse(null);
+        
+        assertNotNull(gameStateMsg, "other player should receive WAIT_FOR_TURN game state after host re-enters and starts");
+        assertNotNull(gameStateMsg.hand, "other player should receive their hand");
+        assertEquals(5, gameStateMsg.hand.size(), "other player should have 5 cards");
+        assertEquals(1, gameStateMsg.roundNumber);
     }
 
     @Test
@@ -520,6 +581,74 @@ class GameLifecycleScenariosTest {
         assertEquals(otherMsgsBefore, messagesFor(OTHER).size());
     }
 
+    @Test
+    void C8_handleJoin_restoresFromSnapshotWhenEngineEvicted() throws Exception {
+        // Start game and make a move so there's meaningful state
+        startStartedGame();
+        String firstPlayer = engineFromSnapshot().getCurrentPlayer();
+        String cardId = engineFromSnapshot().getPlayerHand(firstPlayer).getCards().get(0).getId();
+        controller.handleGameAction(ROOM, discardAction(firstPlayer, List.of(cardId)), auth(firstPlayer));
+
+        // Handle potential bonus discard after the action
+        YanivGameEngine engineAfterAction = engineFromSnapshot();
+        if (engineAfterAction.getCurrentState() == YanivGameEngine.GameState.BONUS_DISCARD) {
+            controller.handleGameAction(ROOM, bonusDiscardAction(firstPlayer, false), auth(firstPlayer));
+        }
+
+        // Verify game is in progress with modified state
+        assertEquals(1, engineFromSnapshot().getRoundNumber());
+        String nextPlayer = engineFromSnapshot().getCurrentPlayer();
+        List<String> expectedHandIds = engineFromSnapshot().getPlayerHand(nextPlayer).getCards()
+                .stream().map(c -> c.getId()).sorted().toList();
+
+        // Simulate server restart: engine evicted from memory, but snapshot exists in Redis
+        clearEngines();
+
+        // Frontend calls /app/room/{roomId}/join on reconnect
+        // This should restore from snapshot and send game state to the requester
+        // NOT broadcast lobby state to all players
+        controller.handleJoin(ROOM, auth(nextPlayer));
+
+        // The requester should get the restored game state (not lobby state)
+        GameStateController.GameStateMessage msg = lastMessageFor(nextPlayer);
+        assertNotNull(msg.hand, "restored hand should not be empty");
+        assertEquals(expectedHandIds, msg.hand.stream().map(c -> c.get("id").toString()).sorted().toList(),
+                "handleJoin must restore from snapshot when engine not in memory");
+        assertEquals("WAIT_FOR_TURN", msg.currentState);
+        assertEquals(1, msg.roundNumber);
+
+        // Other player should NOT receive lobby state broadcast (game must not "reset" for them)
+        int otherMsgsBefore = messagesFor(OTHER).size();
+        // handleJoin should only send to the requester, not broadcast
+        assertEquals(otherMsgsBefore, messagesFor(OTHER).size(),
+                "handleJoin must not broadcast lobby state to other players when game is active");
+    }
+
+    @Test
+    void C9_reconnectAfterRestart_noStaleDisconnectedBroadcast() throws Exception {
+        // Start game
+        startStartedGame();
+        String current = engineFromSnapshot().getCurrentPlayer();
+        String other = current.equals(HOST) ? OTHER : HOST;
+
+        // Player disconnects
+        controller.handleSessionDisconnect(disconnectEvent(current));
+        verify(presenceService).setUserDisconnectedInGame(current);
+
+        // Simulate server restart: engine evicted, disconnectedInGame map cleared (in-memory)
+        clearEngines();
+        clearDisconnected();
+
+        // Player reconnects - engine restored from snapshot
+        int otherMsgsBefore = messagesFor(other).size();
+        controller.handleSessionConnect(connectEvent(current));
+
+        // After restart, disconnectedInGame is lost, so no "reconnected" broadcast is sent.
+        // Other player just receives normal game state updates, not a disconnected status message.
+        assertEquals(otherMsgsBefore, messagesFor(other).size(),
+                "no reconnect broadcast after restart (disconnectedInGame not persisted)");
+    }
+
     // ----------------------------------------------- D. actions & races
 
     @Test
@@ -747,7 +876,13 @@ class GameLifecycleScenariosTest {
         controller.handleGameAction(ROOM, discardAction(current, List.of(cardId)), auth(current));
 
         assertNull(lastMessageFor(current).error, "action must succeed through storage failure");
-        // Snapshots are failing, so assert on the LIVE engine - it must still advance
+        // Snapshots are failing, so assert on the LIVE engine
+        // Handle potential bonus discard state
+        YanivGameEngine live = liveEngine();
+        if (live.getCurrentState() == YanivGameEngine.GameState.BONUS_DISCARD) {
+            controller.handleGameAction(ROOM, bonusDiscardAction(current, false), auth(current));
+        }
+        // Now the turn should have advanced
         assertNotEquals(current, liveEngine().getCurrentPlayer());
     }
 

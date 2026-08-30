@@ -77,9 +77,8 @@
   align-items: center;
   gap: 10px;
   padding: 4px 12px 4px 6px;
-  border-radius: 24px;
+  border-radius: 12px;
   background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(212, 175, 55, 0.25);
   cursor: pointer;
   transition: all 0.2s ease;
 }
@@ -89,23 +88,10 @@
   border-color: var(--gold-primary);
 }
 
-.user-avatar {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: var(--gold-gradient);
-  color: #0c2b1e;
-  font-weight: 800;
-  font-size: 11px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
 .user-info {
   display: flex;
   flex-direction: column;
-  text-align: left;
+  text-align: right;
 }
 
 .user-name {
@@ -120,63 +106,40 @@
   opacity: 0.8;
 }
 
-.connection-pill {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
+/* Nav Avatar - uses Avatar component */
+.nav-avatar {
+  flex-shrink: 0;
+}
+
+.nav-avatar .avatar-wrapper {
   border-radius: 12px;
-  background: rgba(0, 0, 0, 0.4);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.status-light {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-}
-
-.status-light.online {
-  background: #10b981;
-  box-shadow: 0 0 8px #10b981;
-}
-
-.status-light.offline {
-  background: #6b7280;
-}
-
-.status-label {
-  font-family: 'DM Mono', monospace;
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--ink-light);
-}
-
-.version-badge {
-  font-family: 'DM Mono', monospace;
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--gold-light);
-  padding: 4px 8px;
-  border-radius: 8px;
-  background: rgba(212, 175, 55, 0.15);
-  border: 1px solid rgba(212, 175, 55, 0.35);
-  opacity: 0.85;
-  white-space: nowrap;
+  border: none;
 }
 
 .nav-logout-btn {
   font-size: 12px;
   padding: 6px 12px;
-  border-radius: 6px;
-  background: rgba(239, 68, 68, 0.15);
-  border: 1px solid rgba(239, 68, 68, 0.35);
-  color: #fca5a5;
-  font-weight: 600;
+  border-radius: 12px;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: var(--ink-light);
+  font-weight: 500;
+  transition: all 0.2s ease;
 }
 
 .nav-logout-btn:hover {
-  background: rgba(239, 68, 68, 0.3);
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
+}
+
+.version-text {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--ink-muted);
+  opacity: 0.6;
+  white-space: nowrap;
 }
 
 /* Workspace Layout */
@@ -334,18 +297,8 @@
     min-width: 32px;
   }
 
-  .user-avatar {
-    width: 26px;
-    height: 26px;
-    font-size: 10px;
-  }
-
-  .connection-pill {
-    padding: 4px 6px;
-  }
-
-  .status-label {
-    display: none;
+  .nav-avatar .avatar-wrapper {
+    border-radius: 8px;
   }
 
   .nav-logout-btn {
@@ -401,20 +354,14 @@
 
   .nav-logout-btn {
     padding: 6px;
-    font-size: 0;
+    font-size: 11px;
   }
 
-  .nav-logout-btn::before {
-    content: '↩';
-    font-size: 16px;
+  .version-text {
+    font-size: 9px;
   }
 
-  .connection-pill {
-    padding: 4px 6px;
-  }
-
-  .version-badge {
-    font-size: 8px;
-    padding: 2px 5px;
+  .nav-avatar .avatar-wrapper {
+    border-radius: 12px;
   }
 }

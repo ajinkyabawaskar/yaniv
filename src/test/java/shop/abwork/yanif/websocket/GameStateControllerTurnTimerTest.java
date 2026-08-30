@@ -77,7 +77,7 @@ class GameStateControllerTurnTimerTest {
 
         controller = new GameStateController(gameService, presenceService, userService,
                 messagingTemplate, 1 /* turn timer seconds */, true /* auto-play */,
-                1 /* yaniv contest window */);
+                1 /* yaniv contest window */, 7 /* yaniv threshold */);
     }
 
     @AfterEach
@@ -145,6 +145,14 @@ class GameStateControllerTurnTimerTest {
         return action;
     }
 
+    private GameStateController.GameActionMessage bonusDiscardAction(String playerId, boolean shouldDiscard) {
+        GameStateController.GameActionMessage action = new GameStateController.GameActionMessage();
+        action.actionType = "BONUS_DISCARD";
+        action.playerId = playerId;
+        action.bonusDiscard = shouldDiscard;
+        return action;
+    }
+
     private String otherPlayer(String playerId) {
         return HOST.equals(playerId) ? OTHER : HOST;
     }
@@ -207,6 +215,12 @@ class GameStateControllerTurnTimerTest {
                 .get("id").toString();
 
         controller.handleGameAction(ROOM, discardFirstCardAction(firstPlayer, cardId), auth(firstPlayer));
+
+        // Handle potential bonus discard after the action
+        YanivGameEngine engineAfterAction = engineFromSnapshot();
+        if (engineAfterAction.getCurrentState() == YanivGameEngine.GameState.BONUS_DISCARD) {
+            controller.handleGameAction(ROOM, bonusDiscardAction(firstPlayer, false), auth(firstPlayer));
+        }
 
         // Human action advanced the turn immediately
         assertNotEquals(firstPlayer, engineFromSnapshot().getCurrentPlayer());

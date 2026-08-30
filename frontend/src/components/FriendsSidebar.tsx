@@ -281,7 +281,7 @@ export default function FriendsSidebar({
                 </div>
 
                 <div className="friend-row-right">
-                  {/* Invite to Room button when in a game room */}
+                  {/* Invite to Table button when in a game table */}
                   {currentGameId && isOnline && (
                     <button
                       className={`invite-friend-btn ${wasInvited ? 'invited' : ''}`}

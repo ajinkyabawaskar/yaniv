@@ -66,7 +66,7 @@ export default function InviteNotificationToast({ onAccept }: InviteNotification
           <div className="toast-body">
             <h4 className="toast-title">Game Invitation</h4>
             <p className="toast-text">
-              <strong>{invite.hostDisplayName}</strong> invited you to play room <code>#{invite.roomCode}</code>
+              <strong>{invite.hostDisplayName}</strong> invited you to play table <code>#{invite.roomCode}</code>
             </p>
           </div>
           <div className="toast-actions-row">

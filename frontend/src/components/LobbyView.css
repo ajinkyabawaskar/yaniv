@@ -438,6 +438,162 @@
 }
 
 /* ==========================================================================
+   Open Tables Section
+   ========================================================================== */
+.open-tables-section {
+  padding: 16px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.section-title {
+  font-family: 'DM Mono', monospace;
+  font-size: 12px;
+  color: var(--gold-light);
+  text-transform: uppercase;
+}
+
+.refresh-indicator {
+  font-size: 14px;
+  color: var(--gold-primary);
+  opacity: 0.6;
+  animation: spin 2s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.open-tables-loading,
+.open-tables-empty {
+  text-align: center;
+  padding: 20px;
+  color: var(--ink-light);
+}
+
+.open-tables-empty .empty-hint {
+  font-size: 12px;
+  color: var(--ink-muted);
+  margin-top: 4px;
+}
+
+.open-tables-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.open-table-card {
+  display: flex;
+  flex-direction: column;
+  padding: 14px;
+  border-radius: 10px;
+  background: rgba(4, 18, 12, 0.6);
+  border: 1px solid rgba(212, 175, 55, 0.25);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  transition: transform 0.2s ease, border-color 0.2s ease;
+}
+
+.open-table-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--gold-primary);
+}
+
+.table-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.table-code {
+  font-family: 'DM Mono', monospace;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--gold-light);
+  letter-spacing: 0.1em;
+}
+
+.table-status {
+  font-family: 'DM Mono', monospace;
+  font-size: 12px;
+  color: var(--ink-light);
+  background: rgba(212, 175, 55, 0.15);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.table-card-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.table-host {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.host-label {
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.host-name {
+  color: var(--gold-light);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.table-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--ink-muted);
+}
+
+.join-table-btn {
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--gold-gradient);
+  color: #081a13;
+  font-family: 'Cinzel', serif;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  box-shadow: 0 3px 10px rgba(212, 175, 55, 0.4);
+  transition: opacity 0.2s ease;
+}
+
+.join-table-btn:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.join-table-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: rgba(255, 255, 255, 0.1);
+  box-shadow: none;
+  color: var(--ink-muted);
+}
+
+/* ==========================================================================
    Card Assets Preload Status Bar
    ========================================================================== */
 .preload-status-bar {

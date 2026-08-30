@@ -66,8 +66,9 @@ public class SecurityConfig {
                 .requestMatchers("/api/v1/version").permitAll()
                 // Actuator endpoints for health checks
                 .requestMatchers("/actuator", "/actuator/**").permitAll()
-                // Static resources and frontend
-                .requestMatchers("/", "/index.html", "/static/**", "/cards/**", "/asset-manifest.json", "/manifest.json", "/favicon.ico", "/favicon.svg").permitAll()
+                // Static resources and SPA routes (React Router handles client-side routing)
+                .requestMatchers("/", "/index.html", "/static/**", "/cards/**", "/asset-manifest.json", "/manifest.json", "/favicon.ico", "/favicon.svg",
+                        "/home", "/join/**").permitAll()
                 // Everything else requires authentication
                 .anyRequest().authenticated()
             )

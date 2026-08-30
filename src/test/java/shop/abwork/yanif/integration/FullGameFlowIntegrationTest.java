@@ -76,11 +76,11 @@ class FullGameFlowIntegrationTest {
         // ============================================
         // PHASE 1: Room Creation and Joining
         // ============================================
-        Game game = gameService.createGame("TST123", 200, player1Id, 6);
+        Game game = gameService.createGame("ACE", 200, player1Id, 6);
         gameId = game.getId();
         roomCode = game.getRoomCode();
         assertNotNull(gameId);
-        assertEquals("TST123", roomCode);
+        assertEquals("ACE", roomCode);
 
         // Add host (player1) and other players
         gameService.addPlayerToGame(gameId, player1Id);
@@ -155,6 +155,13 @@ class FullGameFlowIntegrationTest {
 
         // Draw from deck
         engine.processDraw(playerId, "DECK", null);
+        
+        // Handle potential bonus discard state
+        if (engine.getCurrentState() == YanivGameEngine.GameState.BONUS_DISCARD) {
+            // Choose to NOT discard the bonus card (keep it in hand)
+            engine.processBonusDiscard(playerId, false);
+        }
+        
         assertEquals(YanivGameEngine.GameState.WAIT_FOR_TURN, engine.getCurrentState());
     }
 
@@ -189,6 +196,12 @@ class FullGameFlowIntegrationTest {
                 engine.processDiscard(playerId, pair);
                 assertEquals(YanivGameEngine.GameState.DRAW_CARD, engine.getCurrentState());
                 engine.processDraw(playerId, "DECK", null);
+                
+                // Handle potential bonus discard (pair discard doesn't trigger bonus, but handle anyway)
+                if (engine.getCurrentState() == YanivGameEngine.GameState.BONUS_DISCARD) {
+                    engine.processBonusDiscard(playerId, false);
+                }
+                
                 assertEquals(YanivGameEngine.GameState.WAIT_FOR_TURN, engine.getCurrentState());
                 return;
             }
@@ -219,6 +232,12 @@ class FullGameFlowIntegrationTest {
                     engine.processDiscard(playerId, seq);
                     assertEquals(YanivGameEngine.GameState.DRAW_CARD, engine.getCurrentState());
                     engine.processDraw(playerId, "DECK", null);
+                    
+                    // Handle potential bonus discard (sequence discard doesn't trigger bonus, but handle anyway)
+                    if (engine.getCurrentState() == YanivGameEngine.GameState.BONUS_DISCARD) {
+                        engine.processBonusDiscard(playerId, false);
+                    }
+                    
                     assertEquals(YanivGameEngine.GameState.WAIT_FOR_TURN, engine.getCurrentState());
                     return;
                 }
@@ -234,6 +253,12 @@ class FullGameFlowIntegrationTest {
         engine.processDiscard(playerId, single);
         assertEquals(YanivGameEngine.GameState.DRAW_CARD, engine.getCurrentState());
         engine.processDraw(playerId, "DECK", null);
+        
+        // Handle potential bonus discard state
+        if (engine.getCurrentState() == YanivGameEngine.GameState.BONUS_DISCARD) {
+            engine.processBonusDiscard(playerId, false);
+        }
+        
         assertEquals(YanivGameEngine.GameState.WAIT_FOR_TURN, engine.getCurrentState());
     }
 

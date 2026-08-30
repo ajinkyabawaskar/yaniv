@@ -16,7 +16,7 @@ import java.util.*;
 public class YanivGameEngine {
 
     public enum GameState {
-        WAIT_FOR_TURN, DISCARD_CARDS, DRAW_CARD, YANIV_CALLED, EVALUATE_HANDS, APPLY_SCORES, CHECK_ELIMINATIONS, ROUND_OVER, GAME_OVER
+        WAIT_FOR_TURN, DISCARD_CARDS, DRAW_CARD, BONUS_DISCARD, YANIV_CALLED, EVALUATE_HANDS, APPLY_SCORES, CHECK_ELIMINATIONS, ROUND_OVER, GAME_OVER
     }
 
     private String gameId;
@@ -41,11 +41,16 @@ public class YanivGameEngine {
     private long yanivCalledTimestamp; // When Yaniv was called (epoch ms)
     private int yanivContestTimerSeconds = 15; // Configurable via game.yaniv-contest-timer-seconds
 
+    // Bonus discard: track the rank of the card that was just discarded
+    // and the drawn card that could be bonus discarded
+    private Card.Rank lastDiscardedRank; // Rank of the card discarded this turn
+    private Card pendingBonusCard; // The card drawn from deck that matches lastDiscardedRank
+
     public YanivGameEngine(String gameId, List<String> playerIds, Integer yanivThreshold, Integer targetScore) {
         this.gameId = gameId;
         this.playerIds = new ArrayList<>(playerIds);
         this.yanivThreshold = yanivThreshold != null ? yanivThreshold : 7;
-        this.targetScore = targetScore != null ? targetScore : 200;
+        this.targetScore = targetScore != null ? targetScore : 100;
 
         initializeGame();
     }
@@ -89,6 +94,8 @@ public class YanivGameEngine {
         this.asafByUserId = snapshot.asafByUserId;
         this.winnerId = snapshot.winnerId;
         this.yanivCalledTimestamp = snapshot.yanivCalledTimestamp;
+        this.lastDiscardedRank = snapshot.lastDiscardedRank != null ? Card.Rank.valueOf(snapshot.lastDiscardedRank) : null;
+        this.pendingBonusCard = snapshot.pendingBonusCard != null ? GameSnapshot.toCard(snapshot.pendingBonusCard) : null;
     }
 
     /**
@@ -125,6 +132,8 @@ public class YanivGameEngine {
         snapshot.asafByUserId = asafByUserId;
         snapshot.winnerId = winnerId;
         snapshot.yanivCalledTimestamp = yanivCalledTimestamp;
+        snapshot.lastDiscardedRank = lastDiscardedRank != null ? lastDiscardedRank.name() : null;
+        snapshot.pendingBonusCard = pendingBonusCard != null ? GameSnapshot.of(pendingBonusCard) : null;
         return snapshot.toJson();
     }
 
@@ -195,6 +204,13 @@ public class YanivGameEngine {
         this.pendingDiscard = new ArrayList<>(discardedCards);
         this.pendingDiscardHandSize = handSizeBeforeDiscard;
 
+        // Track the last discarded rank for bonus discard rule (only for single card discards)
+        if (discardedCards.size() == 1) {
+            this.lastDiscardedRank = discardedCards.get(0).getRank();
+        } else {
+            this.lastDiscardedRank = null; // No bonus discard for multi-card combinations
+        }
+
         currentState = GameState.DRAW_CARD;
     }
 
@@ -202,6 +218,8 @@ public class YanivGameEngine {
      * Process a player's draw action.
      * Player can draw from deck or from drawable cards in discard pile.
      * After drawing, the pending discard is added to the discard pile.
+     * If drawing from deck and the drawn card matches the rank of the discarded card
+     * (different suit), the player enters BONUS_DISCARD state to optionally discard it.
      */
     public void processDraw(String playerId, String drawSource, Card drawnCard) {
         if (!getCurrentPlayer().equals(playerId)) {
@@ -220,6 +238,16 @@ public class YanivGameEngine {
             }
             Card topCard = deck.drawCard();
             hand.addCard(topCard);
+
+            // Check for bonus discard: drawn from deck, single card discarded,
+            // and drawn card matches rank but different suit
+            if (lastDiscardedRank != null
+                    && topCard.getRank() == lastDiscardedRank
+                    && !topCard.getSuit().equals(getSuitOfDiscardedCard())) {
+                this.pendingBonusCard = topCard;
+                currentState = GameState.BONUS_DISCARD;
+                return; // Wait for player's bonus discard decision
+            }
         } else if ("DISCARD_PILE".equalsIgnoreCase(drawSource)) {
             if (drawnCard == null || !discardPile.isDrawable(drawnCard.getId())) {
                 throw new IllegalArgumentException(
@@ -230,6 +258,56 @@ public class YanivGameEngine {
             throw new IllegalArgumentException("Invalid draw source: " + drawSource);
         }
 
+        // Normal flow: add pending discard to discard pile and advance
+        finalizeTurn();
+    }
+
+    /**
+     * Process the player's decision on bonus discard.
+     * If shouldDiscard is true, the pending bonus card is added to discard pile.
+     * Either way, the turn ends and advances to next player.
+     */
+    public void processBonusDiscard(String playerId, boolean shouldDiscard) {
+        if (!getCurrentPlayer().equals(playerId)) {
+            throw new IllegalArgumentException("Not this player's turn");
+        }
+
+        if (currentState != GameState.BONUS_DISCARD) {
+            throw new IllegalStateException("Cannot process bonus discard in current state: " + currentState);
+        }
+
+        if (shouldDiscard && pendingBonusCard != null) {
+            Hand hand = playerHands.get(playerId);
+            // Remove the bonus card from hand (it was added during draw)
+            hand.removeCard(pendingBonusCard);
+            // Add to discard pile as a single card on top
+            discardPile.addCombination(List.of(pendingBonusCard), DiscardCombination.Type.SINGLE, pendingDiscardHandSize);
+        }
+        // If not discarding, the card stays in hand
+
+        // Clear bonus discard state
+        pendingBonusCard = null;
+        lastDiscardedRank = null;
+
+        // Finalize the turn (add pending discard to pile if not already done)
+        finalizeTurn();
+    }
+
+    /**
+     * Helper to get the suit of the single card that was discarded this turn.
+     * Returns null if no single card was discarded.
+     */
+    private Card.Suit getSuitOfDiscardedCard() {
+        if (pendingDiscard.size() == 1) {
+            return pendingDiscard.get(0).getSuit();
+        }
+        return null;
+    }
+
+    /**
+     * Finalize the turn: add pending discard to discard pile and advance to next player.
+     */
+    private void finalizeTurn() {
         // Add pending discard to discard pile AFTER drawing
         if (!pendingDiscard.isEmpty()) {
             String combinationType = CardCombinationValidator.getCombinationType(pendingDiscard, pendingDiscardHandSize);
@@ -238,6 +316,10 @@ public class YanivGameEngine {
             pendingDiscard.clear();
             pendingDiscardHandSize = 0;
         }
+
+        // Clear bonus discard tracking
+        pendingBonusCard = null;
+        lastDiscardedRank = null;
 
         // Move to next player
         advanceToNextPlayer();
@@ -395,24 +477,54 @@ public class YanivGameEngine {
     }
 
     /**
-     * Recycle all discard combinations except the top one back into an empty deck.
-     * Keeps long games moving once every card has been drawn. The top combination
-     * stays in place so draw-from-discard rules remain intact.
+     * Refill the empty deck with all cards not currently in players' hands.
+     * Keeps the top discard combination for draw-from-discard rules.
      *
      * @return true if the deck was refilled
      */
     private boolean recycleDeck() {
+        Set<String> heldCardIds = new HashSet<>();
+
+        for (Map.Entry<String, Hand> entry : playerHands.entrySet()) {
+            if (!eliminatedPlayers.contains(entry.getKey())) {
+                for (Card card : entry.getValue().getCards()) {
+                    heldCardIds.add(card.getId());
+                }
+            }
+        }
+
         List<DiscardCombination> combos = discardPile.getCombinations();
-        if (combos.size() <= 1) {
-            return false; // only the top combination exists - nothing to recycle
+        if (!combos.isEmpty()) {
+            DiscardCombination topCombination = combos.get(combos.size() - 1);
+            for (Card card : topCombination.getCards()) {
+                heldCardIds.add(card.getId());
+            }
         }
-        List<Card> recycled = new ArrayList<>();
-        for (int i = 0; i < combos.size() - 1; i++) {
-            recycled.addAll(combos.get(i).getCards());
+
+        Card.Suit[] suits = {Card.Suit.HEARTS, Card.Suit.DIAMONDS, Card.Suit.CLUBS, Card.Suit.SPADES};
+        Card.Rank[] ranks = {Card.Rank.ACE, Card.Rank.TWO, Card.Rank.THREE, Card.Rank.FOUR,
+                Card.Rank.FIVE, Card.Rank.SIX, Card.Rank.SEVEN, Card.Rank.EIGHT,
+                Card.Rank.NINE, Card.Rank.TEN, Card.Rank.JACK, Card.Rank.QUEEN, Card.Rank.KING};
+
+        List<Card> newDeckCards = new ArrayList<>();
+        int cardId = 1;
+        for (Card.Suit suit : suits) {
+            for (Card.Rank rank : ranks) {
+                String id = "card_" + cardId++;
+                if (!heldCardIds.contains(id)) {
+                    newDeckCards.add(new Card(id, suit, rank));
+                }
+            }
         }
-        // Drop the recycled combinations from the pile, keeping only the top one
-        discardPile.retainTopCombinations(1);
-        this.deck = new Deck(recycled);
+
+        if (newDeckCards.isEmpty()) {
+            return false;
+        }
+
+        if (!combos.isEmpty()) {
+            discardPile.retainTopCombinations(1);
+        }
+        this.deck = new Deck(newDeckCards);
         this.deck.shuffle();
         return true;
     }
@@ -481,13 +593,12 @@ public class YanivGameEngine {
     }
 
     /**
-     * Apply halving rule: if score is a multiple of 50, reduce total score by 25
-     * points.
+     * Apply halving rule: if score is a multiple of 50, halve the total score.
      */
     private void applyHalvingRule(String playerId) {
         int score = playerScores.getOrDefault(playerId, 0);
         if (score > 0 && score % 50 == 0) {
-            playerScores.put(playerId, score - 25);
+            playerScores.put(playerId, score / 2);
         }
     }
 
@@ -541,6 +652,9 @@ public class YanivGameEngine {
         }
         discardPile.clear();
         pendingDiscard.clear();
+        // Clear bonus discard state
+        lastDiscardedRank = null;
+        pendingBonusCard = null;
 
         this.deck = new Deck();
         this.deck.shuffle();
@@ -683,5 +797,28 @@ public class YanivGameEngine {
      */
     public List<String> getAllPlayerIds() {
         return new ArrayList<>(playerIds);
+    }
+
+    /**
+     * Check if the game is currently in bonus discard state (waiting for player
+     * to decide whether to discard a drawn card matching the rank of the discarded card).
+     */
+    public boolean isBonusDiscardActive() {
+        return currentState == GameState.BONUS_DISCARD;
+    }
+
+    /**
+     * Get the pending bonus card that the player can optionally discard.
+     * Only valid when {@link #isBonusDiscardActive()} returns true.
+     */
+    public Card getPendingBonusCard() {
+        return pendingBonusCard;
+    }
+
+    /**
+     * Get the rank of the card that was discarded this turn (triggering potential bonus discard).
+     */
+    public Card.Rank getLastDiscardedRank() {
+        return lastDiscardedRank;
     }
 }

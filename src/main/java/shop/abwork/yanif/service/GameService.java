@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * Service for managing Yaniv game operations.
@@ -42,8 +43,8 @@ public class GameService {
     /**
      * Create a new game room.
      *
-     * @param roomCode    6-character room code
-     * @param targetScore Target score for game elimination (default 200)
+     * @param roomCode    3-letter room code
+     * @param targetScore Target score for game elimination (default 100)
      * @param hostUserId  Host user ID
      * @param maxPlayers  Maximum players (default 6)
      * @return Created game object
@@ -56,8 +57,8 @@ public class GameService {
     /**
      * Create a new game room with default max players (6).
      *
-     * @param roomCode    6-character room code
-     * @param targetScore Target score for game elimination (default 200)
+     * @param roomCode    3-letter room code
+     * @param targetScore Target score for game elimination (default 100)
      * @param hostUserId  Host user ID
      * @return Created game object
      */
@@ -78,7 +79,7 @@ public class GameService {
     /**
      * Get game by room code.
      *
-     * @param roomCode 6-character room code
+     * @param roomCode 3-letter room code
      * @return Game object or null if not found
      */
     public Game getGameByRoomCode(String roomCode) {
@@ -95,6 +96,47 @@ public class GameService {
         return gameRepository.findByStatusIn(List.of(
                 Game.GameStatus.IN_PROGRESS
         ));
+    }
+
+    /**
+     * Get open lobbies (games in LOBBY status) ordered by most recent first.
+     * Returns up to 5 lobbies with player counts.
+     *
+     * @return List of open lobbies with player count info
+     */
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> getOpenLobbies() {
+        List<Game> lobbies = gameRepository.findByStatusOrderByCreatedAtDesc(Game.GameStatus.LOBBY);
+        
+        // Limit to 5 most recent
+        lobbies = lobbies.stream().limit(5).collect(Collectors.toList());
+        
+        // Fetch player counts for each lobby
+        List<String> gameIds = lobbies.stream().map(Game::getId).collect(Collectors.toList());
+        Map<String, Long> playerCounts = new HashMap<>();
+        if (!gameIds.isEmpty()) {
+            List<Object[]> counts = gamePlayerRepository.countByGameIdIn(gameIds);
+            for (Object[] row : counts) {
+                playerCounts.put((String) row[0], (Long) row[1]);
+            }
+        }
+        
+        // Build response with game info and player count
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Game game : lobbies) {
+            Map<String, Object> lobby = new HashMap<>();
+            lobby.put("gameId", game.getId());
+            lobby.put("roomCode", game.getRoomCode());
+            lobby.put("status", game.getStatus().toString());
+            lobby.put("targetScore", game.getTargetScore());
+            lobby.put("maxPlayers", game.getMaxPlayers());
+            lobby.put("hostUserId", game.getHostUserId());
+            lobby.put("createdAt", game.getCreatedAt());
+            lobby.put("playerCount", playerCounts.getOrDefault(game.getId(), 0L));
+            result.add(lobby);
+        }
+        
+        return result;
     }
 
     /**

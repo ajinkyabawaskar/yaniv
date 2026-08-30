@@ -35,8 +35,10 @@ export interface GameState {
   isAsaf: boolean; // Whether Asaf occurred
   asafByUserId: string | null; // Who caused Asaf
   isRoundOver: boolean; // Whether round is over and waiting for acknowledgment
+  isGameOver: boolean; // Whether game is over (final winner)
   error: string | null;
   maxPlayers: number; // Maximum players allowed in the room
+  targetScore: number; // Target score to win the game (default 100)
 
   // Yaniv Contest Timer fields
   yanivCallerId: string | null;
@@ -49,6 +51,10 @@ export interface GameState {
   turnEndsAt: number | null; // Server epoch ms when current turn expires
   turnTimerSeconds: number; // Total allowed seconds per turn
   autoPlayedPlayerId: string | null; // Player whose last move was auto-played
+
+  // Bonus discard fields
+  bonusDiscardActive: boolean; // Whether player can do bonus discard
+  pendingBonusCard: GameCard | null; // The drawn card matching discarded rank
 
   // Disconnected players tracking for reconnection UI
   disconnectedPlayers: Set<string>; // userIds of disconnected players
@@ -85,8 +91,10 @@ export const useGameStore = create<GameState>((set) => ({
   isAsaf: false,
   asafByUserId: null,
   isRoundOver: false,
+  isGameOver: false,
   error: null,
   maxPlayers: 6,
+  targetScore: 100,
 
   // Yaniv Contest Timer initial values
   yanivCallerId: null,
@@ -99,6 +107,10 @@ export const useGameStore = create<GameState>((set) => ({
   turnEndsAt: null,
   turnTimerSeconds: 45,
   autoPlayedPlayerId: null,
+
+  // Bonus discard initial values
+  bonusDiscardActive: false,
+  pendingBonusCard: null,
 
   // Disconnected players
   disconnectedPlayers: new Set(),
@@ -148,8 +160,10 @@ export const useGameStore = create<GameState>((set) => ({
       isAsaf: false,
       asafByUserId: null,
       isRoundOver: false,
+      isGameOver: false,
       error: null,
       maxPlayers: 6,
+      targetScore: 100,
       yanivCallerId: null,
       yanivCallerName: null,
       yanivCalledAt: null,
@@ -158,6 +172,8 @@ export const useGameStore = create<GameState>((set) => ({
       turnEndsAt: null,
       turnTimerSeconds: 45,
       autoPlayedPlayerId: null,
+      bonusDiscardActive: false,
+      pendingBonusCard: null,
       disconnectedPlayers: new Set(),
     }),
 }));

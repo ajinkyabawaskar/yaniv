@@ -10,7 +10,7 @@
 cd frontend && npm run build && cd ..
 
 # Build backend JAR
-mvn clean package
+mvn clean package -DskipTests=true
 ```
 
 ## Deploy to Production

@@ -57,7 +57,7 @@ public class Game {
         this.id = UUID.randomUUID().toString();
         this.roomCode = roomCode;
         this.status = GameStatus.LOBBY;
-        this.targetScore = targetScore != null ? targetScore : 200;
+        this.targetScore = targetScore != null ? targetScore : 100;
         this.maxPlayers = maxPlayers != null ? maxPlayers : 6;
         this.hostUserId = hostUserId;
         this.createdAt = LocalDateTime.now();

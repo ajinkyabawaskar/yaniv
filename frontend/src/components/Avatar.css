@@ -1,0 +1,84 @@
+/* ==========================================================================
+   Avatar.css - Rounded Square Avatar with Online Status Indicator
+   ========================================================================== */
+
+.avatar-wrapper {
+  position: relative;
+  display: inline-flex;
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.05);
+  flex-shrink: 0;
+}
+
+.avatar-image {
+  border-radius: 12px;
+  object-fit: cover;
+  width: 100%;
+  height: 100%;
+}
+
+.avatar-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: var(--gold-gradient);
+  color: #0c2b1e;
+  font-family: 'Cinzel', serif;
+  font-weight: 700;
+  width: 100%;
+  height: 100%;
+}
+
+.presence-indicator {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  border-radius: 50%;
+  border: 2px solid var(--bg-primary, #0a1f17);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3);
+  flex-shrink: 0;
+}
+
+/* Size-specific adjustments */
+.avatar-wrapper:has(.avatar-image[style*="24"]) .presence-indicator,
+.avatar-wrapper:has(.avatar-placeholder[style*="24"]) .presence-indicator {
+  bottom: -1px;
+  right: -1px;
+}
+
+.avatar-wrapper:has(.avatar-image[style*="32"]) .presence-indicator,
+.avatar-wrapper:has(.avatar-placeholder[style*="32"]) .presence-indicator {
+  bottom: -2px;
+  right: -2px;
+}
+
+.avatar-wrapper:has(.avatar-image[style*="40"]) .presence-indicator,
+.avatar-wrapper:has(.avatar-placeholder[style*="40"]) .presence-indicator {
+  bottom: -3px;
+  right: -3px;
+}
+
+.avatar-wrapper:has(.avatar-image[style*="56"]) .presence-indicator,
+.avatar-wrapper:has(.avatar-placeholder[style*="56"]) .presence-indicator {
+  bottom: -4px;
+  right: -4px;
+}
+
+.avatar-wrapper:has(.avatar-image[style*="80"]) .presence-indicator,
+.avatar-wrapper:has(.avatar-placeholder[style*="80"]) .presence-indicator {
+  bottom: -5px;
+  right: -5px;
+}
+
+/* Hover effect for interactive avatars */
+.avatar-wrapper:hover .presence-indicator {
+  transform: scale(1.15);
+  transition: transform 0.15s ease;
+}
+
+/* Offline state - no indicator shown */
+.avatar-wrapper.offline .presence-indicator {
+  display: none;
+}

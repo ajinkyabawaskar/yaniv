@@ -51,6 +51,10 @@ public class GameSnapshot {
     public String winnerId;
     public long yanivCalledTimestamp;
 
+    // Bonus discard state (for matching-rank rule)
+    public String lastDiscardedRank;
+    public CardDto pendingBonusCard;
+
     public static class CardDto {
         public String id;
         public String suit;

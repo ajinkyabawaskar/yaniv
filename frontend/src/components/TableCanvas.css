@@ -111,6 +111,14 @@
   animation: turnLabelPulse 1.5s ease-in-out infinite;
 }
 
+/* Opponent's turn indicator - different style */
+.current-player-turn-indicator-small.opponent-turn {
+  background: rgba(59, 130, 246, 0.2);
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  color: #93c5fd;
+  animation: none;
+}
+
 .turn-label-small {
   letter-spacing: 0.05em;
 }
@@ -1198,25 +1206,48 @@
     margin-top: 6px;
   }
 
-  /* Player HUD Bar - wrap nicely */
+  /* Player HUD Bar - single row on mobile */
   .player-hud-bar {
-    gap: 8px;
-    margin-bottom: 10px;
-    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 8px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    width: 100%;
+    justify-content: center;
+  }
+
+  .player-hud-bar::-webkit-scrollbar {
+    display: none;
   }
 
   .hud-btn {
-    padding: 4px 10px;
-    min-height: 40px;
-    min-width: 90px;
-    font-size: 10px;
+    padding: 3px 6px;
+    min-height: 32px;
+    min-width: 56px;
+    font-size: 8px;
+    flex-shrink: 1;
+    width: auto;
   }
 
   .hand-sort-controls {
     display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
+    gap: 2px;
+    flex-wrap: nowrap;
     justify-content: center;
+  }
+
+  .sort-btn {
+    min-width: 48px;
+    padding: 3px 4px;
+  }
+
+  .call-yaniv-btn-hud {
+    min-width: 56px;
+    padding: 3px 5px;
+    font-size: 8px;
   }
 
   /* Player Hand - overlapping fan layout, all 5 cards visible.
@@ -1230,6 +1261,13 @@
     padding: 8px 16px 4px;
     justify-content: center;
     align-items: flex-end;
+  }
+
+  /* Compensate for negative margins on fan cards to keep fan centered.
+     Total negative margin = -20px * (n-1). For 5 cards = -80px.
+     Half of that = 40px left padding on first card. */
+  .player-hand-fanned .hand-card:first-child {
+    margin-left: 40px;
   }
 
   .player-hand-fanned .hand-card + .hand-card {
@@ -1376,6 +1414,10 @@
     padding: 6px 12px 4px;
   }
 
+  .player-hand-fanned .hand-card:first-child {
+    margin-left: 36px;
+  }
+
   .player-hand-fanned .hand-card + .hand-card {
     margin-left: -18px;
   }
@@ -1386,17 +1428,25 @@
   }
 
   .sort-btn {
-    padding: 2px 6px;
-    font-size: 10px;
-    min-height: 32px;
-    min-width: 36px;
+    padding: 2px 4px;
+    font-size: 8px;
+    min-height: 28px;
+    min-width: 40px;
   }
 
   .hud-btn {
-    padding: 4px 8px;
-    min-height: 38px;
-    min-width: 80px;
-    font-size: 10px;
+    padding: 2px 4px;
+    min-height: 28px;
+    min-width: 48px;
+    font-size: 8px;
+    flex-shrink: 1;
+    width: auto;
+  }
+
+  .call-yaniv-btn-hud {
+    min-width: 52px;
+    padding: 2px 4px;
+    font-size: 8px;
   }
 
   /* 480px - even tighter fan for discard pile */
