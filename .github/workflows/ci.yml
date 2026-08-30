@@ -89,14 +89,21 @@ jobs:
           cd ..
           ./mvnw spring-boot:run > backend.log 2>&1 &
           echo "BACKEND_PID=$!" >> $GITHUB_ENV
-          # Wait for backend
-          for i in {1..30}; do
-            if curl -s http://localhost:8080/actuator/health > /dev/null 2>&1; then
+          # Wait for backend (up to 90s)
+          for i in {1..45}; do
+            if curl -s http://localhost:8080/actuator/health | grep -q '"status":"UP"' 2>/dev/null; then
               echo "Backend ready"
               break
             fi
+            if [ $i -eq 45 ]; then
+              echo "Backend failed to become healthy, tailing log:"
+              tail -n 200 backend.log || true
+            fi
             sleep 2
           done
+          # Show backend health regardless
+          curl -s http://localhost:8080/actuator/health || echo "Health check failed"
+          cat backend.log | tail -n 100 || true
 
       - name: Start frontend
         run: |
