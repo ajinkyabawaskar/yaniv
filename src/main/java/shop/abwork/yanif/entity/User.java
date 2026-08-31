@@ -2,6 +2,7 @@ package shop.abwork.yanif.entity;
 
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.UUID;
 
 /**
@@ -42,8 +43,8 @@ public class User {
         this.fingerprintHash = fingerprintHash;
         this.displayName = displayName;
         this.friendCode = friendCode;
-        this.createdAt = LocalDateTime.now();
-        this.lastSeenAt = LocalDateTime.now();
+        this.createdAt = LocalDateTime.now(ZoneOffset.UTC);
+        this.lastSeenAt = LocalDateTime.now(ZoneOffset.UTC);
     }
 
     // Getters and Setters

@@ -116,7 +116,9 @@ export default function LobbyView({ onCreateGame, onJoinGame, friendCode }: Lobb
   };
 
   const formatTimeAgo = (isoString: string) => {
-    const diff = Date.now() - new Date(isoString).getTime();
+    // Server sends UTC (LocalDateTime in UTC). Ensure JS parses as UTC: append Z if no zone.
+    const utcString = isoString.endsWith('Z') || isoString.includes('+') ? isoString : isoString + 'Z';
+    const diff = Date.now() - new Date(utcString).getTime();
     const mins = Math.floor(diff / 60000);
     if (mins < 1) return 'just now';
     if (mins < 60) return `${mins}m ago`;
@@ -188,7 +190,7 @@ export default function LobbyView({ onCreateGame, onJoinGame, friendCode }: Lobb
             {loadingLobbies ? (
               <span className="refresh-indicator">⟳</span>
             ) : (
-              <span className="refresh-indicator" title="Auto-refreshes every 15s">⟳</span>
+              <span className="refresh-indicator" title="Auto-refreshes every 5s">⟳</span>
             )}
           </div>
           

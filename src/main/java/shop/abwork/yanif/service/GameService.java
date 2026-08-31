@@ -108,8 +108,8 @@ public class GameService {
     public List<Map<String, Object>> getOpenLobbies() {
         List<Game> lobbies = gameRepository.findByStatusOrderByCreatedAtDesc(Game.GameStatus.LOBBY);
 
-        // Only lobbies created in last 5 minutes, up to 3 most recent
-        java.time.LocalDateTime cutoff = java.time.LocalDateTime.now().minusMinutes(5);
+        // Only lobbies created in last 5 minutes, up to 3 most recent (UTC)
+        java.time.LocalDateTime cutoff = java.time.LocalDateTime.now(java.time.ZoneOffset.UTC).minusMinutes(5);
         lobbies = lobbies.stream()
                 .filter(g -> g.getCreatedAt() != null && g.getCreatedAt().isAfter(cutoff))
                 .limit(3)
@@ -219,7 +219,7 @@ public class GameService {
         }
         game.setStatus(Game.GameStatus.FINISHED);
         game.setWinnerId(winnerId);
-        game.setFinishedAt(java.time.LocalDateTime.now());
+        game.setFinishedAt(java.time.LocalDateTime.now(java.time.ZoneOffset.UTC));
         return gameRepository.save(game);
     }
 

@@ -2,6 +2,7 @@ package shop.abwork.yanif.entity;
 
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 
 /**
  * Friendship entity representing a friendship relationship between two users.
@@ -40,7 +41,7 @@ public class Friendship {
         this.userId1 = userId1;
         this.userId2 = userId2;
         this.status = status;
-        this.createdAt = LocalDateTime.now();
+        this.createdAt = LocalDateTime.now(ZoneOffset.UTC);
     }
 
     // Getters and Setters

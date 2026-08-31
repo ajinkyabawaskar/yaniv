@@ -42,6 +42,9 @@ public class UserService {
 
         if (existingUser.isPresent()) {
             user = existingUser.get();
+            // Touch lastSeenAt on every resolve (UTC)
+            user.setLastSeenAt(java.time.LocalDateTime.now(java.time.ZoneOffset.UTC));
+            user = userRepository.save(user);
         } else {
             if (displayName == null || displayName.isBlank()) {
                 throw new IllegalArgumentException("Display name is required for new users");

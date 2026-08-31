@@ -2,6 +2,7 @@ package shop.abwork.yanif.entity;
 
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 
 /**
  * RoundHistory entity tracking each round played in a game.
@@ -47,7 +48,7 @@ public class RoundHistory {
         this.isAsaf = isAsaf;
         this.asafByUserId = asafByUserId;
         this.roundScoresJson = roundScoresJson;
-        this.createdAt = LocalDateTime.now();
+        this.createdAt = LocalDateTime.now(ZoneOffset.UTC);
     }
 
     // Getters and Setters

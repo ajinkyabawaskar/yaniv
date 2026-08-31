@@ -2,6 +2,7 @@ package shop.abwork.yanif.entity;
 
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.UUID;
 
 /**
@@ -60,7 +61,7 @@ public class Game {
         this.targetScore = targetScore != null ? targetScore : 100;
         this.maxPlayers = maxPlayers != null ? maxPlayers : 6;
         this.hostUserId = hostUserId;
-        this.createdAt = LocalDateTime.now();
+        this.createdAt = LocalDateTime.now(ZoneOffset.UTC);
     }
 
     // Getters and Setters
