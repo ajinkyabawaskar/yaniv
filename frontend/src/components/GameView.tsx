@@ -4,6 +4,7 @@ import { useGameStore } from '../stores/gameStore';
 import { gameApi } from '../utils/api';
 import TableCanvas, { OpponentInfo, getCardImagePath } from './TableCanvas';
 import ScoreboardView from './ScoreboardView';
+import { playTurnChangeSound, playYourTurnSound, isSoundEnabled, setSoundEnabled, setupAudioUnlock } from '../utils/sound';
 import './GameView.css';
 
 interface GameViewProps {
@@ -29,6 +30,44 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
   const [autoPlayNotice, setAutoPlayNotice] = useState<string | null>(null);
 
   const currentUserId = localStorage.getItem('userId') || '';
+  const [soundEnabled, setSoundEnabledState] = useState(() => isSoundEnabled());
+  const prevTurnRef = useRef<string | null>(null);
+  const hasStartedRef = useRef(false);
+
+  // Sound unlock on first interaction
+  useEffect(() => {
+    setupAudioUnlock();
+    const handler = (e: Event) => setSoundEnabledState((e as CustomEvent).detail);
+    window.addEventListener('yanif:sound-toggled', handler as EventListener);
+    return () => window.removeEventListener('yanif:sound-toggled', handler as EventListener);
+  }, []);
+
+  // Detect turn switches and play distinct sounds
+  useEffect(() => {
+    const turn = gameState.currentTurnPlayerId;
+    const state = gameState.currentState;
+    const isActive = state === 'WAIT_FOR_TURN' || state === 'BONUS_DISCARD' || state === 'YANIV_CALLED';
+    if (!isActive || !turn) {
+      if (state === 'LOBBY' || state === 'ROUND_OVER' || state === 'GAME_OVER') {
+        hasStartedRef.current = false;
+        prevTurnRef.current = null;
+      }
+      return;
+    }
+    // Ignore initial load — set baseline without sound
+    if (!hasStartedRef.current) {
+      hasStartedRef.current = true;
+      prevTurnRef.current = turn;
+      return;
+    }
+    if (prevTurnRef.current === turn) return;
+    prevTurnRef.current = turn;
+    if (turn === currentUserId) {
+      playYourTurnSound();
+    } else {
+      playTurnChangeSound();
+    }
+  }, [gameState.currentTurnPlayerId, gameState.currentState, currentUserId]);
 
   // Detect mobile viewport
   useEffect(() => {
@@ -313,6 +352,18 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
         </div>
 
         <div className="header-actions">
+          <button
+            className="header-btn sound-toggle-btn"
+            onClick={() => {
+              const next = !soundEnabled;
+              setSoundEnabled(next);
+              setSoundEnabledState(next);
+            }}
+            aria-label={soundEnabled ? 'Mute sounds' : 'Unmute sounds'}
+            title={soundEnabled ? 'Mute turn sounds' : 'Unmute turn sounds'}
+          >
+            <span>{soundEnabled ? '🔊' : '🔇'}</span>
+          </button>
           {gameStarted && (
             <button
               className="header-btn"
