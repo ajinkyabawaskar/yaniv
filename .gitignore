@@ -13,6 +13,7 @@ Thumbs.db
 *.iws
 *.ipr
 .claude/
+.agents/
 
 .vscode/
 .classpath
@@ -60,3 +61,4 @@ dump.rdb
 # Playwright artifacts
 frontend/playwright-report/
 frontend/test-results/
+skills-lock.json
