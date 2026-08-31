@@ -99,17 +99,21 @@ public class GameService {
     }
 
     /**
-     * Get open lobbies (games in LOBBY status) ordered by most recent first.
-     * Returns up to 5 lobbies with player counts.
+     * Get open lobbies (games in LOBBY status) created in last 5 minutes,
+     * ordered by most recent first. Returns up to 3 lobbies with player counts.
      *
      * @return List of open lobbies with player count info
      */
     @Transactional(readOnly = true)
     public List<Map<String, Object>> getOpenLobbies() {
         List<Game> lobbies = gameRepository.findByStatusOrderByCreatedAtDesc(Game.GameStatus.LOBBY);
-        
-        // Limit to 5 most recent
-        lobbies = lobbies.stream().limit(5).collect(Collectors.toList());
+
+        // Only lobbies created in last 5 minutes, up to 3 most recent
+        java.time.LocalDateTime cutoff = java.time.LocalDateTime.now().minusMinutes(5);
+        lobbies = lobbies.stream()
+                .filter(g -> g.getCreatedAt() != null && g.getCreatedAt().isAfter(cutoff))
+                .limit(3)
+                .collect(Collectors.toList());
         
         // Fetch player counts for each lobby
         List<String> gameIds = lobbies.stream().map(Game::getId).collect(Collectors.toList());

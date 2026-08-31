@@ -220,8 +220,8 @@ public class RoomController {
     }
 
     /**
-     * Get open lobbies (games in LOBBY status) - public endpoint, no JWT required.
-     * Returns up to 5 most recent open lobbies with player counts.
+     * Get open lobbies (games in LOBBY status) created in last 5 minutes -
+     * public endpoint, no JWT required. Returns up to 3 most recent.
      *
      * @return List of open lobbies
      */
