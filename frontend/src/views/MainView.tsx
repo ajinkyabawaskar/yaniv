@@ -113,6 +113,7 @@ export default function MainView({ initialRoomCode }: MainViewProps) {
       setCurrentGameId(response.gameId);
       setCurrentRoomCode(response.roomCode);
       setActiveView('game');
+      window.dispatchEvent(new CustomEvent('yanif:lobby-created'));
     } catch (err) {
       console.error('Failed to create game:', err);
     }

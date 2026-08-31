@@ -183,6 +183,21 @@ export const gameApi = {
 
   getPlayers: (gameId: string) =>
     apiClient.get<PlayersResponse>(`/rooms/${gameId}/players`),
+
+  getOpenLobbies: () =>
+    apiClient.get<
+      Array<{
+        gameId: string;
+        roomCode: string;
+        status: string;
+        targetScore: number;
+        maxPlayers: number;
+        hostUserId: string;
+        hostDisplayName?: string;
+        createdAt: string;
+        playerCount: number;
+      }>
+    >('/rooms/open'),
 };
 
 export default apiClient;

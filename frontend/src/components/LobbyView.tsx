@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { preloadAllCards } from '../utils/cardPreload';
+import { gameApi } from '../utils/api';
 import './LobbyView.css';
 
 interface OpenLobby {
@@ -48,18 +49,15 @@ export default function LobbyView({ onCreateGame, onJoinGame, friendCode }: Lobb
     };
   }, []);
 
-  // Fetch open lobbies
+  // Fetch open lobbies (uses authenticated apiClient; endpoint is also public as fallback)
   useEffect(() => {
     let mounted = true;
 
     const fetchOpenLobbies = async () => {
       try {
-        const response = await fetch('/api/v1/rooms/open');
-        if (response.ok) {
-          const data = await response.json();
-          if (mounted) {
-            setOpenLobbies(data);
-          }
+        const data = await gameApi.getOpenLobbies();
+        if (mounted) {
+          setOpenLobbies(data as any);
         }
       } catch (err) {
         console.warn('[LobbyView] Failed to fetch open lobbies:', err);
@@ -69,11 +67,22 @@ export default function LobbyView({ onCreateGame, onJoinGame, friendCode }: Lobb
     };
 
     fetchOpenLobbies();
-    const interval = setInterval(fetchOpenLobbies, 15000); // Refresh every 15s
+    const interval = setInterval(fetchOpenLobbies, 5000); // Refresh every 5s for near-realtime open tables
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') fetchOpenLobbies();
+    };
+    const handleLobbyCreated = () => fetchOpenLobbies();
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('yanif:lobby-created', handleLobbyCreated as EventListener);
+    window.addEventListener('focus', fetchOpenLobbies);
 
     return () => {
       mounted = false;
       clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('yanif:lobby-created', handleLobbyCreated as EventListener);
+      window.removeEventListener('focus', fetchOpenLobbies);
     };
   }, []);
 
