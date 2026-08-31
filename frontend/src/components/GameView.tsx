@@ -440,7 +440,7 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
             <div className="round-complete-header">
               <span className="trophy-icon">🏆</span>
               <h2>
-                {gameState.isGameOver ? 'Game Over!' : `Round {gameState.roundNumber} Complete!`}
+                {gameState.isGameOver ? 'Game Over!' : `Round ${gameState.roundNumber} Complete!`}
               </h2>
             </div>
 
