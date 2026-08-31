@@ -8,6 +8,7 @@ import InviteNotificationToast from '../components/InviteNotificationToast';
 import LobbyView from '../components/LobbyView';
 import GameView from '../components/GameView';
 import Avatar from '../components/Avatar';
+import { isBgMusicEnabled, setBgMusicEnabled, setupBgMusicUnlock, preloadBgMusic } from '../utils/backgroundMusic';
 import './MainView.css';
 
 interface MainViewProps {
@@ -34,6 +35,16 @@ export default function MainView({ initialRoomCode }: MainViewProps) {
   const [showEditProfileModal, setShowEditProfileModal] = useState(false);
   const [newDisplayName, setNewDisplayName] = useState(user?.displayName || '');
   const [savingProfile, setSavingProfile] = useState(false);
+  const [bgMusicEnabled, setBgMusicEnabledState] = useState(() => isBgMusicEnabled());
+
+  // Background music — hidden, low volume, plays after first interaction
+  useEffect(() => {
+    setupBgMusicUnlock();
+    preloadBgMusic();
+    const handler = (e: Event) => setBgMusicEnabledState((e as CustomEvent).detail);
+    window.addEventListener('yanif:bg-music-toggled', handler as EventListener);
+    return () => window.removeEventListener('yanif:bg-music-toggled', handler as EventListener);
+  }, []);
 
   // Detect mobile viewport
   useEffect(() => {
@@ -187,6 +198,19 @@ export default function MainView({ initialRoomCode }: MainViewProps) {
         </div>
 
         <div className="nav-right">
+          <button
+            className="nav-logout-btn"
+            onClick={() => {
+              const next = !bgMusicEnabled;
+              setBgMusicEnabled(next);
+              setBgMusicEnabledState(next);
+            }}
+            aria-label={bgMusicEnabled ? 'Mute background music' : 'Unmute background music'}
+            title={bgMusicEnabled ? 'Mute background music' : 'Unmute background music'}
+            style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)' }}
+          >
+            {bgMusicEnabled ? '🎵' : '🔇'}
+          </button>
           {FRONTEND_VERSION && FRONTEND_VERSION !== 'dev' && (
             <span className="version-text" title="Frontend Version">
               v{FRONTEND_VERSION}
