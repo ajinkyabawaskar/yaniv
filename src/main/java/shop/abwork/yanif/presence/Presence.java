@@ -2,10 +2,13 @@ package shop.abwork.yanif.presence;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.BiConsumer;
 
 /**
  * Who is reachable, and who is watching which game.
@@ -34,8 +37,20 @@ public class Presence {
     /** roomId + playerId to the moment that player's last session left the room. */
     private final Map<String, Instant> absentSince = new ConcurrentHashMap<>();
 
+    /**
+     * Told when a game's view of a player changes — they arrived, or they went. The
+     * game orchestrator uses this to re-evaluate whose turn is waiting on whom; without
+     * it, Presence would know a player had gone and nothing would ever act on it.
+     */
+    private final List<BiConsumer<String, String>> absenceListeners = new CopyOnWriteArrayList<>();
+
     public Presence(Clock clock) {
         this.clock = clock;
+    }
+
+    /** Register interest in a game's view of a player changing. */
+    public void onAbsenceChanged(BiConsumer<String, String> listener) {
+        absenceListeners.add(listener);
     }
 
     public void sessionOpened(String sessionId, String playerId) {
@@ -118,10 +133,16 @@ public class Presence {
      */
     private void settleAbsence(String roomId, String playerId) {
         String key = key(roomId, playerId);
+        boolean wasAbsent = absentSince.containsKey(key);
         if (attachedSessions(roomId, playerId).isEmpty()) {
             absentSince.putIfAbsent(key, clock.instant());
         } else {
             absentSince.remove(key);
+        }
+        // Only a real change is worth announcing: a second tab closing while another
+        // still watches leaves the game's view of this player exactly as it was.
+        if (wasAbsent != absentSince.containsKey(key)) {
+            absenceListeners.forEach(listener -> listener.accept(roomId, playerId));
         }
     }
 

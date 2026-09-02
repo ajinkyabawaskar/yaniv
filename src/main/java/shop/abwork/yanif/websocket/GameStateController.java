@@ -3,6 +3,7 @@ package shop.abwork.yanif.websocket;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import shop.abwork.yanif.entity.Game;
+import shop.abwork.yanif.presence.Presence;
 import shop.abwork.yanif.entity.GamePlayer;
 import shop.abwork.yanif.entity.User;
 import shop.abwork.yanif.game.AutoPlayStrategy;
@@ -24,6 +25,7 @@ import org.springframework.stereotype.Controller;
 import org.springframework.web.socket.messaging.SessionConnectedEvent;
 import org.springframework.web.socket.messaging.SessionDisconnectEvent;
 
+import java.time.Instant;
 import java.util.*;
 import java.util.Objects;
 import java.util.concurrent.*;
@@ -52,6 +54,24 @@ public class GameStateController {
      * just a cache entry and can be dropped and rebuilt on the next touch.
      */
     private final Map<String, Long> engineLastTouched = new ConcurrentHashMap<>();
+
+    /** Who is watching which game. Auto-play asks this, never a set of its own. */
+    private final Presence presence;
+
+    /** How long an absent player's turn is held before the server plays it for them. */
+    private final long absenceGraceSeconds;
+
+    /**
+     * The absence each player has already spent their grace on, keyed room+player.
+     * Grace is once per absence, not per turn: making everyone wait afresh on every
+     * turn of the same absence would stall the table. The absence instant is the
+     * identity -- when it changes, the player came back and left again, and the new
+     * absence gets its own grace.
+     */
+    private final Map<String, Instant> gracedAbsences = new ConcurrentHashMap<>();
+
+    /** Once the grace is spent, later turns in the same absence go quickly. */
+    private static final long SPENT_GRACE_DELAY_MS = 800L;
 
     /**
      * Rooms untouched for this long are dropped from memory. The Redis snapshot outlives
@@ -97,24 +117,27 @@ public class GameStateController {
 
     // Track disconnected players who are still in game (for reconnection)
     // roomId -> Set of disconnected userIds
-    private final Map<String, Set<String>> disconnectedInGame = new ConcurrentHashMap<>();
 
     public GameStateController(GameService gameService,
                               PresenceService presenceService,
                               UserService userService,
                               SimpMessagingTemplate messagingTemplate,
+                              Presence presence,
                               @Value("${game.turn-timer-seconds:45}") int turnTimerSeconds,
                               @Value("${game.auto-play-enabled:false}") boolean autoPlayEnabled,
                               @Value("${game.yaniv-contest-timer-seconds:15}") int yanivContestTimerSeconds,
-                              @Value("${game.yaniv-threshold:7}") int yanivThreshold) {
+                              @Value("${game.yaniv-threshold:7}") int yanivThreshold,
+                              @Value("${game.absence-grace-seconds:45}") long absenceGraceSeconds) {
         this.gameService = gameService;
         this.presenceService = presenceService;
         this.userService = userService;
         this.messagingTemplate = messagingTemplate;
+        this.presence = presence;
         this.turnTimerSeconds = turnTimerSeconds;
         this.autoPlayEnabled = autoPlayEnabled;
         this.yanivContestTimerSeconds = yanivContestTimerSeconds;
         this.yanivThreshold = yanivThreshold;
+        this.absenceGraceSeconds = absenceGraceSeconds;
 
     }
 
@@ -152,8 +175,8 @@ public class GameStateController {
             return;
         }
 
-        // Player is in an active game - mark as disconnected but keep in game
-        disconnectedInGame.computeIfAbsent(roomId, k -> ConcurrentHashMap.newKeySet()).add(userId);
+        // Presence already recorded this, via the session listener. Nothing to track here:
+        // a set keyed by user cannot tell a closed spare tab from a player who left.
 
         // Update presence to DISCONNECTED_IN_GAME status (extended TTL)
         presenceService.setUserDisconnectedInGame(userId);
@@ -216,14 +239,11 @@ public class GameStateController {
             return;
         }
 
-        // Check if this player was previously disconnected in this game
-        Set<String> disconnected = disconnectedInGame.get(roomId);
-        boolean wasDisconnected = disconnected != null && disconnected.contains(userId);
+        // Was this player away from this game? Presence knows; this handler does not
+        // keep a record of its own.
+        boolean wasDisconnected = presence.absentSince(roomId, userId).isPresent();
 
         if (wasDisconnected) {
-            // Player is reconnecting to an active game
-            disconnected.remove(userId);
-
             // Update presence back to IN_GAME
             presenceService.setUserInGame(userId);
 
@@ -1056,10 +1076,14 @@ public class GameStateController {
             System.err.println("Failed to delete game snapshot for room " + roomId + ": " + e.getMessage());
         }
         gameEngines.remove(roomId);
-        disconnectedInGame.remove(roomId);
         engineLastTouched.remove(roomId);
         unpersistedRooms.remove(roomId);
+        presence.roomClosed(roomId); // an absence must not outlive the game that recorded it
         return true;
+    }
+
+    private static String graceKey(String roomId, String playerId) {
+        return roomId + "\u0000" + playerId;
     }
 
     /**
@@ -1135,8 +1159,8 @@ public class GameStateController {
 
                 if (gameEngines.remove(roomId, engine)) {
                     engineLastTouched.remove(roomId);
-                    disconnectedInGame.remove(roomId);
                     unpersistedRooms.remove(roomId);
+                    presence.roomClosed(roomId);
                     System.out.println("Evicted idle engine for room " + roomId
                             + "; it will be restored from its snapshot on next use");
                 }
@@ -1152,6 +1176,24 @@ public class GameStateController {
      * configured value. Sweeping at half the idle window bounds the extra time a room
      * can linger to one interval.
      */
+    /**
+     * React to a game's view of a player changing: their turn may now be waiting on
+     * somebody who is not there, or somebody who just came back.
+     *
+     * Registered here rather than in Presence so the module stays free of game concepts.
+     */
+    @PostConstruct
+    void watchForAbsenceChanges() {
+        presence.onAbsenceChanged((roomId, playerId) -> {
+            YanivGameEngine engine = gameEngines.get(roomId);
+            if (engine != null) {
+                synchronized (engine) {
+                    scheduleTurnTimerIfNeeded(engine, roomId);
+                }
+            }
+        });
+    }
+
     @PostConstruct
     void startIdleEngineSweep() {
         long intervalSeconds = Math.max(30, engineIdleEvictionMinutes * 30);
@@ -1255,9 +1297,9 @@ public class GameStateController {
                     System.err.println("Could not delete stale snapshot for room " + roomId + ": " + e.getMessage());
                 }
                 gameEngines.remove(roomId);
-                disconnectedInGame.remove(roomId);
                 engineLastTouched.remove(roomId);
                 unpersistedRooms.remove(roomId);
+                presence.roomClosed(roomId);
                 System.err.println("Game state lost for room " + roomId + "; returned to lobby");
             }
         } catch (Exception e) {
@@ -1348,10 +1390,9 @@ public class GameStateController {
         if (!autoPlayEnabled) {
             return;
         }
-        Set<String> disconnected = disconnectedInGame.getOrDefault(roomId, java.util.Set.of());
         boolean allActivePlayersGone = engine.getAllPlayerIds().stream()
                 .filter(p -> !engine.getEliminatedPlayers().contains(p))
-                .allMatch(disconnected::contains);
+                .allMatch(p -> presence.absentSince(roomId, p).isPresent());
         if (!allActivePlayersGone) {
             ScheduledFuture<?> old = turnTimers.remove(roomId);
             if (old != null) {
@@ -1434,14 +1475,15 @@ public class GameStateController {
             return;
         }
 
-        Set<String> disconnected = disconnectedInGame.get(roomId);
-        boolean currentPlayerDisconnected = disconnected != null && disconnected.contains(engine.getCurrentPlayer());
-        if (!currentPlayerDisconnected) {
-            return; // connected players keep unlimited thinking time
+        String currentPlayer = engine.getCurrentPlayer();
+        Optional<Instant> absentSince = presence.absentSince(roomId, currentPlayer);
+        if (absentSince.isEmpty()) {
+            return; // a session is still watching this game for them
         }
 
-        // Disconnected player: auto-play immediately (no wait)
-        long delayMs = 800L; // Small delay to allow reconnect handling to complete
+        // The grace clock starts now, when it becomes their turn -- not when they left.
+        boolean graceSpent = absentSince.get().equals(gracedAbsences.get(graceKey(roomId, currentPlayer)));
+        long delayMs = graceSpent ? SPENT_GRACE_DELAY_MS : absenceGraceSeconds * 1000L;
         long deadline = System.currentTimeMillis() + delayMs;
         turnDeadlines.put(roomId, deadline);
 
@@ -1470,8 +1512,8 @@ public class GameStateController {
         }
         try {
             synchronized (engine) {
-                Set<String> disconnected = disconnectedInGame.get(roomId);
-                if (disconnected == null || !disconnected.contains(expectedPlayer)) {
+                Optional<Instant> absentSince = presence.absentSince(roomId, expectedPlayer);
+                if (absentSince.isEmpty()) {
                     return; // player came back before the timer fired
                 }
                 YanivGameEngine.GameState state = engine.getCurrentState();
@@ -1511,6 +1553,8 @@ public class GameStateController {
                     }
                 }
 
+                // This absence has now had its grace; later turns in it go quickly.
+                gracedAbsences.put(graceKey(roomId, expectedPlayer), absentSince.get());
                 System.out.println("Auto-played turn for player " + expectedPlayer + " in room " + roomId);
                 finishMutation(engine, roomId, expectedPlayer);
             }

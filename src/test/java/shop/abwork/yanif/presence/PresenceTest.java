@@ -8,6 +8,9 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -124,5 +127,39 @@ class PresenceTest {
                 "room-2 did not");
         assertEquals(PresenceStatus.IN_GAME, presence.status("alice"),
                 "she is still playing, just not that game");
+    }
+
+    @Test
+    @DisplayName("A change in who is watching a game is announced")
+    void absenceChangesAreAnnounced() {
+        List<String> announced = new ArrayList<>();
+        presence.onAbsenceChanged((roomId, playerId) -> announced.add(roomId + "/" + playerId));
+
+        presence.sessionOpened("session-a", "alice");
+        presence.attachedToRoom("session-a", "room-1");
+        assertTrue(announced.isEmpty(),
+                "arriving for the first time is not a change in absence");
+
+        presence.sessionClosed("session-a");
+        assertEquals(List.of("room-1/alice"), announced, "leaving is");
+
+        presence.sessionOpened("session-b", "alice");
+        presence.attachedToRoom("session-b", "room-1");
+        assertEquals(List.of("room-1/alice", "room-1/alice"), announced, "and so is coming back");
+    }
+
+    @Test
+    @DisplayName("A second tab closing changes nothing, so nothing is announced")
+    void noAnnouncementWhenAnotherSessionStillWatches() {
+        presence.sessionOpened("session-a", "alice");
+        presence.attachedToRoom("session-a", "room-1");
+        presence.sessionOpened("session-b", "alice");
+        presence.attachedToRoom("session-b", "room-1");
+
+        List<String> announced = new ArrayList<>();
+        presence.onAbsenceChanged((roomId, playerId) -> announced.add(roomId + "/" + playerId));
+        presence.sessionClosed("session-a");
+
+        assertTrue(announced.isEmpty(), "she is still watching, so the game's view of her is unchanged");
     }
 }
