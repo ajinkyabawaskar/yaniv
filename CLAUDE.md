@@ -37,6 +37,16 @@ E2E specs live in `frontend/e2e/`; see `scripts/run-all-tests.sh` to run backend
 
 Backend needs MySQL on localhost:3306 (db `yanif`, root/root) and Redis on localhost:6379. If you don't run them locally, SSH tunnels to the production box are documented in `docs/build-deploy.md`.
 
+For a fresh clone, `./scripts/dev-setup.sh` walks you through it: it checks the toolchain, reuses or
+starts Docker containers for Redis and MySQL (prompting for a Redis password if yours needs one),
+generates a JWT secret, installs the git hooks, and installs frontend deps. Everything it captures
+goes to `src/main/resources/application-local.properties`, which is gitignored and **only read when
+the `local` profile is active**:
+
+```bash
+./mvnw spring-boot:run -Dspring-boot.run.profiles=local
+```
+
 ### Versioning / release
 
 ```bash
