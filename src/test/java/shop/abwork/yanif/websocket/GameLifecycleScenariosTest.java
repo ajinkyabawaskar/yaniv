@@ -120,7 +120,7 @@ class GameLifecycleScenariosTest {
         controller = new GameStateController(gameService, presenceService, userService,
                 messagingTemplate, presence, 1 /* turn timer seconds */, true /* auto-play */,
                 1 /* yaniv contest window */, 7 /* yaniv threshold */,
-                2 /* absence grace seconds */);
+                2 /* absence grace seconds */, 1 /* bonus discard timeout seconds */);
         controller.watchForAbsenceChanges();
         // The real composition: Presence is the only writer of the Redis projection.
         new shop.abwork.yanif.presence.PresenceRedisProjection(presence, presenceService).follow(); // @PostConstruct does not run on a direct construction
@@ -1363,6 +1363,46 @@ class GameLifecycleScenariosTest {
             }
         }
         return null;
+    }
+
+    @Test
+    void H6_othersAreToldWhenSomeoneLeavesWithoutAnyoneActing() {
+        startStartedGame();
+        String current = liveEngine().getCurrentPlayer();
+        String other = current.equals(HOST) ? OTHER : HOST;
+
+        presence.sessionOpened("s-" + other, other);
+        presence.attachedToRoom("s-" + other, ROOM);
+        presence.sessionOpened("s-" + current, current);
+        presence.attachedToRoom("s-" + current, ROOM);
+        controller.getGameState(ROOM, auth(other));
+        int before = messagesFor(other).size();
+
+        // Nobody plays a card. The only thing that happens is that someone leaves.
+        presence.sessionClosed("s-" + current);
+
+        assertTrue(messagesFor(other).size() > before,
+                "the others must be told, not left waiting for the next game action");
+        assertEquals("DISCONNECTED_IN_GAME", rosterStatusOf(other, current),
+                "and what they are told must show the absence");
+    }
+
+    @Test
+    void H7_othersAreToldWhenSomeoneComesBack() {
+        startStartedGame();
+        String current = liveEngine().getCurrentPlayer();
+        String other = current.equals(HOST) ? OTHER : HOST;
+
+        presence.sessionOpened("s-" + other, other);
+        presence.attachedToRoom("s-" + other, ROOM);
+        makeAbsentFromRoom(current);
+        controller.getGameState(ROOM, auth(other));
+        assertEquals("DISCONNECTED_IN_GAME", rosterStatusOf(other, current), "precondition: away");
+
+        returnToRoom(current);
+
+        assertEquals("IN_GAME", rosterStatusOf(other, current),
+                "the badge must clear for everyone else too, without anyone acting");
     }
 
     @Test

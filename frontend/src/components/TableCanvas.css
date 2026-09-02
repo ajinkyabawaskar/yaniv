@@ -731,11 +731,20 @@
   position: absolute;
   inset: 0;
   z-index: 100;
+  cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   background: rgba(40, 5, 5, 0.7);
   animation: crimsonFlash 1.5s ease;
+}
+
+.asaf-dismiss-hint {
+  margin-top: 14px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.7;
 }
 
 .asaf-strike-card {
@@ -1280,7 +1289,15 @@
     flex-shrink: 0;
   }
 
-  .dramatic-asaf-overlay .asaf-strike-card {
+  .dramatic-asaf-overlay .asaf-dismiss-hint {
+  margin-top: 14px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.asaf-strike-card {
     padding: 20px 28px;
     margin: 0 16px;
   }
@@ -1506,4 +1523,172 @@
     width: 72px;
     height: 100px;
   }
+}
+
+/* ==========================================================================
+   Bonus Discard — the matching-rank prompt
+   This panel shipped with no styles at all, because nothing ever rendered it:
+   the client never read bonusDiscardActive, so the markup was dead. The moment
+   it started rendering it landed in the flow as an unpositioned block with a
+   full-size card image, shoving the table apart.
+   ========================================================================== */
+
+.bonus-discard-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 96;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(ellipse at center, rgba(212, 175, 55, 0.14) 0%, rgba(5, 20, 14, 0.82) 70%);
+  animation: bonusOverlayIn 0.25s ease-out;
+  /* Deliberately NOT pointer-events:none. Unlike the Asaf banner this is a
+     decision, not an announcement: there is genuinely nothing else the player
+     may do, and a click that lands on the table behind sends an action the
+     engine rejects. The two buttons are always a way out, and the server's
+     bonus deadline answers it if they walk away. */
+}
+
+@keyframes bonusOverlayIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.bonus-discard-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  max-width: min(360px, calc(100% - 32px));
+  padding: 24px 28px;
+  background: radial-gradient(circle, rgba(24, 60, 46, 0.98) 0%, rgba(7, 25, 18, 0.99) 100%);
+  border: 2px solid var(--gold-primary);
+  border-radius: 20px;
+  box-shadow:
+    0 0 60px var(--gold-glow),
+    0 18px 50px rgba(0, 0, 0, 0.85),
+    inset 0 0 30px rgba(212, 175, 55, 0.08);
+  backdrop-filter: blur(16px);
+  text-align: center;
+  animation: bonusPanelIn 0.3s cubic-bezier(0.2, 0.9, 0.3, 1.3);
+}
+
+@keyframes bonusPanelIn {
+  from { transform: scale(0.88) translateY(12px); opacity: 0; }
+  to   { transform: scale(1) translateY(0); opacity: 1; }
+}
+
+.bonus-discard-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.bonus-icon {
+  font-size: 28px;
+  animation: goldPulse 1.8s infinite ease-in-out;
+}
+
+.bonus-title {
+  font-family: 'Cinzel', serif;
+  font-size: 24px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  background: var(--gold-gradient);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.bonus-discard-explanation {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--ink-light);
+}
+
+.bonus-discard-explanation strong {
+  color: var(--gold-light);
+  font-weight: 700;
+}
+
+.bonus-card-display {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+/* .card-img fills its parent; this image has no sized parent of its own, so it
+   is sized here. Without a rule the SVG renders at its natural size. */
+.bonus-card-img {
+  width: 84px;
+  height: 118px;
+  object-fit: contain;
+  display: block;
+  border-radius: 6px;
+  box-shadow: 0 0 22px var(--gold-glow), 0 8px 20px rgba(0, 0, 0, 0.6);
+}
+
+.bonus-card-label {
+  font-family: 'DM Mono', monospace;
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  color: var(--gold-light);
+}
+
+.bonus-discard-actions {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+}
+
+.bonus-btn {
+  flex: 1;
+  padding: 12px 16px;
+  font-family: 'Cinzel', serif;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.bonus-btn:hover:not(:disabled) { transform: scale(1.04); }
+.bonus-btn:active:not(:disabled) { transform: scale(0.96); }
+
+.bonus-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.bonus-btn-discard {
+  color: var(--ink-dark);
+  background: var(--gold-gradient);
+  border: 2px solid var(--gold-light);
+  box-shadow: 0 0 18px var(--gold-glow), 0 6px 18px rgba(0, 0, 0, 0.5);
+}
+
+.bonus-btn-keep {
+  color: var(--gold-light);
+  background: rgba(12, 44, 32, 0.9);
+  border: 2px solid rgba(212, 175, 55, 0.5);
+}
+
+.bonus-discard-hint {
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--ink-muted);
+}
+
+@media (max-width: 480px) {
+  .bonus-discard-panel { padding: 18px 20px; gap: 12px; }
+  .bonus-title { font-size: 20px; }
+  .bonus-discard-explanation { font-size: 13px; }
+  .bonus-card-img { width: 68px; height: 96px; }
+  .bonus-btn { font-size: 13px; padding: 11px 12px; }
 }

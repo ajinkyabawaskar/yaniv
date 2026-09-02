@@ -195,6 +195,9 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
             opponentCounts: gameData.opponentCounts || {},
             roundScores: gameData.roundScores || {},
             roundWinner: gameData.roundWinner || null,
+            // The real winner list. roundWinner above is a legacy field that always names
+            // the Yaniv caller, even when an Asaf means they lost the round.
+            roundWinners: gameData.roundWinners || null,
             isAsaf: gameData.isAsaf || false,
             asafByUserId: gameData.asafByUserId || null,
             isRoundOver: isRoundOverState,
@@ -211,6 +214,10 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
             autoPlayedPlayerId: gameData.autoPlayedPlayerId || null,
             maxPlayers: gameData.maxPlayers || 6,
             targetScore: gameData.targetScore || 100,
+            // Without these the engine waits in BONUS_DISCARD for a decision the player
+            // has no way to make, and the client just keeps retrying its discard.
+            bonusDiscardActive: gameData.bonusDiscardActive || false,
+            pendingBonusCard: gameData.pendingBonusCard || null,
           });
 
           if (gameData.autoPlayedPlayerId) {

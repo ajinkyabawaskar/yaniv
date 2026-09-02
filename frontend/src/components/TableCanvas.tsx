@@ -203,6 +203,13 @@ export default function TableCanvas({
     }
   }, [isAsaf]);
 
+  // The banner covers the whole table and eats clicks. Its timer outlives the round it
+  // belongs to, so a quick Next Round leaves it sitting over the new deal, blocking the
+  // first turn. A new round always clears it.
+  useEffect(() => {
+    setShowAsafBanner(false);
+  }, [roundNumber]);
+
   // Turn timer driven by the server's authoritative deadline. The server
   // performs auto-play on expiry - the client only displays and ticks.
   useEffect(() => {
@@ -561,6 +568,13 @@ export default function TableCanvas({
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 1.1 }}
               transition={{ duration: 0.3 }}
+              onClick={() => setShowAsafBanner(false)}
+              role="button"
+              tabIndex={0}
+              aria-label="Dismiss Asaf announcement"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') setShowAsafBanner(false);
+              }}
             >
               <div className="asaf-strike-card">
                 <span className="asaf-warning-badge">⚠️ COUNTER STRIKE</span>
@@ -569,6 +583,7 @@ export default function TableCanvas({
                   {asafByUserId ? playerNames[asafByUserId] || asafByUserId : 'An opponent'} had equal or lower score!
                 </p>
                 <div className="asaf-penalty-tag">+30 Point Penalty Applied</div>
+                <span className="asaf-dismiss-hint">Tap to dismiss</span>
               </div>
             </motion.div>
           )}
@@ -783,7 +798,9 @@ export default function TableCanvas({
                 <span className="bonus-title">Matching Rank Bonus!</span>
               </div>
               <div className="bonus-discard-explanation">
-                You discarded a <strong>{pendingBonusCard.rank} of {pendingBonusCard.suit}</strong> and drew a <strong>{pendingBonusCard.rank} of {pendingBonusCard.suit}</strong>!
+                {/* Only the drawn card is on the wire; the card it matched is staged
+                    server-side and never sent, so don't claim to know its suit. */}
+                You drew a <strong>{pendingBonusCard.rank} of {pendingBonusCard.suit}</strong>, matching the {pendingBonusCard.rank} you just discarded!
               </div>
               <div className="bonus-card-display">
                 <img
@@ -799,18 +816,22 @@ export default function TableCanvas({
                   onClick={() => onBonusDiscard(true)}
                   disabled={!isPlayerTurn}
                 >
-                  🗑️ Discard (End Turn)
+                  🗑️ Discard it
                 </button>
                 <button
                   className="bonus-btn bonus-btn-keep"
                   onClick={() => onBonusDiscard(false)}
                   disabled={!isPlayerTurn}
                 >
-                  🤚 Keep in Hand
+                  🤚 Keep it
                 </button>
               </div>
               <div className="bonus-discard-hint">
-                {isPlayerTurn ? '' : 'Waiting for your turn...'}
+                {!isPlayerTurn
+                  ? 'Waiting for your turn...'
+                  : turnEndsAt
+                    ? `${turnTimerSeconds}s to choose — either way, your turn ends here.`
+                    : 'Either way, your turn ends here.'}
               </div>
             </div>
           </div>

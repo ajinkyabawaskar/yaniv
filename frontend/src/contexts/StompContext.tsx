@@ -38,6 +38,7 @@ export function StompProvider({ children }: { children: React.ReactNode }) {
   const { jwtToken, user } = useAuthStore();
   const userId = user?.userId;
   const [isConnected, setIsConnected] = useState(false);
+  const pageHideHandlerRef = useRef<(() => void) | null>(null);
   const clientRef = useRef<Client | null>(null);
   const pendingMessagesRef = useRef<Array<{ destination: string; body: any }>>([]);
   const subscriptionsRef = useRef<Map<string, StompSubscription>>(new Map());
@@ -58,6 +59,10 @@ export function StompProvider({ children }: { children: React.ReactNode }) {
         },
         debug: () => {}, // Disable debug logging
         reconnectDelay: 3000,
+        // Explicit rather than inherited from the library, and matched to the broker's
+        // 10s so a dead socket is noticed in seconds rather than whenever the OS says so.
+        heartbeatIncoming: 10000,
+        heartbeatOutgoing: 10000,
       });
 
       // Expose for e2e tests (Playwright waits on this handle)
@@ -65,7 +70,6 @@ export function StompProvider({ children }: { children: React.ReactNode }) {
 
       client.onConnect = () => {
         console.log('WebSocket connected');
-        console.log('Client connected state:', client.connected);
         setIsConnected(true);
         clientRef.current = client;
 
@@ -77,16 +81,39 @@ export function StompProvider({ children }: { children: React.ReactNode }) {
         // heartbeat tells it when this one dies. The old one was worse than redundant --
         // a beat from a live tab refreshed a DISCONNECTED_IN_GAME status, pinning a
         // player who was sitting right there.
+      };
 
-        client.onDisconnect = () => {
-          console.log('WebSocket disconnected');
-          setIsConnected(false);
-        };
+      // onDisconnect only fires for a *graceful* STOMP disconnect. A socket that simply
+      // dies -- phone locks, network drops, server restarts -- fires this instead. Without
+      // it isConnected stayed true across a reconnect, so nothing that keys on it re-ran:
+      // the client never resubscribed, and the server never learned the player was back.
+      client.onWebSocketClose = () => {
+        console.log('WebSocket closed');
+        setIsConnected(false);
+      };
+
+      client.onDisconnect = () => {
+        console.log('WebSocket disconnected');
+        setIsConnected(false);
+      };
+
+      client.onWebSocketError = (event) => {
+        console.error('WebSocket error:', event);
+        setIsConnected(false);
       };
 
       client.onStompError = (frame) => {
         console.error('STOMP error:', frame.headers['message'], frame.body);
       };
+
+      // Closing a tab does not unmount React, so the cleanup below never runs and the
+      // socket can linger until the OS tears it down. pagehide is the event that fires
+      // reliably on mobile Safari; closing the socket here makes the drop immediate.
+      const handlePageHide = () => {
+        clientRef.current?.forceDisconnect();
+      };
+      pageHideHandlerRef.current = handlePageHide;
+      window.addEventListener('pagehide', handlePageHide);
 
       client.activate();
     };
@@ -94,6 +121,10 @@ export function StompProvider({ children }: { children: React.ReactNode }) {
     connect();
 
     return () => {
+      if (pageHideHandlerRef.current) {
+        window.removeEventListener('pagehide', pageHideHandlerRef.current);
+        pageHideHandlerRef.current = null;
+      }
       // No offline message on unmount: the server sees the socket close and decides,
       // and it will not call a player away while another tab still holds a session.
       if (clientRef.current && clientRef.current.connected) {
