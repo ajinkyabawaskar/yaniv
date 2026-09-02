@@ -200,6 +200,78 @@ class BonusDiscardTest {
                 GameSnapshot.toCard(pair[0]), GameSnapshot.toCard(pair[1]));
     }
 
+    /**
+     * As above, but that match is the <em>last</em> card in the deck, with everything else
+     * on the pile. Taking the bonus empties the deck, so the replacement can only come
+     * from a recycle - the branch where a card could quietly end up in two places.
+     */
+    private RiggedDeal dealWithOneCardLeftAndTheMatchAsTheLastDeckCard() {
+        GameSnapshot snapshot = GameSnapshot.fromJson(engine.toSnapshot());
+        String player = engine.getCurrentPlayer();
+        GameSnapshot.CardDto[] pair = findHandCardWithASiblingInTheDeck(snapshot, player);
+
+        List<GameSnapshot.CardDto> toPile = new java.util.ArrayList<>(snapshot.deckRemaining);
+        toPile.remove(pair[1]);
+        toPile.addAll(snapshot.playerHands.get(player));
+        toPile.remove(pair[0]);
+
+        List<GameSnapshot.DiscardCombinationDto> combos =
+                new java.util.ArrayList<>(snapshot.discardCombinations);
+        for (GameSnapshot.CardDto card : toPile) {
+            GameSnapshot.DiscardCombinationDto single = new GameSnapshot.DiscardCombinationDto();
+            single.cards = List.of(card);
+            single.type = "SINGLE";
+            single.handSizeAtDiscard = 5;
+            combos.add(single);
+        }
+
+        snapshot.playerHands.put(player, List.of(pair[0]));
+        snapshot.deckRemaining = new java.util.ArrayList<>(List.of(pair[1]));
+        snapshot.discardCombinations = combos;
+
+        return new RiggedDeal(YanivGameEngine.fromSnapshot(snapshot.toJson()), player,
+                GameSnapshot.toCard(pair[0]), GameSnapshot.toCard(pair[1]));
+    }
+
+    /** Deck + every hand + the pile. Must always be 52. */
+    private int totalCardsInPlay(YanivGameEngine engine) {
+        int total = engine.getDeckCount() + engine.getDiscardPile().getAllDiscardedCards().size();
+        for (String playerId : engine.getAllPlayerIds()) {
+            total += engine.getPlayerHand(playerId).size();
+        }
+        return total;
+    }
+
+    @Test
+    @DisplayName("The replacement can come from a recycled deck without duplicating a card")
+    void theReplacementCanComeFromARecycledDeck() {
+        RiggedDeal deal = dealWithOneCardLeftAndTheMatchAsTheLastDeckCard();
+        YanivGameEngine rigged = deal.engine();
+
+        rigged.processDiscard(deal.player(), List.of(deal.toDiscard()));
+        rigged.processDraw(deal.player(), "DECK", null);
+        assertEquals(0, rigged.getDeckCount(), "precondition: that was the last card in the deck");
+        assertTrue(rigged.isBonusDiscardActive());
+
+        rigged.processBonusDiscard(deal.player(), true);
+
+        assertEquals(1, rigged.getPlayerHand(deal.player()).size(),
+                "the recycle is what makes the replacement possible");
+        assertEquals(52, totalCardsInPlay(rigged), "a recycle must not mint cards");
+
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        List<String> duplicates = new java.util.ArrayList<>();
+        for (Card card : rigged.getDiscardPile().getAllDiscardedCards()) {
+            if (!seen.add(card.getId())) duplicates.add(card.getId());
+        }
+        for (String playerId : rigged.getAllPlayerIds()) {
+            for (Card card : rigged.getPlayerHand(playerId).getCards()) {
+                if (!seen.add(card.getId())) duplicates.add(card.getId());
+            }
+        }
+        assertTrue(duplicates.isEmpty(), "the same card in two places: " + duplicates);
+    }
+
     /** {hand card, its same-rank different-suit sibling still in the deck}. */
     private GameSnapshot.CardDto[] findHandCardWithASiblingInTheDeck(GameSnapshot snapshot, String player) {
         for (GameSnapshot.CardDto inHand : snapshot.playerHands.get(player)) {
@@ -213,21 +285,42 @@ class BonusDiscardTest {
     }
 
     @Test
-    @DisplayName("The bonus is not offered when taking it would leave the hand empty")
-    void theBonusIsNotOfferedWhenItWouldEmptyTheHand() {
+    @DisplayName("Bonus-discarding your last card deals a replacement, so the hand is never empty")
+    void bonusDiscardingTheLastCardDealsAReplacement() {
         RiggedDeal deal = dealWithOneCardLeftAndItsMatchOnTheDeck();
         YanivGameEngine rigged = deal.engine();
         assertEquals(1, rigged.getPlayerHand(deal.player()).size(), "precondition: down to one card");
 
         rigged.processDiscard(deal.player(), List.of(deal.toDiscard()));
         rigged.processDraw(deal.player(), "DECK", null);
+        assertTrue(rigged.isBonusDiscardActive(),
+                "the bonus is still offered on a last card - the replacement is what makes it legal");
 
-        assertFalse(rigged.isBonusDiscardActive(),
-                "a player cannot end a turn holding nothing - never ask a question whose yes is illegal");
+        rigged.processBonusDiscard(deal.player(), true);
+
         assertEquals(1, rigged.getPlayerHand(deal.player()).size(),
-                "they keep the card they drew");
-        assertNotEquals(deal.player(), rigged.getCurrentPlayer(),
-                "with no decision to make, the turn just ends");
+                "a player never ends a turn holding nothing");
+        assertFalse(rigged.getPlayerHand(deal.player()).containsCard(deal.bonus()),
+                "the bonus card went to the pile; what they hold is the replacement");
+        assertTrue(rigged.getDiscardPile().isDrawable(deal.bonus().getId()),
+                "the bonus card still tops the pile");
+        assertNotEquals(deal.player(), rigged.getCurrentPlayer(), "the turn ends either way");
+    }
+
+    @Test
+    @DisplayName("Keeping the bonus on a last card leaves that card in hand, and no replacement")
+    void keepingTheBonusOnTheLastCardDrawsNoReplacement() {
+        RiggedDeal deal = dealWithOneCardLeftAndItsMatchOnTheDeck();
+        YanivGameEngine rigged = deal.engine();
+
+        rigged.processDiscard(deal.player(), List.of(deal.toDiscard()));
+        rigged.processDraw(deal.player(), "DECK", null);
+        rigged.processBonusDiscard(deal.player(), false);
+
+        assertEquals(1, rigged.getPlayerHand(deal.player()).size(),
+                "the replacement is only for the card they gave up");
+        assertTrue(rigged.getPlayerHand(deal.player()).containsCard(deal.bonus()),
+                "declining keeps the drawn card");
     }
 
     @Test
@@ -235,6 +328,7 @@ class BonusDiscardTest {
     void acceptedBonusCardIsTheTopOfThePile() {
         RiggedDeal deal = dealWhereTheNextDeckCardMatchesAHandCard();
         YanivGameEngine rigged = deal.engine();
+        int handSizeBefore = rigged.getPlayerHand(deal.player()).size();
 
         rigged.processDiscard(deal.player(), List.of(deal.toDiscard()));
         rigged.processDraw(deal.player(), "DECK", null);
@@ -243,6 +337,10 @@ class BonusDiscardTest {
         assertEquals(deal.bonus().getId(), rigged.getPendingBonusCard().getId());
 
         rigged.processBonusDiscard(deal.player(), true);
+
+        assertEquals(handSizeBefore - 1, rigged.getPlayerHand(deal.player()).size(),
+                "shedding a card is the whole point of the bonus - no replacement is dealt "
+                        + "unless the hand would otherwise be empty");
 
         assertEquals(deal.bonus().getId(), rigged.getDiscardPile().getTopCard().orElseThrow().getId(),
                 "the bonus card left the hand last, so it is what the next player sees");

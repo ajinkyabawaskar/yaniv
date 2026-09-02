@@ -247,15 +247,10 @@ public class YanivGameEngine {
             hand.addCard(topCard);
 
             // Check for bonus discard: drawn from deck, single card discarded,
-            // drawn card matches rank but different suit, and the player would still
-            // hold something afterwards. A player down to their last card discards it,
-            // draws its twin, and accepting would leave them with an empty hand: nothing
-            // to play on their next turn, and a score of zero nobody can beat. Never ask
-            // a question whose yes is illegal, so the turn just ends instead.
+            // and drawn card matches rank but different suit
             if (lastDiscardedRank != null
                     && topCard.getRank() == lastDiscardedRank
-                    && !topCard.getSuit().equals(getSuitOfDiscardedCard())
-                    && hand.size() > 1) {
+                    && !topCard.getSuit().equals(getSuitOfDiscardedCard())) {
                 this.pendingBonusCard = topCard;
                 currentState = GameState.BONUS_DISCARD;
                 return; // Wait for player's bonus discard decision
@@ -303,6 +298,21 @@ public class YanivGameEngine {
             int handSizeAtDiscard = pendingDiscardHandSize;
             pushPendingDiscardToPile();
             discardPile.addCombination(List.of(pendingBonusCard), DiscardCombination.Type.SINGLE, handSizeAtDiscard);
+
+            // A player on their last card discards it, draws its twin, and takes the
+            // bonus with it -- which would leave them holding nothing: no legal discard
+            // next turn, and a score of zero no Asaf can beat. They pick another up
+            // instead. Both discards are on the pile by now, so a recycle has material,
+            // and the replacement always comes from the deck: the top of the pile is the
+            // card they just threw.
+            if (hand.isEmpty()) {
+                if (deck.isEmpty()) {
+                    recycleDeck();
+                }
+                if (!deck.isEmpty()) {
+                    hand.addCard(deck.drawCard());
+                }
+            }
         }
         // If not discarding, the card stays in hand
 

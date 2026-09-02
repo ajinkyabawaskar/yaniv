@@ -153,9 +153,9 @@ the Ace-high heuristic in `DiscardCombination.sortSequenceCards` can never misfi
 (it would need a 12-card combination).
 
 **The floor is one card, not zero.** Every other path reaches it for free: discarding the whole hand
-still draws one card back, so a five-card mixed run leaves you with one. The bonus discard was the
-only route to an empty hand, because it is the only second removal in a turn — see condition 4 of
-its trigger.
+still draws one card back, so a five-card mixed run leaves you with one. The bonus discard is the
+only second removal in a turn, and therefore the only route to an empty hand — which is why taking
+it on a last card deals a replacement.
 
 ## What may be discarded
 
@@ -218,20 +218,22 @@ is always 5 cards, with its two ends drawable.
 
 A non-standard house rule built into the engine.
 
-**Trigger** — all four must hold (`processDraw:249-263`):
+**Trigger** — all three must hold (`processDraw:249-258`):
 1. the discard this turn was **exactly one card**;
 2. the draw source was **DECK** (a discard-pile draw never reaches the check);
-3. the drawn card has the **same rank but a different suit** as the discarded card;
-4. the hand holds **more than one card** after the draw — otherwise accepting would empty it.
-
-Condition 4 is the one that is easy to miss. A player down to their last card discards it, draws its
-twin, and accepting would leave them holding nothing: no legal discard on their next turn, and a
-hand score of zero that no Asaf can beat. The engine does not offer the choice at all rather than
-offer one whose "yes" is illegal, so the turn simply ends.
+3. the drawn card has the **same rank but a different suit** as the discarded card.
 
 The engine parks in `BONUS_DISCARD` and waits for `processBonusDiscard(playerId, shouldDiscard)`
 (`:282-311`). Accepting removes the card and pushes it as its **own SINGLE combination**; the player
 draws **no replacement**, so the hand shrinks by one. All 13 ranks can trigger it.
+
+**Taking the bonus on your last card deals a replacement.** A player down to one card discards it,
+draws its twin, and accepting would otherwise leave them holding nothing — no legal discard on their
+next turn, and a hand score of zero that no Asaf can beat. So when the accept empties the hand the
+engine deals one card from the deck (`:308-315`), recycling first if it has to. The replacement is
+always from the **deck**: the top of the pile is the card they just threw. Declining draws nothing —
+the replacement is only for the card they gave up. This is the *only* case where a bonus discard
+does not shrink the hand.
 
 **Push order matters, because only the top combination is drawable.** Accepting pushes the turn's
 *original* discard first (`pushPendingDiscardToPile`, `:328-341`) and the bonus card second, so the
@@ -681,7 +683,7 @@ The card-conservation, scoring and authorisation defects that used to fill this 
 | Disconnect during `BONUS_DISCARD` stalled the room | covered by the turn timer | — |
 | A *connected* player parked in `BONUS_DISCARD` stalled the room for good | every bonus decision has a deadline | `GameStateControllerTurnTimerTest.aBonusDecisionNobodyAnswersIsDeclinedInsteadOfStallingTheRoom` |
 | An accepted bonus card was buried under the discard it matched | pushed last, so it is the drawable top | `BonusDiscardTest.acceptedBonusCardIsTheTopOfThePile` |
-| A player on their last card could bonus-discard down to an empty hand | not offered when it would empty the hand | `BonusDiscardTest.theBonusIsNotOfferedWhenItWouldEmptyTheHand` |
+| A player on their last card could bonus-discard down to an empty hand | dealt a replacement, recycling the deck if needed | `BonusDiscardTest.bonusDiscardingTheLastCardDealsAReplacement`, `.theReplacementCanComeFromARecycledDeck` |
 | The client never read `bonusDiscardActive` / `pendingBonusCard` | written to the store on every push | `GameStateMessageContractTest` |
 | `handleNextRound` never restored from a snapshot | restores like every other handler | — |
 | Reconnect during a storage outage NPE'd | returns without touching the room | — |
