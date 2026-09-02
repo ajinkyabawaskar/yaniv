@@ -71,8 +71,13 @@ public class GameStateController {
      */
     private final Map<String, Instant> gracedAbsences = new ConcurrentHashMap<>();
 
-    /** Once the grace is spent, later turns in the same absence go quickly. */
-    private static final long SPENT_GRACE_DELAY_MS = 800L;
+    /**
+     * Once the grace is spent, later turns in the same absence go at this pace. It trades
+     * the absent player's chance to catch up against the table not waiting on them: at
+     * under a second a whole game can finish while someone's phone is locked.
+     */
+    @Value("${game.spent-grace-delay-ms:800}")
+    private long spentGraceDelayMs = 800L;
 
     /**
      * Rooms untouched for this long are dropped from memory. The Redis snapshot outlives
@@ -1444,7 +1449,7 @@ public class GameStateController {
 
         // The grace clock starts now, when it becomes their turn -- not when they left.
         boolean graceSpent = absentSince.get().equals(gracedAbsences.get(graceKey(roomId, currentPlayer)));
-        long delayMs = graceSpent ? SPENT_GRACE_DELAY_MS : absenceGraceSeconds * 1000L;
+        long delayMs = graceSpent ? spentGraceDelayMs : absenceGraceSeconds * 1000L;
         long deadline = System.currentTimeMillis() + delayMs;
         turnTimerTotals.put(roomId, (int) Math.max(1, Math.round(delayMs / 1000.0)));
         turnDeadlines.put(roomId, deadline);

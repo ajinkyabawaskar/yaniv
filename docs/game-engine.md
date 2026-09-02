@@ -485,6 +485,12 @@ Nothing polls for this. `Presence` announces a change in who is watching a game,
 re-evaluates the timer for that room (`watchForAbsenceChanges`). Without that, Presence would know a
 player had gone and nothing would act on it.
 
+**All of it depends on the client noticing it disconnected.** `onWebSocketClose` is what flips
+`isConnected`; `onDisconnect` alone fires only on a *graceful* STOMP disconnect, so a socket that
+simply dies would leave the flag true, nothing that keys on it would re-run, and the client would
+never resubscribe — leaving the server convinced the player is still away. `pagehide` force-closes
+the socket when a tab goes, because closing a tab does not unmount React.
+
 > `game.turn-timer-seconds` is **not** this timer. It is a display field (`:780`) and the ROUND_OVER
 > auto-advance delay. The absence grace is `game.absence-grace-seconds`.
 
@@ -688,6 +694,7 @@ else.
 | `game.turn-timer-seconds` | `45` | Display field and the round-over auto-advance delay. **Not the auto-play delay.** |
 | `game.auto-play-enabled` | `false` (`@Value` default now also `false`) | Gates every turn timer and the round-over self-advance. **Deliberately off** while presence status is unreliable. |
 | `game.absence-grace-seconds` | `45` | How long an absent player's turn is held before the server plays it for them. Once per absence, counted only during their turn. |
+| `game.spent-grace-delay-ms` | `800` | Pace of later turns in the same absence. Low keeps the table moving; too low and a whole game finishes while someone's phone is locked. |
 | `game.engine-idle-eviction-minutes` | `5` | How long a room may go untouched before its engine is dropped from memory. State survives in the snapshot, so eviction costs at most one restore. |
 
 Per-room, supplied in the `POST /api/v1/rooms` body: `targetScore` (default 100, unvalidated) and
