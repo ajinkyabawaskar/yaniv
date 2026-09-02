@@ -364,7 +364,8 @@ combination, regenerate the canonical 52 ids, and keep the ones not held (`:488-
 every combination except the newest (`:524-526`) and reshuffles.
 
 Eliminated players' hands are deliberately *excluded* from the held set (`:489`), returning their
-stale cards to circulation. Their hands are never cleared, only hidden from clients (`:424-432`).
+stale cards to circulation. Their hands are emptied on elimination, so there is nothing stale to
+return — see [Scoring](#scoring).
 
 ---
 
@@ -377,8 +378,7 @@ surprises are.
 
 `gameEngines` maps room id → engine (`GameStateController.java:43`). Engines are created only by
 `/start` (`:615-619`) and by `getOrRestoreEngine` restoring a snapshot (`:970`), and removed only
-when the game ends (`:1061`). **There is no TTL and no idle eviction** — a game everyone abandons
-keeps its engine for the process lifetime.
+when the game ends, when a room is aborted, and when the idle sweep reclaims it — see below.
 
 A restart loses everything in memory: engines, disconnect sets, dedup entries, all timers. Games are
 restored **lazily, on first touch** — there is no warm-up at boot.
@@ -404,11 +404,9 @@ Two consequences worth knowing:
   the engine only once `completeGame` succeeds; the snapshot is deleted last, so the game stays
   recoverable until then. Nothing else would retry — a terminal engine accepts no further actions —
   so the sweep re-attempts it via `pendingFinalization`.
-- **Eviction clears the room's `disconnectedInGame` entry**, so a player who was disconnected before
-  eviction is not known to be disconnected after the restore. This is deliberate: it matches what
-  already happens across a server restart (`C9`), and keeping the entry would leak it for rooms that
-  are never finished or aborted. It costs nothing while `game.auto-play-enabled` is false, since
-  nothing acts on that set — but it is worth revisiting alongside presence.
+- **Eviction calls `presence.roomClosed(roomId)`**, so absences do not outlive the game that
+  recorded them. A player still connected re-attaches on their next subscribe; one who had gone is
+  simply no longer expected by a game that is no longer in memory.
 
 ### When a snapshot is trusted
 
@@ -441,15 +439,23 @@ client gets the *previous* turn's countdown.
 All of it happens in `buildGameStateForPlayers` (`:644-803`), and every push goes to a **user
 destination**, never a shared topic. Only two fields differ per recipient:
 
+**The destination is room-scoped**: `/user/queue/room/{roomId}/game-state`, built by
+`gameStateDestination(roomId)`. A user destination reaches every session a player has open, so a
+single shared one let a message for one game overwrite a tab watching another — the client stores
+the payload's `gameId` but never checks it. Errors go the same way, which is why `sendErrorToUser`
+takes a room. Subscribing to it is also how the server learns which game a session is watching; see
+`docs/adr/0001` and the **room attachment** entry in `CONTEXT.md`.
+
 - `hand` — the recipient's own cards only (`:688-701`)
 - `opponentCounts` — every *other* player's hand **size**, never card identities (`:731-740`)
 
 On `ROUND_OVER`/`GAME_OVER`, `allPlayerHands` is revealed to everyone (`:757-774`). The deck's
 remaining order is never sent — only `deckCount`.
 
-> `PlayerInfo.status` is hardcoded `"ONLINE"` in every builder (`:454`, `:535`, `:680`); the roster
-> never reflects real presence. Clients learn about disconnects only from the separate
-> `broadcastPlayerDisconnected` message (`:1273-1289`).
+**`PlayerInfo.status` is real.** For a game it reports absence from *that* game
+(`IN_GAME` / `DISCONNECTED_IN_GAME`); for a lobby it reports overall reachability. Because it rides
+on every state push, a client that reloads or joins late sees the truth — the old delta message it
+replaced could only be caught by clients that were listening at the moment it was sent.
 
 **Cost: three queries per mutation, whatever the player count.** `loadRoomView` fetches the game
 row, the player rows and every display name (one batched `getUsersByIds`) once per broadcast, and
@@ -459,38 +465,44 @@ roughly `1 + N·(2 + N)` round-trips, so 49 for a 6-player table on every single
 
 ## Turn timers and auto-play
 
-**Only a disconnected player is ever auto-played.** `scheduleTurnTimerIfNeeded` (`:1182-1209`) arms
-a timer only when auto-play is enabled, the state is `WAIT_FOR_TURN`, and the **current** player is
-in the room's `disconnectedInGame` set. Connected players get unlimited thinking time.
+**Only an absent player is ever auto-played.** `scheduleTurnTimerIfNeeded` arms a timer only when
+auto-play is enabled, the state is `WAIT_FOR_TURN` or `BONUS_DISCARD`, and
+`presence.absentSince(roomId, currentPlayer)` reports an absence. A player with *any* session
+attached to the game — a second tab, say — is never auto-played. See **absence** and **room
+attachment** in `CONTEXT.md`.
 
-> **`game.turn-timer-seconds` is not the turn timer.** The auto-play delay is a hardcoded **800 ms**
-> (`:1201`). The 45-second value is used only as a display field (`:780`) and as the ROUND_OVER
-> auto-advance delay (`:1128`). Clients render a 45-second countdown against a deadline 800 ms away.
+**Grace is once per absence, and only counted while it is their turn.** The first time an absent
+player's turn comes round, the timer waits `game.absence-grace-seconds` (45). If they return inside
+it, nothing is played for them and the grace is restored, because coming back and leaving again is
+a *new* absence with a new `absentSince`. Once the grace has been spent — the server actually played
+for them — later turns in that same absence go at 800 ms, so the table is not held up 45 seconds a
+turn. `gracedAbsences` records which absence has been spent, keyed room+player.
 
-> **Auto-play is disabled in the shipped config, deliberately.** `game.auto-play-enabled=false`
-> (`application.properties:48`), and the `@Value` default now matches. It is held off because the
-> presence/connection status it depends on is not yet reliable — see the `PlayerInfo.status` note
-> under [Per-player filtering](#per-player-filtering). That one flag gates every turn timer
-> (`:1189`) and the round-over self-advance (`:1109`), so in production nothing is ever auto-played
-> and `turnEndsAt` is never populated. Every lifecycle test constructs the controller with `true`,
-> so no test covers the shipped default.
->
-> A consequence worth knowing: because `turnDeadlines` is never written, the 45s-vs-800ms countdown
-> mismatch above **cannot occur in production today**. It is latent, waiting for auto-play to be
-> switched on.
+The clock starts when their turn arrives, not when they left: a player who drops during someone
+else's turn has not burned any grace.
 
-### Intended design, not yet built
+Nothing polls for this. `Presence` announces a change in who is watching a game, and the orchestrator
+re-evaluates the timer for that room (`watchForAbsenceChanges`). Without that, Presence would know a
+player had gone and nothing would act on it.
 
-The intended behaviour is a **45-second turn timer for connected players** and the short ~800ms
-delay only for players who are disconnected or reconnecting. Today the code has no connected-player
-timer at all — `scheduleTurnTimerIfNeeded` returns unless the current player is in
-`disconnectedInGame`. Building it depends on presence status being trustworthy first. Until then,
-connected players have unlimited thinking time.
+> `game.turn-timer-seconds` is **not** this timer. It is a display field (`:780`) and the ROUND_OVER
+> auto-advance delay. The absence grace is `game.absence-grace-seconds`.
 
-**Round-over self-advance** fires only when *every non-eliminated* player is disconnected
-(`:1113-1115`), after `turnTimerSeconds`. Note "active" means non-eliminated, not connected — an
-eliminated spectator who is still connected does not hold the round open. A player who drops during
-`ROUND_OVER` is *not* added to `disconnectedInGame` (`:116-120`), so their drop cannot trigger it.
+**Auto-play is on.** `game.auto-play-enabled=true`. It was held off while presence was unreliable;
+it now rests on session-counted **absence**, so a player with any session attached is never played
+for. The flag still gates both the turn timer and the round-over self-advance.
+
+The countdown the client draws uses the total that the current deadline was actually set from
+(`turnTimerTotals`), not `game.turn-timer-seconds` — those are different numbers that merely share a
+default, and advertising the wrong one drew a 45-second arc against an 800 ms deadline.
+
+Connected players still have unlimited thinking time: there is no turn timer for someone who is
+watching. Only absence starts a clock.
+
+**Round-over self-advance** fires only when *every non-eliminated* player is absent, after
+`turnTimerSeconds`. Note "active" means non-eliminated, not connected — an
+eliminated spectator who is still connected does not hold the round open. A player who drops during `ROUND_OVER` is still recorded as
+absent by Presence, so unlike before, their drop *can* now trigger the advance.
 
 ### What the bot plays
 
@@ -540,9 +552,28 @@ twice — the case this exists for.
 
 ## Disconnect and reconnect
 
-A mid-game drop adds the player to `disconnectedInGame`, sets presence to `DISCONNECTED_IN_GAME`
-(30-minute Redis TTL), arms their timer if it is already their turn, and notifies the others
-(`:93-138`).
+A mid-game drop closes one session. `PresenceSessionListener` tells `Presence`, which records an
+**absence** only if that was the player's *last* session watching this game — a second tab keeps
+them present. The absence announcement re-arms the turn timer if it is their turn.
+
+Changes to one player are serialised inside `Presence`, so two of their sessions opening or closing
+at once cannot both read the same "before" and conclude nothing happened. A dropped absence
+announcement would mean a turn is never re-armed.
+
+`PresenceRedisProjection` is the **only** writer of the Redis presence key. It follows
+`Presence.onPresenceChanged` and mirrors the current status; a failure is logged and changes
+nothing, because memory is the truth and Redis knows nothing the process does not know better.
+Previously two `@EventListener`s wrote that key on the same event with no `@Order` between them, so
+what a disconnect meant depended on bean discovery order.
+
+Leaving during `ROUND_OVER` now records an absence like any other — the player is still in the game.
+It used to report plain offline, which meant a table where everyone had gone could never
+self-advance.
+
+`GameStateController` no longer listens for disconnects at all: everything that handler did is now
+done by Presence and the absence announcement. `findRoomForUser` went with it — scanning live
+engines for a user and taking the first match is meaningless when a player can be in several games.
+The reconnect path uses the database, which is the record of who is in which game.
 
 **A disconnected player is never removed from the game.** No code path calls
 `removePlayerFromGame` — it exists (`GameService.java:175-180`) with zero callers. They keep their
@@ -610,10 +641,6 @@ exercising the bug; those are fixed too, and the suite is stable across repeated
 
 ## Still open
 
-- **Presence status is not real.** `PlayerInfo.status` is hardcoded `"ONLINE"` in every builder
-  (`:454`, `:535`, `:680`), so the pushed roster never reflects who is actually connected. Clients
-  learn about disconnects only from the separate `broadcastPlayerDisconnected` message. This is the
-  reason auto-play is held off, and it blocks the connected-player turn timer.
 - **The invite feature has no test coverage.** Its handlers were unreachable until now, so nothing
   has ever exercised send / respond / cancel end to end.
 - **`AutoPlayStrategy.evaluate` does not model the real move.** A deck draw is scored as
@@ -660,7 +687,8 @@ else.
 | `game.yaniv-contest-timer-seconds` | `15` | Asaf window. Captured at engine construction, so changes don't reach in-flight games. |
 | `game.turn-timer-seconds` | `45` | Display field and the round-over auto-advance delay. **Not the auto-play delay.** |
 | `game.auto-play-enabled` | `false` (`@Value` default now also `false`) | Gates every turn timer and the round-over self-advance. **Deliberately off** while presence status is unreliable. |
+| `game.absence-grace-seconds` | `45` | How long an absent player's turn is held before the server plays it for them. Once per absence, counted only during their turn. |
 | `game.engine-idle-eviction-minutes` | `5` | How long a room may go untouched before its engine is dropped from memory. State survives in the snapshot, so eviction costs at most one restore. |
 
 Per-room, supplied in the `POST /api/v1/rooms` body: `targetScore` (default 100, unvalidated) and
-`maxPlayers` (default 6, unvalidated upper bound).
+`maxPlayers` (default 6, valid range 2–6, validated on create).

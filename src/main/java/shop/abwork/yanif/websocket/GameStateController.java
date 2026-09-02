@@ -3,6 +3,8 @@ package shop.abwork.yanif.websocket;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import shop.abwork.yanif.entity.Game;
+import shop.abwork.yanif.presence.Presence;
+import shop.abwork.yanif.presence.PresenceStatus;
 import shop.abwork.yanif.entity.GamePlayer;
 import shop.abwork.yanif.entity.User;
 import shop.abwork.yanif.game.AutoPlayStrategy;
@@ -24,6 +26,7 @@ import org.springframework.stereotype.Controller;
 import org.springframework.web.socket.messaging.SessionConnectedEvent;
 import org.springframework.web.socket.messaging.SessionDisconnectEvent;
 
+import java.time.Instant;
 import java.util.*;
 import java.util.Objects;
 import java.util.concurrent.*;
@@ -52,6 +55,24 @@ public class GameStateController {
      * just a cache entry and can be dropped and rebuilt on the next touch.
      */
     private final Map<String, Long> engineLastTouched = new ConcurrentHashMap<>();
+
+    /** Who is watching which game. Auto-play asks this, never a set of its own. */
+    private final Presence presence;
+
+    /** How long an absent player's turn is held before the server plays it for them. */
+    private final long absenceGraceSeconds;
+
+    /**
+     * The absence each player has already spent their grace on, keyed room+player.
+     * Grace is once per absence, not per turn: making everyone wait afresh on every
+     * turn of the same absence would stall the table. The absence instant is the
+     * identity -- when it changes, the player came back and left again, and the new
+     * absence gets its own grace.
+     */
+    private final Map<String, Instant> gracedAbsences = new ConcurrentHashMap<>();
+
+    /** Once the grace is spent, later turns in the same absence go quickly. */
+    private static final long SPENT_GRACE_DELAY_MS = 800L;
 
     /**
      * Rooms untouched for this long are dropped from memory. The Redis snapshot outlives
@@ -83,6 +104,13 @@ public class GameStateController {
     // roomId -> epoch ms when the current player's timer expires (for client display)
     private final Map<String, Long> turnDeadlines = new ConcurrentHashMap<>();
 
+    /**
+     * The total the current deadline was set from, so the client draws an arc that
+     * actually reaches zero when the turn is played. The grace and the display config
+     * are different numbers that merely happen to share a default.
+     */
+    private final Map<String, Integer> turnTimerTotals = new ConcurrentHashMap<>();
+
     // Turn timer configuration (game.turn-timer-seconds / game.auto-play-enabled)
     private final int turnTimerSeconds;
     private final boolean autoPlayEnabled;
@@ -97,24 +125,27 @@ public class GameStateController {
 
     // Track disconnected players who are still in game (for reconnection)
     // roomId -> Set of disconnected userIds
-    private final Map<String, Set<String>> disconnectedInGame = new ConcurrentHashMap<>();
 
     public GameStateController(GameService gameService,
                               PresenceService presenceService,
                               UserService userService,
                               SimpMessagingTemplate messagingTemplate,
+                              Presence presence,
                               @Value("${game.turn-timer-seconds:45}") int turnTimerSeconds,
-                              @Value("${game.auto-play-enabled:false}") boolean autoPlayEnabled,
+                              @Value("${game.auto-play-enabled:true}") boolean autoPlayEnabled,
                               @Value("${game.yaniv-contest-timer-seconds:15}") int yanivContestTimerSeconds,
-                              @Value("${game.yaniv-threshold:7}") int yanivThreshold) {
+                              @Value("${game.yaniv-threshold:7}") int yanivThreshold,
+                              @Value("${game.absence-grace-seconds:45}") long absenceGraceSeconds) {
         this.gameService = gameService;
         this.presenceService = presenceService;
         this.userService = userService;
         this.messagingTemplate = messagingTemplate;
+        this.presence = presence;
         this.turnTimerSeconds = turnTimerSeconds;
         this.autoPlayEnabled = autoPlayEnabled;
         this.yanivContestTimerSeconds = yanivContestTimerSeconds;
         this.yanivThreshold = yanivThreshold;
+        this.absenceGraceSeconds = absenceGraceSeconds;
 
     }
 
@@ -123,52 +154,6 @@ public class GameStateController {
      * If player is in an active game, mark them as disconnected but keep game state.
      * Their turn timer keeps running; auto-play takes over when it expires.
      */
-    @EventListener
-    public void handleSessionDisconnect(SessionDisconnectEvent event) {
-        String userId = getUserIdFromSession(event);
-
-        if (userId == null) {
-            return;
-        }
-
-        // Find which room this user is in (if any)
-        String roomId = findRoomForUser(userId);
-        if (roomId == null) {
-            return;
-        }
-
-        // Check if there's an active game engine for this room
-        YanivGameEngine engine = gameEngines.get(roomId);
-        if (engine == null) {
-            // Not in an active game, just update presence
-            presenceService.setUserOffline(userId);
-            return;
-        }
-
-        // Check if game is still in progress (not in lobby, not game over)
-        if (engine.isGameOver() || engine.isRoundOver()) {
-            // Game is between rounds or over, just update presence
-            presenceService.setUserOffline(userId);
-            return;
-        }
-
-        // Player is in an active game - mark as disconnected but keep in game
-        disconnectedInGame.computeIfAbsent(roomId, k -> ConcurrentHashMap.newKeySet()).add(userId);
-
-        // Update presence to DISCONNECTED_IN_GAME status (extended TTL)
-        presenceService.setUserDisconnectedInGame(userId);
-
-        // If it is already this player's turn, arm their auto-play timer now
-        if (engine.getCurrentState() == YanivGameEngine.GameState.WAIT_FOR_TURN
-                && userId.equals(engine.getCurrentPlayer())) {
-            scheduleTurnTimerIfNeeded(engine, roomId);
-        }
-
-        // Broadcast disconnected status to other players
-        broadcastPlayerDisconnected(roomId, userId, true);
-
-        System.out.println("Player " + userId + " disconnected from active game in room " + roomId);
-    }
 
     /**
      * Handle WebSocket session connect.
@@ -183,14 +168,11 @@ public class GameStateController {
             return;
         }
 
-        // Find which room this user is in - check both active game engines and database
-        String roomId = findRoomForUser(userId);
+        // The database is the record of who is in which game. Scanning live engines by
+        // user was a first-match guess, and a player may be in several games at once.
+        String roomId = findActiveGameRoomForUser(userId);
         if (roomId == null) {
-            // Check if user has an active game in database (e.g., game engine was cleaned up)
-            roomId = findActiveGameRoomForUser(userId);
-            if (roomId == null) {
-                return;
-            }
+            return;
         }
 
         // Check if there's an active game engine for this room (memory or Redis snapshot)
@@ -202,7 +184,6 @@ public class GameStateController {
         if (engine == null && shouldAbortToLobby(roomId)) {
             // No restorable game and storage confirms it: return the room to the lobby
             abortStaleGame(roomId);
-            presenceService.setUserOnline(userId);
             broadcastLobbyState(roomId);
             return;
         }
@@ -210,39 +191,31 @@ public class GameStateController {
         if (engine == null) {
             // Unresolvable but not provably stale (typically a storage outage). Leave the
             // room alone; every path below dereferences the engine.
-            presenceService.setUserOnline(userId);
             System.err.println("Could not resolve engine for room " + roomId
                     + " on reconnect of " + userId + "; leaving room untouched");
             return;
         }
 
-        // Check if this player was previously disconnected in this game
-        Set<String> disconnected = disconnectedInGame.get(roomId);
-        boolean wasDisconnected = disconnected != null && disconnected.contains(userId);
+        // Was this player away from this game? Presence knows; this handler does not
+        // keep a record of its own.
+        boolean wasDisconnected = presence.absentSince(roomId, userId).isPresent();
 
         if (wasDisconnected) {
-            // Player is reconnecting to an active game
-            disconnected.remove(userId);
-
             // Update presence back to IN_GAME
-            presenceService.setUserInGame(userId);
 
-            // Broadcast reconnected status to other players
-            broadcastPlayerDisconnected(roomId, userId, false);
 
             // Proactively send game state to reconnecting player
             // This avoids race condition where frontend requests state before subscribing
             GameStateMessage stateMessage = buildGameStateForPlayers(engine, roomId, userId);
-            messagingTemplate.convertAndSendToUser(userId, "/queue/game-state", stateMessage);
+            messagingTemplate.convertAndSendToUser(userId, gameStateDestination(roomId), stateMessage);
 
             System.out.println("Player " + userId + " reconnected to active game in room " + roomId + "; game state sent proactively");
         } else {
             // Normal join or new connection to existing game
-            presenceService.setUserInGame(userId);
 
             // Send current game state to the newly connected player
             GameStateMessage stateMessage = buildGameStateForPlayers(engine, roomId, userId);
-            messagingTemplate.convertAndSendToUser(userId, "/queue/game-state", stateMessage);
+            messagingTemplate.convertAndSendToUser(userId, gameStateDestination(roomId), stateMessage);
         }
 
         // Roster changed: drop any auto-play timer armed for the returning player
@@ -267,7 +240,7 @@ public class GameStateController {
 
             // Validate action
             if (!userId.equals(action.playerId)) {
-                sendErrorToUser(userId, "Cannot perform actions for another player");
+                sendErrorToUser(roomId, userId, "Cannot perform actions for another player");
                 return;
             }
 
@@ -282,7 +255,7 @@ public class GameStateController {
                     YanivGameEngine engine = gameEngines.get(roomId);
                     if (engine != null) {
                         GameStateMessage stateMessage = buildGameStateForPlayers(engine, roomId, userId);
-                        messagingTemplate.convertAndSendToUser(userId, "/queue/game-state", stateMessage);
+                        messagingTemplate.convertAndSendToUser(userId, gameStateDestination(roomId), stateMessage);
                     }
                     return;
                 }
@@ -297,14 +270,14 @@ public class GameStateController {
                 if (shouldAbortToLobby(roomId)) {
                     abortStaleGame(roomId);
                 }
-                sendErrorToUser(userId, "Game not found");
+                sendErrorToUser(roomId, userId, "Game not found");
                 return;
             }
 
             synchronized (engine) {
                 // Check if it's this player's turn
                 if (!userId.equals(engine.getCurrentPlayer()) && !"CALL_YANIV".equals(action.actionType)) {
-                    sendErrorToUser(userId, "Not your turn");
+                    sendErrorToUser(roomId, userId, "Not your turn");
                     return;
                 }
 
@@ -313,7 +286,7 @@ public class GameStateController {
                     case "DISCARD_AND_DRAW" -> {
                         Hand playerHand = engine.getPlayerHand(userId);
                         if (playerHand == null) {
-                            sendErrorToUser(userId, "Player hand not found");
+                            sendErrorToUser(roomId, userId, "Player hand not found");
                             return;
                         }
 
@@ -323,7 +296,7 @@ public class GameStateController {
                                 .toList();
 
                         if (discardedCards.size() != action.discardedCardIds.size()) {
-                            sendErrorToUser(userId, "Some discarded cards not found in hand");
+                            sendErrorToUser(roomId, userId, "Some discarded cards not found in hand");
                             return;
                         }
 
@@ -335,11 +308,11 @@ public class GameStateController {
                         } else if ("DISCARD_PILE".equalsIgnoreCase(action.drawSource)) {
                             drawnCard = engine.getDiscardPile().getDrawableCard(action.drawnCardId).orElse(null);
                             if (drawnCard == null) {
-                                sendErrorToUser(userId, "Card not drawable from discard pile: " + action.drawnCardId);
+                                sendErrorToUser(roomId, userId, "Card not drawable from discard pile: " + action.drawnCardId);
                                 return;
                             }
                         } else {
-                            sendErrorToUser(userId, "Invalid draw source: " + action.drawSource);
+                            sendErrorToUser(roomId, userId, "Invalid draw source: " + action.drawSource);
                             return;
                         }
 
@@ -347,7 +320,7 @@ public class GameStateController {
                     }
                     case "BONUS_DISCARD" -> {
                         if (!engine.isBonusDiscardActive()) {
-                            sendErrorToUser(userId, "No bonus discard available");
+                            sendErrorToUser(roomId, userId, "No bonus discard available");
                             return;
                         }
                         boolean shouldDiscard = action.bonusDiscard != null && action.bonusDiscard;
@@ -357,7 +330,7 @@ public class GameStateController {
                         engine.callYaniv(userId);
                     }
                     default -> {
-                        sendErrorToUser(userId, "Unknown action type: " + action.actionType);
+                        sendErrorToUser(roomId, userId, "Unknown action type: " + action.actionType);
                         return;
                     }
                 }
@@ -370,7 +343,7 @@ public class GameStateController {
         } catch (Exception e) {
             System.err.println("Error processing game action: " + e.getMessage());
             e.printStackTrace();
-            sendErrorToUser(auth.getName(), e.getMessage());
+            sendErrorToUser(roomId, auth.getName(), e.getMessage());
         }
     }
 
@@ -393,7 +366,7 @@ public class GameStateController {
                 if (shouldAbortToLobby(roomId)) {
                     abortStaleGame(roomId);
                 }
-                sendErrorToUser(userId, "Game not found");
+                sendErrorToUser(roomId, userId, "Game not found");
                 return;
             }
 
@@ -405,7 +378,7 @@ public class GameStateController {
             }
 
         } catch (Exception e) {
-            sendErrorToUser(auth.getName(), e.getMessage());
+            sendErrorToUser(roomId, auth.getName(), e.getMessage());
         }
     }
 
@@ -428,7 +401,7 @@ public class GameStateController {
                 if (shouldAbortToLobby(roomId)) {
                     abortStaleGame(roomId);
                 }
-                sendErrorToUser(userId, "Game not found");
+                sendErrorToUser(roomId, userId, "Game not found");
                 return;
             }
 
@@ -447,7 +420,7 @@ public class GameStateController {
             System.out.println("Yaniv contested by " + userId + " in room " + roomId);
 
         } catch (Exception e) {
-            sendErrorToUser(auth.getName(), e.getMessage());
+            sendErrorToUser(roomId, auth.getName(), e.getMessage());
         }
     }
 
@@ -467,7 +440,7 @@ public class GameStateController {
             if (engine == null) {
                 Game game = gameService.getGameById(roomId);
                 if (game == null) {
-                    sendErrorToUser(userId, "Game not found");
+                    sendErrorToUser(roomId, userId, "Game not found");
                     return;
                 }
                 // Live state lost (e.g. pre-snapshot restart): back to lobby
@@ -497,7 +470,7 @@ public class GameStateController {
                         info.userId = playerUserId;
                         info.displayName = u.getDisplayName();
                         info.isHost = game.getHostUserId().equals(playerUserId);
-                        info.status = "ONLINE";
+                        info.status = presence.status(playerUserId).name();
                         playerInfos.add(info);
                     });
                 }
@@ -506,20 +479,20 @@ public class GameStateController {
                 lobbyState.drawableDiscardCards = new ArrayList<>();
                 lobbyState.topDiscardCards = new ArrayList<>();
 
-                messagingTemplate.convertAndSendToUser(userId, "/queue/game-state", lobbyState);
+                messagingTemplate.convertAndSendToUser(userId, gameStateDestination(roomId), lobbyState);
                 return;
             }
 
             GameStateMessage stateMessage = buildGameStateForPlayers(engine, roomId, userId);
             messagingTemplate.convertAndSendToUser(
                     userId,
-                    "/queue/game-state",
+                    gameStateDestination(roomId),
                     stateMessage
             );
         } catch (Exception e) {
             System.err.println("Error getting game state: " + e.getMessage());
             e.printStackTrace();
-            sendErrorToUser(auth.getName(), e.getMessage());
+            sendErrorToUser(roomId, auth.getName(), e.getMessage());
         }
     }
 
@@ -534,7 +507,7 @@ public class GameStateController {
 
             Game game = gameService.getGameById(roomId);
             if (game == null) {
-                sendErrorToUser(userId, "Game not found");
+                sendErrorToUser(roomId, userId, "Game not found");
                 return;
             }
 
@@ -547,7 +520,7 @@ public class GameStateController {
             if (engine != null && !engine.isGameOver()) {
                 messagingTemplate.convertAndSendToUser(
                         userId,
-                        "/queue/game-state",
+                        gameStateDestination(roomId),
                         buildGameStateForPlayers(engine, roomId, userId)
                 );
                 return;
@@ -559,7 +532,7 @@ public class GameStateController {
         } catch (Exception e) {
             System.err.println("Error handling player join: " + e.getMessage());
             e.printStackTrace();
-            sendErrorToUser(auth.getName(), e.getMessage());
+            sendErrorToUser(roomId, auth.getName(), e.getMessage());
         }
     }
 
@@ -578,7 +551,7 @@ public class GameStateController {
                 info.userId = playerUserId;
                 info.displayName = u.getDisplayName();
                 info.isHost = game.getHostUserId().equals(playerUserId);
-                info.status = "ONLINE";
+                info.status = presence.status(playerUserId).name();
                 playerInfos.add(info);
             });
         }
@@ -614,7 +587,7 @@ public class GameStateController {
             String playerUserId = player.getId().getUserId();
             messagingTemplate.convertAndSendToUser(
                     playerUserId,
-                    "/queue/game-state",
+                    gameStateDestination(roomId),
                     lobbyState
             );
         }
@@ -632,30 +605,30 @@ public class GameStateController {
             var game = gameService.getGameById(roomId);
 
             if (game == null) {
-                sendErrorToUser(userId, "Game not found");
+                sendErrorToUser(roomId, userId, "Game not found");
                 return;
             }
 
             if (!game.getHostUserId().equals(userId)) {
-                sendErrorToUser(userId, "Only host can start game");
+                sendErrorToUser(roomId, userId, "Only host can start game");
                 return;
             }
 
             if (game.getStatus() == Game.GameStatus.IN_PROGRESS) {
                 // A game is already running (possibly restored after a restart)
-                sendErrorToUser(userId, "Game already in progress");
+                sendErrorToUser(roomId, userId, "Game already in progress");
                 return;
             }
 
             if (game.getStatus() == Game.GameStatus.FINISHED) {
                 // Re-running would deal a fresh game onto a finished row, corrupting history
-                sendErrorToUser(userId, "Game has already finished");
+                sendErrorToUser(roomId, userId, "Game has already finished");
                 return;
             }
 
             var players = gameService.getGamePlayers(roomId);
             if (players.size() < 2) {
-                sendErrorToUser(userId, "Need at least 2 players to start");
+                sendErrorToUser(roomId, userId, "Need at least 2 players to start");
                 return;
             }
 
@@ -672,7 +645,6 @@ public class GameStateController {
             engineLastTouched.put(roomId, System.currentTimeMillis());
 
             for (String playerId : playerIds) {
-                presenceService.setUserInGame(playerId);
             }
 
             // Persist initial snapshot, schedule first turn timer, broadcast
@@ -681,7 +653,7 @@ public class GameStateController {
         } catch (Exception e) {
             System.err.println("Error starting game: " + e.getMessage());
             e.printStackTrace();
-            sendErrorToUser(auth.getName(), e.getMessage());
+            sendErrorToUser(roomId, auth.getName(), e.getMessage());
         }
     }
 
@@ -721,7 +693,13 @@ public class GameStateController {
             info.userId = playerUserId;
             info.displayName = user.getDisplayName();
             info.isHost = game != null && game.getHostUserId().equals(playerUserId);
-            info.status = "ONLINE";
+            // Real, per-game. Absence from THIS game outranks overall reachability, so a
+            // player watching another game still reads as gone from this one. Falling back
+            // to overall status matters for someone who never connected at all: they are
+            // OFFLINE, not sitting at the table.
+            info.status = presence.absentSince(roomId, playerUserId).isPresent()
+                    ? PresenceStatus.DISCONNECTED_IN_GAME.name()
+                    : presence.status(playerUserId).name();
             playerInfos.add(info);
         }
         return new RoomView(game, players, playerNames, playerInfos);
@@ -859,7 +837,7 @@ public class GameStateController {
         if (engine.getCurrentState() == YanivGameEngine.GameState.WAIT_FOR_TURN) {
             Long deadline = turnDeadlines.get(roomId);
             if (deadline != null) {
-                message.turnTimerSeconds = turnTimerSeconds;
+                message.turnTimerSeconds = turnTimerTotals.getOrDefault(roomId, turnTimerSeconds);
                 message.turnEndsAt = deadline;
             }
         }
@@ -897,17 +875,17 @@ public class GameStateController {
             // ROUND_OVER bricks the Next Round button.
             YanivGameEngine engine = getOrRestoreEngine(roomId);
             if (engine == null) {
-                sendErrorToUser(userId, "Game not found");
+                sendErrorToUser(roomId, userId, "Game not found");
                 return;
             }
 
             if (!engine.getAllPlayerIds().contains(userId)) {
-                sendErrorToUser(userId, "You are not a player in this game");
+                sendErrorToUser(roomId, userId, "You are not a player in this game");
                 return;
             }
 
             if (!engine.isRoundOver()) {
-                sendErrorToUser(userId, "Round is not over yet");
+                sendErrorToUser(roomId, userId, "Round is not over yet");
                 return;
             }
 
@@ -919,7 +897,7 @@ public class GameStateController {
         } catch (Exception e) {
             System.err.println("Error starting next round: " + e.getMessage());
             e.printStackTrace();
-            sendErrorToUser(auth.getName(), e.getMessage());
+            sendErrorToUser(roomId, auth.getName(), e.getMessage());
         }
     }
 
@@ -939,7 +917,7 @@ public class GameStateController {
                     autoPlayedPlayerId, view);
             messagingTemplate.convertAndSendToUser(
                     playerId,
-                    "/queue/game-state",
+                    gameStateDestination(roomId),
                     stateMessage
             );
         }
@@ -948,12 +926,21 @@ public class GameStateController {
     /**
      * Send error message to a specific user.
      */
-    private void sendErrorToUser(String userId, String error) {
+    /**
+     * Game state is addressed per room, not per user: a user destination is delivered to
+     * every session that player has open, so a message for one game would otherwise land
+     * in a tab watching another. See docs/adr/0001.
+     */
+    private static String gameStateDestination(String roomId) {
+        return "/queue/room/" + roomId + "/game-state";
+    }
+
+    private void sendErrorToUser(String roomId, String userId, String error) {
         GameStateMessage message = new GameStateMessage();
         message.error = error;
         messagingTemplate.convertAndSendToUser(
                 userId,
-                "/queue/game-state",
+                gameStateDestination(roomId),
                 message
         );
     }
@@ -981,17 +968,6 @@ public class GameStateController {
         return null;
     }
 
-    /**
-     * Find the room a user is currently in by checking game engines.
-     */
-    private String findRoomForUser(String userId) {
-        for (Map.Entry<String, YanivGameEngine> entry : gameEngines.entrySet()) {
-            if (entry.getValue().getAllPlayerIds().contains(userId)) {
-                return entry.getKey();
-            }
-        }
-        return null;
-    }
 
     /**
      * Find active game room for user by checking database.
@@ -1047,10 +1023,20 @@ public class GameStateController {
             System.err.println("Failed to delete game snapshot for room " + roomId + ": " + e.getMessage());
         }
         gameEngines.remove(roomId);
-        disconnectedInGame.remove(roomId);
         engineLastTouched.remove(roomId);
         unpersistedRooms.remove(roomId);
+        presence.roomClosed(roomId); // an absence must not outlive the game that recorded it
+        forgetGracedAbsences(roomId);
         return true;
+    }
+
+    /** The room is gone; its spent-grace records go with it. */
+    private void forgetGracedAbsences(String roomId) {
+        gracedAbsences.keySet().removeIf(k -> k.startsWith(roomId + "\u0000"));
+    }
+
+    private static String graceKey(String roomId, String playerId) {
+        return roomId + "\u0000" + playerId;
     }
 
     /**
@@ -1126,8 +1112,10 @@ public class GameStateController {
 
                 if (gameEngines.remove(roomId, engine)) {
                     engineLastTouched.remove(roomId);
-                    disconnectedInGame.remove(roomId);
                     unpersistedRooms.remove(roomId);
+                    presence.roomClosed(roomId);
+                forgetGracedAbsences(roomId);
+                    forgetGracedAbsences(roomId);
                     System.out.println("Evicted idle engine for room " + roomId
                             + "; it will be restored from its snapshot on next use");
                 }
@@ -1143,7 +1131,29 @@ public class GameStateController {
      * configured value. Sweeping at half the idle window bounds the extra time a room
      * can linger to one interval.
      */
+    /**
+     * React to a game's view of a player changing: their turn may now be waiting on
+     * somebody who is not there, or somebody who just came back.
+     *
+     * Registered here rather than in Presence so the module stays free of game concepts.
+     */
+    void watchForAbsenceChanges() {
+        presence.onAbsenceChanged((roomId, playerId) -> {
+            YanivGameEngine engine = gameEngines.get(roomId);
+            if (engine != null) {
+                synchronized (engine) {
+                    scheduleTurnTimerIfNeeded(engine, roomId);
+                }
+            }
+        });
+    }
+
     @PostConstruct
+    void start() {
+        watchForAbsenceChanges();
+        startIdleEngineSweep();
+    }
+
     void startIdleEngineSweep() {
         long intervalSeconds = Math.max(30, engineIdleEvictionMinutes * 30);
         scheduler.scheduleAtFixedRate(this::evictIdleEngines,
@@ -1246,9 +1256,10 @@ public class GameStateController {
                     System.err.println("Could not delete stale snapshot for room " + roomId + ": " + e.getMessage());
                 }
                 gameEngines.remove(roomId);
-                disconnectedInGame.remove(roomId);
                 engineLastTouched.remove(roomId);
                 unpersistedRooms.remove(roomId);
+                presence.roomClosed(roomId);
+                forgetGracedAbsences(roomId);
                 System.err.println("Game state lost for room " + roomId + "; returned to lobby");
             }
         } catch (Exception e) {
@@ -1339,10 +1350,9 @@ public class GameStateController {
         if (!autoPlayEnabled) {
             return;
         }
-        Set<String> disconnected = disconnectedInGame.getOrDefault(roomId, java.util.Set.of());
         boolean allActivePlayersGone = engine.getAllPlayerIds().stream()
                 .filter(p -> !engine.getEliminatedPlayers().contains(p))
-                .allMatch(disconnected::contains);
+                .allMatch(p -> presence.absentSince(roomId, p).isPresent());
         if (!allActivePlayersGone) {
             ScheduledFuture<?> old = turnTimers.remove(roomId);
             if (old != null) {
@@ -1415,6 +1425,7 @@ public class GameStateController {
             old.cancel(false);
         }
         turnDeadlines.remove(roomId);
+        turnTimerTotals.remove(roomId);
 
         // BONUS_DISCARD is included: a player who drops while the engine waits for
         // their bonus decision would otherwise stall the room permanently.
@@ -1425,15 +1436,17 @@ public class GameStateController {
             return;
         }
 
-        Set<String> disconnected = disconnectedInGame.get(roomId);
-        boolean currentPlayerDisconnected = disconnected != null && disconnected.contains(engine.getCurrentPlayer());
-        if (!currentPlayerDisconnected) {
-            return; // connected players keep unlimited thinking time
+        String currentPlayer = engine.getCurrentPlayer();
+        Optional<Instant> absentSince = presence.absentSince(roomId, currentPlayer);
+        if (absentSince.isEmpty()) {
+            return; // a session is still watching this game for them
         }
 
-        // Disconnected player: auto-play immediately (no wait)
-        long delayMs = 800L; // Small delay to allow reconnect handling to complete
+        // The grace clock starts now, when it becomes their turn -- not when they left.
+        boolean graceSpent = absentSince.get().equals(gracedAbsences.get(graceKey(roomId, currentPlayer)));
+        long delayMs = graceSpent ? SPENT_GRACE_DELAY_MS : absenceGraceSeconds * 1000L;
         long deadline = System.currentTimeMillis() + delayMs;
+        turnTimerTotals.put(roomId, (int) Math.max(1, Math.round(delayMs / 1000.0)));
         turnDeadlines.put(roomId, deadline);
 
         final String expectedPlayer = engine.getCurrentPlayer();
@@ -1461,8 +1474,8 @@ public class GameStateController {
         }
         try {
             synchronized (engine) {
-                Set<String> disconnected = disconnectedInGame.get(roomId);
-                if (disconnected == null || !disconnected.contains(expectedPlayer)) {
+                Optional<Instant> absentSince = presence.absentSince(roomId, expectedPlayer);
+                if (absentSince.isEmpty()) {
                     return; // player came back before the timer fired
                 }
                 YanivGameEngine.GameState state = engine.getCurrentState();
@@ -1476,6 +1489,7 @@ public class GameStateController {
                 if (state == YanivGameEngine.GameState.BONUS_DISCARD) {
                     // They dropped mid-decision: decline and let the turn finish.
                     engine.processBonusDiscard(expectedPlayer, false);
+                    gracedAbsences.put(graceKey(roomId, expectedPlayer), absentSince.get());
                     finishMutation(engine, roomId, expectedPlayer);
                     return;
                 }
@@ -1502,6 +1516,8 @@ public class GameStateController {
                     }
                 }
 
+                // This absence has now had its grace; later turns in it go quickly.
+                gracedAbsences.put(graceKey(roomId, expectedPlayer), absentSince.get());
                 System.out.println("Auto-played turn for player " + expectedPlayer + " in room " + roomId);
                 finishMutation(engine, roomId, expectedPlayer);
             }
@@ -1510,26 +1526,6 @@ public class GameStateController {
         }
     }
 
-    /**
-     * Broadcast player disconnected/reconnected status to other players in the room.
-     */
-    private void broadcastPlayerDisconnected(String roomId, String userId, boolean disconnected) {
-        var players = gameService.getGamePlayers(roomId);
-        for (var player : players) {
-            String playerId = player.getId().getUserId();
-            if (!playerId.equals(userId)) {
-                GameStateMessage message = new GameStateMessage();
-                message.gameId = roomId;
-                message.playerDisconnected = userId;
-                message.playerDisconnectedStatus = disconnected;
-                messagingTemplate.convertAndSendToUser(
-                    playerId,
-                    "/queue/game-state",
-                    message
-                );
-            }
-        }
-    }
 
     /**
      * Request DTOs
@@ -1600,10 +1596,6 @@ public class GameStateController {
 
         // All player hands revealed on ROUND_OVER
         public Map<String, List<Map<String, Object>>> allPlayerHands;
-
-        // Player reconnection status
-        public String playerDisconnected;
-        public boolean playerDisconnectedStatus;
 
         // Turn timer / auto-play
         public int turnTimerSeconds;          // Total allowed seconds per turn

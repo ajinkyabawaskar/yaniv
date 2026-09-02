@@ -57,7 +57,6 @@ export interface GameState {
   pendingBonusCard: GameCard | null; // The drawn card matching discarded rank
 
   // Disconnected players tracking for reconnection UI
-  disconnectedPlayers: Set<string>; // userIds of disconnected players
 
   // Actions
   setGame: (game: Partial<GameState>) => void;
@@ -65,8 +64,6 @@ export interface GameState {
   addCardToHand: (card: GameCard) => void;
   removeCardFromHand: (cardId: string) => void;
   clearGame: () => void;
-  addDisconnectedPlayer: (userId: string) => void;
-  removeDisconnectedPlayer: (userId: string) => void;
 }
 
 export const useGameStore = create<GameState>((set) => ({
@@ -113,7 +110,6 @@ export const useGameStore = create<GameState>((set) => ({
   pendingBonusCard: null,
 
   // Disconnected players
-  disconnectedPlayers: new Set(),
 
   setGame: (game) => set((state) => ({ ...state, ...game })),
   setError: (error) => set({ error }),
@@ -125,18 +121,6 @@ export const useGameStore = create<GameState>((set) => ({
     set((state) => ({
       playerHand: state.playerHand.filter((c) => c.id !== cardId),
     })),
-  addDisconnectedPlayer: (userId) =>
-    set((state) => {
-      const newSet = new Set(state.disconnectedPlayers);
-      newSet.add(userId);
-      return { disconnectedPlayers: newSet };
-    }),
-  removeDisconnectedPlayer: (userId) =>
-    set((state) => {
-      const newSet = new Set(state.disconnectedPlayers);
-      newSet.delete(userId);
-      return { disconnectedPlayers: newSet };
-    }),
   clearGame: () =>
     set({
       gameId: null,
@@ -174,7 +158,6 @@ export const useGameStore = create<GameState>((set) => ({
       autoPlayedPlayerId: null,
       bonusDiscardActive: false,
       pendingBonusCard: null,
-      disconnectedPlayers: new Set(),
     }),
 }));
 

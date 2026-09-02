@@ -19,6 +19,7 @@ import shop.abwork.yanif.entity.User;
 import shop.abwork.yanif.game.GameSnapshot;
 import shop.abwork.yanif.game.YanivGameEngine;
 import shop.abwork.yanif.game.model.Hand;
+import shop.abwork.yanif.presence.Presence;
 import shop.abwork.yanif.service.GameService;
 import shop.abwork.yanif.service.PresenceService;
 import shop.abwork.yanif.service.UserService;
@@ -52,6 +53,10 @@ class GameLifecycleScenariosTest {
     private UserService userService;
     private SimpMessagingTemplate messagingTemplate;
     private GameStateController controller;
+
+    /** A real Presence, not a mock: it is a plain module with no I/O. */
+    private Presence presence;
+    private java.time.Instant presenceNow;
     private Map<String, String> snapshotStore;
     private Game roomGame; // mutable entity so status transitions are observable
 
@@ -61,6 +66,13 @@ class GameLifecycleScenariosTest {
         presenceService = mock(PresenceService.class);
         userService = mock(UserService.class);
         messagingTemplate = mock(SimpMessagingTemplate.class);
+
+        presenceNow = java.time.Instant.parse("2026-09-02T12:00:00Z");
+        presence = new Presence(new java.time.Clock() {
+            @Override public java.time.ZoneId getZone() { return java.time.ZoneOffset.UTC; }
+            @Override public java.time.Clock withZone(java.time.ZoneId z) { return this; }
+            @Override public java.time.Instant instant() { return presenceNow; }
+        });
         snapshotStore = new ConcurrentHashMap<>();
 
         doAnswer(inv -> {
@@ -106,14 +118,18 @@ class GameLifecycleScenariosTest {
         when(gameService.getActiveGames()).thenReturn(List.of(roomGame));
 
         controller = new GameStateController(gameService, presenceService, userService,
-                messagingTemplate, 1 /* turn timer seconds */, true /* auto-play */,
-                1 /* yaniv contest window */, 7 /* yaniv threshold */);
+                messagingTemplate, presence, 1 /* turn timer seconds */, true /* auto-play */,
+                1 /* yaniv contest window */, 7 /* yaniv threshold */,
+                2 /* absence grace seconds */);
+        controller.watchForAbsenceChanges();
+        // The real composition: Presence is the only writer of the Redis projection.
+        new shop.abwork.yanif.presence.PresenceRedisProjection(presence, presenceService).follow(); // @PostConstruct does not run on a direct construction
     }
 
     @AfterEach
     void tearDown() throws Exception {
         clearEngines();
-        clearDisconnected();
+        presence.roomClosed(ROOM);
     }
 
     // ---------------------------------------------------------------- helpers
@@ -133,19 +149,19 @@ class GameLifecycleScenariosTest {
         enginesMap().clear();
     }
 
-    @SuppressWarnings("unchecked")
-    private Map<String, Set<String>> disconnectedMap() {
-        try {
-            Field f = GameStateController.class.getDeclaredField("disconnectedInGame");
-            f.setAccessible(true);
-            return (Map<String, Set<String>>) f.get(controller);
-        } catch (Exception e) {
-            throw new IllegalStateException(e);
-        }
+    /** A player comes back: a new session attaches to the room, as a reopened tab would. */
+    private void returnToRoom(String playerId) {
+        String sessionId = "session-return-" + playerId;
+        presence.sessionOpened(sessionId, playerId);
+        presence.attachedToRoom(sessionId, ROOM);
     }
 
-    private void clearDisconnected() {
-        disconnectedMap().clear();
+    /** State absence through Presence's own interface, not by writing a private field. */
+    private void makeAbsentFromRoom(String playerId) {
+        String sessionId = "session-" + playerId;
+        presence.sessionOpened(sessionId, playerId);
+        presence.attachedToRoom(sessionId, ROOM);
+        presence.sessionClosed(sessionId);
     }
 
     private YanivGameEngine liveEngine() {
@@ -185,7 +201,7 @@ class GameLifecycleScenariosTest {
     private List<GameStateController.GameStateMessage> messagesFor(String userId) {
         ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
         verify(messagingTemplate, atLeast(0))
-                .convertAndSendToUser(eq(userId), eq("/queue/game-state"), captor.capture());
+                .convertAndSendToUser(eq(userId), eq("/queue/room/" + ROOM + "/game-state"), captor.capture());
         return captor.getAllValues().stream()
                 .filter(v -> v instanceof GameStateController.GameStateMessage)
                 .map(v -> (GameStateController.GameStateMessage) v)
@@ -299,7 +315,6 @@ class GameLifecycleScenariosTest {
         startStartedGame();
         
         // Host disconnects and reconnects (simulates exit/re-enter)
-        controller.handleSessionDisconnect(disconnectEvent(HOST));
         controller.handleSessionConnect(connectEvent(HOST));
         
         // Host clicks start game
@@ -376,7 +391,7 @@ class GameLifecycleScenariosTest {
         startStartedGame();
         String current = engineFromSnapshot().getCurrentPlayer();
 
-        controller.handleSessionDisconnect(disconnectEvent(current));
+        makeAbsentFromRoom(current);
 
         verify(presenceService).setUserDisconnectedInGame(current);
         boolean autoPlayed = waitFor(() ->
@@ -391,7 +406,7 @@ class GameLifecycleScenariosTest {
         String current = engineFromSnapshot().getCurrentPlayer();
         String opponent = current.equals(HOST) ? OTHER : HOST;
 
-        controller.handleSessionDisconnect(disconnectEvent(opponent));
+        makeAbsentFromRoom(opponent);
 
         verify(presenceService).setUserDisconnectedInGame(opponent);
         try { Thread.sleep(1600); } catch (InterruptedException ignored) { }
@@ -411,7 +426,7 @@ class GameLifecycleScenariosTest {
         controller.callYaniv(ROOM, new GameStateController.YanivCallMessage(), auth(caller));
         assertTrue(engine.isYanivCalled());
 
-        controller.handleSessionDisconnect(disconnectEvent(caller));
+        makeAbsentFromRoom(caller); // the caller drops inside the contest window
         controller.contestYaniv(ROOM, new GameStateController.ContestYanivMessage(), auth(opponent));
         assertTrue(engine.isRoundOver(), "contest resolves despite caller disconnect");
     }
@@ -421,8 +436,12 @@ class GameLifecycleScenariosTest {
         reachRoundOverViaContest();
         int round = engineFromSnapshot().getRoundNumber();
 
-        controller.handleSessionDisconnect(disconnectEvent(HOST));
-        verify(presenceService, atLeastOnce()).setUserOffline(HOST);
+        makeAbsentFromRoom(HOST);
+
+        // Behaviour change: leaving during ROUND_OVER now records an absence like any
+        // other, because they are still in the game. It used to report plain offline,
+        // which meant an all-gone table could never self-advance.
+        verify(presenceService, atLeastOnce()).setUserDisconnectedInGame(HOST);
 
         try { Thread.sleep(1500); } catch (InterruptedException ignored) { }
         assertTrue(engineFromSnapshot().isRoundOver());
@@ -437,7 +456,9 @@ class GameLifecycleScenariosTest {
         setEngineField(engine, "currentState", YanivGameEngine.GameState.GAME_OVER);
         setEngineField(engine, "winnerId", HOST);
 
-        controller.handleSessionDisconnect(disconnectEvent(HOST));
+        // Connected, but not watching a game: leaving is plain offline, not an absence.
+        presence.sessionOpened("s-host", HOST);
+        presence.sessionClosed("s-host");
 
         verify(presenceService).setUserOffline(HOST);
         verify(presenceService, never()).setUserDisconnectedInGame(HOST);
@@ -448,7 +469,6 @@ class GameLifecycleScenariosTest {
         startStartedGame();
         String before = snapshotStore.get(ROOM);
 
-        controller.handleSessionDisconnect(disconnectEvent("ghost"));
 
         assertEquals(before, snapshotStore.get(ROOM), "snapshot untouched");
         assertEquals(YanivGameEngine.GameState.WAIT_FOR_TURN, engineFromSnapshot().getCurrentState());
@@ -483,8 +503,8 @@ class GameLifecycleScenariosTest {
     }
 
     private void markEveryoneDisconnectedBeforeStart() throws Exception {
-        disconnectedMap().computeIfAbsent(ROOM, k -> ConcurrentHashMap.newKeySet()).add(HOST);
-        disconnectedMap().get(ROOM).add(OTHER);
+        makeAbsentFromRoom(HOST);
+        makeAbsentFromRoom(OTHER);
     }
 
     // ------------------------------------------------------ C. reconnect
@@ -494,8 +514,8 @@ class GameLifecycleScenariosTest {
         startStartedGame();
         String current = engineFromSnapshot().getCurrentPlayer();
 
-        controller.handleSessionDisconnect(disconnectEvent(current)); // arms 1s timer
-        controller.handleSessionConnect(connectEvent(current));       // back before expiry
+        makeAbsentFromRoom(current);
+        returnToRoom(current);                                        // back before expiry
 
         try { Thread.sleep(1800); } catch (InterruptedException ignored) { }
         assertTrue(messagesFor(current).stream().noneMatch(m -> current.equals(m.autoPlayedPlayerId)),
@@ -507,7 +527,7 @@ class GameLifecycleScenariosTest {
     void C2_reconnect_afterAutoPlayFired_getsFreshState() throws Exception {
         startStartedGame();
         String current = engineFromSnapshot().getCurrentPlayer();
-        controller.handleSessionDisconnect(disconnectEvent(current));
+        makeAbsentFromRoom(current);
 
         boolean fired = waitFor(() ->
                 messagesFor(current).stream().anyMatch(m -> current.equals(m.autoPlayedPlayerId)), 5000);
@@ -646,12 +666,12 @@ class GameLifecycleScenariosTest {
         String other = current.equals(HOST) ? OTHER : HOST;
 
         // Player disconnects
-        controller.handleSessionDisconnect(disconnectEvent(current));
+        makeAbsentFromRoom(current);
         verify(presenceService).setUserDisconnectedInGame(current);
 
         // Simulate server restart: engine evicted, disconnectedInGame map cleared (in-memory)
         clearEngines();
-        clearDisconnected();
+        presence.roomClosed(ROOM);
 
         // Player reconnects - engine restored from snapshot
         int otherMsgsBefore = messagesFor(other).size();
@@ -670,7 +690,7 @@ class GameLifecycleScenariosTest {
         startStartedGame();
         String current = engineFromSnapshot().getCurrentPlayer();
 
-        controller.handleSessionDisconnect(disconnectEvent(current));
+        makeAbsentFromRoom(current);
         controller.handleSessionConnect(connectEvent(current));
         String cardId = engineFromSnapshot().getPlayerHand(current).getCards().get(0).getId();
         controller.handleGameAction(ROOM, discardAction(current, List.of(cardId)), auth(current));
@@ -690,7 +710,7 @@ class GameLifecycleScenariosTest {
     void D2_timerTaskAfterEngineReplaced_noOps() throws Exception {
         startStartedGame();
         String current = engineFromSnapshot().getCurrentPlayer();
-        controller.handleSessionDisconnect(disconnectEvent(current));
+        makeAbsentFromRoom(current);
 
         // Replace the live engine instance before the task fires
         YanivGameEngine replacement = YanivGameEngine.fromSnapshot(snapshotStore.get(ROOM));
@@ -812,7 +832,7 @@ class GameLifecycleScenariosTest {
     void E4_autoPlayedYanivCaller_stillGetsContestWindow() throws Exception {
         startStartedGame();
         String first = engineFromSnapshot().getCurrentPlayer();
-        controller.handleSessionDisconnect(disconnectEvent(first));
+        makeAbsentFromRoom(first);
 
         // Rig the disconnected player's hand low so auto-play calls Yaniv
         YanivGameEngine engine = liveEngine();
@@ -1064,13 +1084,14 @@ class GameLifecycleScenariosTest {
         // room is genuinely idle (G5 covers the pending-timer case).
         String current = engineFromSnapshot().getCurrentPlayer();
         String waiting = current.equals(HOST) ? OTHER : HOST;
-        controller.handleSessionDisconnect(disconnectEvent(waiting));
-        assertTrue(disconnectedMap().containsKey(ROOM), "precondition: room has disconnect state");
+        makeAbsentFromRoom(waiting);
+        assertTrue(presence.absentSince(ROOM, waiting).isPresent(),
+                "precondition: the room has an absence recorded");
 
         ageEngine(ROOM, 120);
         controller.evictIdleEngines();
 
-        assertFalse(disconnectedMap().containsKey(ROOM),
+        assertTrue(presence.absentSince(ROOM, waiting).isEmpty(),
                 "per-room bookkeeping must not outlive the engine it belongs to");
     }
 
@@ -1207,6 +1228,141 @@ class GameLifecycleScenariosTest {
 
         verify(gameService).completeGame(eq(ROOM), eq(HOST), eq(List.of(HOST, OTHER)), anyMap());
         assertNull(enginesMap().get(ROOM), "and it is released once recorded");
+    }
+
+    // ------------------------------------------------- H. grace period
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Long> turnDeadlines() {
+        try {
+            Field f = GameStateController.class.getDeclaredField("turnDeadlines");
+            f.setAccessible(true);
+            return (Map<String, Long>) f.get(controller);
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** Put the player in the room via a session, then take the session away. */
+    private void makeAbsent(String playerId, String sessionId) {
+        presence.sessionOpened(sessionId, playerId);
+        presence.attachedToRoom(sessionId, ROOM);
+        presence.sessionClosed(sessionId);
+    }
+
+    @Test
+    void H1_firstTurnOfAnAbsenceWaitsTheGracePeriod() {
+        startStartedGame();
+        String current = liveEngine().getCurrentPlayer();
+        makeAbsent(current, "session-a");
+
+        controller.getGameState(ROOM, auth(current)); // any touch re-evaluates the timer
+
+        Long deadline = turnDeadlines().get(ROOM);
+        assertNotNull(deadline, "an absent player's turn must be on a timer");
+        long waitMs = deadline - System.currentTimeMillis();
+        assertTrue(waitMs > 1_500,
+                "the first turn of an absence gets the grace period, not 800ms; waited " + waitMs);
+    }
+
+    @Test
+    void H2_closingASpareTabNeverCostsYourTurn() {
+        startStartedGame();
+        String current = liveEngine().getCurrentPlayer();
+
+        // Two tabs on the same game, as a player who reopened the link would have.
+        presence.sessionOpened("tab-1", current);
+        presence.attachedToRoom("tab-1", ROOM);
+        presence.sessionOpened("tab-2", current);
+        presence.attachedToRoom("tab-2", ROOM);
+
+        presence.sessionClosed("tab-1");
+
+        assertNull(turnDeadlines().get(ROOM),
+                "a tab closed, but they are still watching: their turn must not be taken");
+        assertTrue(presence.absentSince(ROOM, current).isEmpty(),
+                "and the game must not consider them absent");
+    }
+
+    @Test
+    void H3_comingBackAndLeavingAgainEarnsAFreshGrace() throws Exception {
+        startStartedGame();
+        String current = liveEngine().getCurrentPlayer();
+
+        makeAbsent(current, "session-a");
+        Long firstDeadline = turnDeadlines().get(ROOM);
+        assertNotNull(firstDeadline, "precondition: absent, so on a timer");
+
+        // The grace elapses and the server plays for them.
+        assertTrue(waitFor(() -> {
+            GameStateController.GameStateMessage last = lastMessageFor(current);
+            return last != null && current.equals(last.autoPlayedPlayerId);
+        }, 10_000), "the grace should expire and the turn be auto-played");
+
+        java.time.Instant firstAbsence = presence.absentSince(ROOM, current).orElseThrow();
+
+        // They come back...
+        presence.sessionOpened("session-b", current);
+        presence.attachedToRoom("session-b", ROOM);
+        assertTrue(presence.absentSince(ROOM, current).isEmpty(), "back at the table");
+
+        // ...and drop again. A later drop is a NEW absence with its own instant, which is
+        // what makes the grace fresh: the spent-grace record is keyed on the old one.
+        presenceNow = presenceNow.plusSeconds(60);
+        presence.sessionClosed("session-b");
+
+        java.time.Instant secondAbsence = presence.absentSince(ROOM, current).orElseThrow();
+        assertNotEquals(firstAbsence, secondAbsence,
+                "coming back and leaving again earns a fresh grace, not the spent one");
+    }
+
+    @Test
+    void H4_theRosterCarriesAbsenceOnEveryPush() {
+        startStartedGame();
+        String current = liveEngine().getCurrentPlayer();
+        String other = current.equals(HOST) ? OTHER : HOST;
+
+        // Everyone is watching to begin with — including the player we later remove.
+        presence.sessionOpened("s-" + other, other);
+        presence.attachedToRoom("s-" + other, ROOM);
+        presence.sessionOpened("s-" + current, current);
+        presence.attachedToRoom("s-" + current, ROOM);
+        controller.getGameState(ROOM, auth(other));
+        assertEquals("IN_GAME", rosterStatusOf(other, current),
+                "precondition: the roster shows a watching player as in the game");
+
+        presence.sessionClosed("s-" + current);
+        controller.getGameState(ROOM, auth(other));
+
+        assertEquals("DISCONNECTED_IN_GAME", rosterStatusOf(other, current),
+                "absence rides on every state push, so a reloading client sees it too");
+    }
+
+    @Test
+    void H5_aPlayerWhoNeverConnectedIsNotReportedAsPlaying() {
+        startStartedGame();
+        String current = liveEngine().getCurrentPlayer();
+        String other = current.equals(HOST) ? OTHER : HOST;
+
+        // `other` watches; `current` has never opened a session at all.
+        presence.sessionOpened("s-" + other, other);
+        presence.attachedToRoom("s-" + other, ROOM);
+        controller.getGameState(ROOM, auth(other));
+
+        assertEquals("OFFLINE", rosterStatusOf(other, current),
+                "never connected is not the same as watching the game");
+    }
+
+    /** The status the roster in {@code recipient}'s latest message gives for {@code subject}. */
+    private String rosterStatusOf(String recipient, String subject) {
+        List<GameStateController.GameStateMessage> msgs = messagesFor(recipient);
+        for (int i = msgs.size() - 1; i >= 0; i--) {
+            if (msgs.get(i).players == null) continue;
+            for (GameStateController.PlayerInfo info : msgs.get(i).players) {
+                if (subject.equals(info.userId)) return info.status;
+            }
+        }
+        return null;
     }
 
     @Test

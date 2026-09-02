@@ -8,11 +8,13 @@ For architecture and commands, see [`CLAUDE.md`](CLAUDE.md).
 
 ## Glossary
 
-**Room** — a lobby keyed by a short room code, created over REST before play. Carries `targetScore`
-and `maxPlayers`. A room becomes a **Game** when it starts.
+**Game** — one contest, from creation until a single player remains. Carries a short **room code**,
+`targetScore` and `maxPlayers`, and moves through lobby, in progress, and finished. Persisted in
+MySQL; the live engine for it exists only in server memory.
 
-**Game** — one full contest, from the first deal until a single player remains. Persisted in MySQL;
-the live engine for it exists only in server memory.
+**Room** — the same thing as a **Game**, named for the stage before play starts. The room id *is*
+the game id; they were never two entities. A player may be in several games at once, so "the
+player's room" is never well defined — always say which one.
 
 **Round** — one deal-to-Yaniv cycle within a game. Ends when someone calls Yaniv and the call
 resolves. A game is many rounds.
@@ -54,8 +56,26 @@ player standing wins.
 Outlasting someone ranks above them regardless of final points, because an eliminated player's
 score freezes when they go out.
 
-**Turn timer / auto-play** — the server playing a move for a **disconnected** player. Connected
-players are never auto-played.
+**Session** — one live client connection. A player may hold several at once (several tabs), and is
+only away when the last one goes.
+_Avoid_: connection, socket, client.
+
+**Presence** — whether a player is reachable at all, derived from their sessions. Distinct from
+**room attachment**: a player may be present but attached to no room.
+_Avoid_: online status, connection state.
+
+**Room attachment** — which room a session is watching. A session is attached to at most one room;
+a player is attached to a room while any of their sessions is.
+
+**Absence** — a player having no session attached to a room, beginning at a definite moment. An
+episode with a start, not a flag: it ends when they attach again, and a later drop is a new absence.
+_Avoid_: disconnected (that describes a session, not a player).
+
+**Grace period** — how long an absent player's turn is held before the server plays it for them.
+Granted once per **absence**, and only counted while it is that player's turn.
+
+**Turn timer / auto-play** — the server playing a move for an **absent** player once their **grace
+period** has elapsed. A player with any session attached to the room is never auto-played.
 
 **Snapshot** — the full engine state serialised to Redis after every mutation, so a restarted
 server resumes games instead of re-dealing.
@@ -69,7 +89,7 @@ server resumes games instead of re-dealing.
   sequence adjacency.
 - **Card identity is the id alone.** `Card.equals` ignores suit and rank.
 - Each player receives a **view filtered to their own hand**; opponents' cards must never leave the
-  server. Broadcasts go to `/user/queue/game-state`, never to a shared topic.
+  server. State is addressed to one player in one room, never to a shared topic.
 - The engine stays **pure** — no Spring, no I/O, no clock beyond the timestamp it is handed.
 
 ## Language to avoid

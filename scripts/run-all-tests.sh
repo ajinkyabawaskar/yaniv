@@ -17,6 +17,17 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BACKEND_DIR="$PROJECT_ROOT"
 FRONTEND_DIR="$PROJECT_ROOT/frontend"
 
+# Frontend dev-server port, resolved the way Create React App resolves it: a
+# real environment variable wins, then frontend/.env, then CRA's default of
+# 3000. frontend/playwright.config.ts resolves it the same way; keep them in step.
+FRONTEND_PORT="${PORT:-}"
+if [ -z "$FRONTEND_PORT" ] && [ -f "$FRONTEND_DIR/.env" ]; then
+  FRONTEND_PORT="$(grep -E '^[[:space:]]*PORT=' "$FRONTEND_DIR/.env" 2>/dev/null \
+    | tail -n1 | cut -d= -f2- | tr -d '"'\''[:space:]' || true)"
+fi
+FRONTEND_PORT="${FRONTEND_PORT:-3000}"
+FRONTEND_URL="http://localhost:${FRONTEND_PORT}"
+
 # Function to run backend tests
 run_backend_tests() {
   echo -e "\n${YELLOW}Running Backend Tests (Maven)...${NC}"
@@ -78,22 +89,22 @@ run_frontend_tests() {
   fi
 
   # Check if frontend is running
-  if ! curl -s http://localhost:3000 > /dev/null 2>&1; then
-    echo -e "${YELLOW}Frontend not running, starting it...${NC}"
-    npm run start > /tmp/frontend.log 2>&1 &
+  if ! curl -s "$FRONTEND_URL" > /dev/null 2>&1; then
+    echo -e "${YELLOW}Frontend not running, starting it on ${FRONTEND_PORT}...${NC}"
+    PORT="$FRONTEND_PORT" npm run start > /tmp/frontend.log 2>&1 &
     FRONTEND_PID=$!
 
     # Wait for frontend to be ready
     echo "Waiting for frontend..."
     for i in {1..60}; do
-      if curl -s http://localhost:3000 > /dev/null 2>&1; then
+      if curl -s "$FRONTEND_URL" > /dev/null 2>&1; then
         echo "Frontend ready!"
         break
       fi
       sleep 2
     done
 
-    if ! curl -s http://localhost:3000 > /dev/null 2>&1; then
+    if ! curl -s "$FRONTEND_URL" > /dev/null 2>&1; then
       echo -e "${RED}Frontend failed to start${NC}"
       [ -n "$BACKEND_PID" ] && kill $BACKEND_PID 2>/dev/null
       kill $FRONTEND_PID 2>/dev/null

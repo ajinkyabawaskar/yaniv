@@ -10,6 +10,7 @@ import shop.abwork.yanif.entity.Game;
 import shop.abwork.yanif.entity.GamePlayer;
 import shop.abwork.yanif.entity.User;
 import shop.abwork.yanif.game.YanivGameEngine;
+import shop.abwork.yanif.presence.Presence;
 import shop.abwork.yanif.service.GameService;
 import shop.abwork.yanif.service.PresenceService;
 import shop.abwork.yanif.service.UserService;
@@ -42,6 +43,10 @@ class GameStateControllerTurnTimerTest {
     private SimpMessagingTemplate messagingTemplate;
     private GameStateController controller;
 
+    /** A real Presence, not a mock: it is a plain module with no I/O. */
+    private Presence presence;
+    private java.time.Instant presenceNow;
+
     // Stub of the Redis snapshot store
     private Map<String, String> snapshotStore;
 
@@ -51,6 +56,13 @@ class GameStateControllerTurnTimerTest {
         presenceService = mock(PresenceService.class);
         userService = mock(UserService.class);
         messagingTemplate = mock(SimpMessagingTemplate.class);
+
+        presenceNow = java.time.Instant.parse("2026-09-02T12:00:00Z");
+        presence = new Presence(new java.time.Clock() {
+            @Override public java.time.ZoneId getZone() { return java.time.ZoneOffset.UTC; }
+            @Override public java.time.Clock withZone(java.time.ZoneId z) { return this; }
+            @Override public java.time.Instant instant() { return presenceNow; }
+        });
         snapshotStore = new ConcurrentHashMap<>();
 
         // Snapshot persistence backed by an in-memory map
@@ -89,8 +101,12 @@ class GameStateControllerTurnTimerTest {
         });
 
         controller = new GameStateController(gameService, presenceService, userService,
-                messagingTemplate, 1 /* turn timer seconds */, true /* auto-play */,
-                1 /* yaniv contest window */, 7 /* yaniv threshold */);
+                messagingTemplate, presence, 1 /* turn timer seconds */, true /* auto-play */,
+                1 /* yaniv contest window */, 7 /* yaniv threshold */,
+                2 /* absence grace seconds */);
+        controller.watchForAbsenceChanges();
+        // The real composition: Presence is the only writer of the Redis projection.
+        new shop.abwork.yanif.presence.PresenceRedisProjection(presence, presenceService).follow();
     }
 
     @AfterEach
@@ -106,11 +122,12 @@ class GameStateControllerTurnTimerTest {
     }
 
     @SuppressWarnings("unchecked")
+    /** State absence through Presence's own interface rather than a private field. */
     private void markDisconnected(String userId) throws Exception {
-        Field field = GameStateController.class.getDeclaredField("disconnectedInGame");
-        field.setAccessible(true);
-        Map<String, java.util.Set<String>> map = (Map<String, java.util.Set<String>>) field.get(controller);
-        map.computeIfAbsent(ROOM, k -> ConcurrentHashMap.newKeySet()).add(userId);
+        String sessionId = "session-" + userId;
+        presence.sessionOpened(sessionId, userId);
+        presence.attachedToRoom(sessionId, ROOM);
+        presence.sessionClosed(sessionId);
     }
 
     private Authentication auth(String userId) {
@@ -122,7 +139,7 @@ class GameStateControllerTurnTimerTest {
     private List<GameStateController.GameStateMessage> messagesFor(String userId) {
         ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
         verify(messagingTemplate, atLeast(0))
-                .convertAndSendToUser(eq(userId), eq("/queue/game-state"), captor.capture());
+                .convertAndSendToUser(eq(userId), eq("/queue/room/" + ROOM + "/game-state"), captor.capture());
         return captor.getAllValues().stream()
                 .filter(v -> v instanceof GameStateController.GameStateMessage)
                 .map(v -> (GameStateController.GameStateMessage) v)
