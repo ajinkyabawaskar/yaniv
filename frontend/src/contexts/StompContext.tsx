@@ -39,6 +39,7 @@ export function StompProvider({ children }: { children: React.ReactNode }) {
   const userId = user?.userId;
   const [isConnected, setIsConnected] = useState(false);
   const pageHideHandlerRef = useRef<(() => void) | null>(null);
+  const pageShowHandlerRef = useRef<(() => void) | null>(null);
   const clientRef = useRef<Client | null>(null);
   const pendingMessagesRef = useRef<Array<{ destination: string; body: any }>>([]);
   const subscriptionsRef = useRef<Map<string, StompSubscription>>(new Map());
@@ -48,12 +49,16 @@ export function StompProvider({ children }: { children: React.ReactNode }) {
 
     const connect = () => {
       const wsUrl = getWsUrl();
-      const socket = new SockJS(wsUrl, undefined, {
-        transports: ['websocket', 'xhr-streaming', 'xhr-polling'],
-      });
 
       const client = new Client({
-        webSocketFactory: () => socket,
+        // A NEW socket per call, never a captured one. stompjs invokes this on every
+        // connection attempt, including every automatic retry -- hand it one long-lived
+        // instance and the first close is permanent, because each retry re-offers the
+        // same dead socket. That is why reconnecting used to need a logout.
+        webSocketFactory: () =>
+          new SockJS(wsUrl, undefined, {
+            transports: ['websocket', 'xhr-streaming', 'xhr-polling'],
+          }),
         connectHeaders: {
           Authorization: `Bearer ${jwtToken}`,
         },
@@ -67,6 +72,11 @@ export function StompProvider({ children }: { children: React.ReactNode }) {
 
       // Expose for e2e tests (Playwright waits on this handle)
       (window as any).__STOMP_CLIENT__ = client;
+
+      // Published before it connects, not inside onConnect: pagehide and pageshow need
+      // a handle to a client that has not finished connecting yet, and a null one there
+      // means the socket is never closed on the way out.
+      clientRef.current = client;
 
       client.onConnect = () => {
         console.log('WebSocket connected');
@@ -115,6 +125,19 @@ export function StompProvider({ children }: { children: React.ReactNode }) {
       pageHideHandlerRef.current = handlePageHide;
       window.addEventListener('pagehide', handlePageHide);
 
+      // ...and the way back. A restored page never unmounts React, so nothing above
+      // re-runs, and the browser freezes timers in a backgrounded or bfcached page --
+      // including the retry timer that was meant to bring us back. Nudge it instead of
+      // waiting for a clock that may never tick.
+      const handlePageShow = () => {
+        const restored = clientRef.current;
+        if (restored && !restored.connected) {
+          restored.deactivate().catch(() => {}).then(() => restored.activate());
+        }
+      };
+      pageShowHandlerRef.current = handlePageShow;
+      window.addEventListener('pageshow', handlePageShow);
+
       client.activate();
     };
 
@@ -124,6 +147,10 @@ export function StompProvider({ children }: { children: React.ReactNode }) {
       if (pageHideHandlerRef.current) {
         window.removeEventListener('pagehide', pageHideHandlerRef.current);
         pageHideHandlerRef.current = null;
+      }
+      if (pageShowHandlerRef.current) {
+        window.removeEventListener('pageshow', pageShowHandlerRef.current);
+        pageShowHandlerRef.current = null;
       }
       // No offline message on unmount: the server sees the socket close and decides,
       // and it will not call a player away while another tab still holds a session.
