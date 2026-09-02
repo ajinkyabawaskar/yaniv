@@ -148,8 +148,9 @@ public final class AutoPlayStrategy {
             candidates.addAll(sequenceWindows(suitCards));
         }
 
-        // Mixed-suit full-hand sequence (only legal when it empties the hand)
-        if (cards.size() >= 3 && CardCombinationValidator.isValidSequence(cards, handSize)) {
+        // Mixed-suit sequence (only legal at exactly a full hand's worth of cards)
+        if (cards.size() == CardCombinationValidator.FULL_HAND_SIZE
+                && CardCombinationValidator.isValidSequence(cards, handSize)) {
             candidates.add(new ArrayList<>(cards));
         }
 
@@ -161,11 +162,10 @@ public final class AutoPlayStrategy {
      */
     private static List<List<Card>> sequenceWindows(List<Card> suitCards) {
         List<List<Card>> windows = new ArrayList<>();
-        int[] aceValues = {1, 14};
-        for (int aceValue : aceValues) {
+        for (boolean aceHigh : new boolean[]{false, true}) {
             Map<Integer, Card> bySeqRank = new HashMap<>();
             for (Card card : suitCards) {
-                bySeqRank.put(seqRankValue(card.getRank(), aceValue), card);
+                bySeqRank.put(card.getRank().sequenceValue(aceHigh), card);
             }
             List<Integer> ranks = new ArrayList<>(bySeqRank.keySet());
             java.util.Collections.sort(ranks);
@@ -194,28 +194,4 @@ public final class AutoPlayStrategy {
         return windows;
     }
 
-    /**
-     * Sequence position of a rank (2..13), with Ace mapped to the given value (1 or 14).
-     * Note {@link Card#getValue()} is the scoring value (face cards = 10) and must not be used here.
-     */
-    private static int seqRankValue(Card.Rank rank, int aceValue) {
-        if (rank == Card.Rank.ACE) {
-            return aceValue;
-        }
-        return switch (rank) {
-            case TWO -> 2;
-            case THREE -> 3;
-            case FOUR -> 4;
-            case FIVE -> 5;
-            case SIX -> 6;
-            case SEVEN -> 7;
-            case EIGHT -> 8;
-            case NINE -> 9;
-            case TEN -> 10;
-            case JACK -> 11;
-            case QUEEN -> 12;
-            case KING -> 13;
-            default -> -1;
-        };
-    }
 }

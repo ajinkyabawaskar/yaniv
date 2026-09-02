@@ -37,28 +37,10 @@ public class DiscardCombination {
         boolean isAceHigh = hasAce && hasKingOrQueen;
 
         List<Card> sorted = new ArrayList<>(inputCards);
-        sorted.sort(Comparator.comparingInt(c -> getSequenceRankValue(c.getRank(), isAceHigh)));
+        sorted.sort(Comparator.comparingInt(c -> c.getRank().sequenceValue(isAceHigh)));
         return sorted;
     }
 
-    private static int getSequenceRankValue(Card.Rank rank, boolean isAceHigh) {
-        if (rank == Card.Rank.ACE) return isAceHigh ? 14 : 1;
-        return switch (rank) {
-            case TWO -> 2;
-            case THREE -> 3;
-            case FOUR -> 4;
-            case FIVE -> 5;
-            case SIX -> 6;
-            case SEVEN -> 7;
-            case EIGHT -> 8;
-            case NINE -> 9;
-            case TEN -> 10;
-            case JACK -> 11;
-            case QUEEN -> 12;
-            case KING -> 13;
-            default -> 0;
-        };
-    }
 
     public List<Card> getCards() {
         return new ArrayList<>(cards);

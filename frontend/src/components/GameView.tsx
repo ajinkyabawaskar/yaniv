@@ -14,6 +14,16 @@ interface GameViewProps {
   onExit: () => void;
 }
 
+/**
+ * Identifies one player action so the server can discard duplicates.
+ *
+ * Generated when the action is created, not when it is sent, so a frame replayed
+ * from the offline queue after a reconnect carries the same id and is ignored
+ * rather than applied twice. The server namespaces it by room and user.
+ */
+let actionCounter = 0;
+const newActionId = (): string => `${Date.now()}-${++actionCounter}`;
+
 export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
   const { send, subscribe, isConnected, flushPending } = useStomp();
   const gameState = useGameStore();
@@ -285,6 +295,7 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
       discardedCardIds: cardIds,
       drawSource,
       drawnCardId,
+      actionId: newActionId(),
     });
   };
 
@@ -294,6 +305,7 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
       actionType: 'BONUS_DISCARD',
       playerId: userId,
       bonusDiscard: shouldDiscard,
+      actionId: newActionId(),
     });
   };
 

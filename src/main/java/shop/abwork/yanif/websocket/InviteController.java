@@ -55,7 +55,7 @@ public class InviteController {
      *   "roomCode": "ACE"
      * }
      */
-    @MessageMapping("/app/game/invite")
+    @MessageMapping("/game/invite")
     public void sendGameInvite(SendInviteMessage request,
                                Authentication auth) {
         try {
@@ -156,7 +156,7 @@ public class InviteController {
      *   "accepted": true/false
      * }
      */
-    @MessageMapping("/app/game/invite-respond")
+    @MessageMapping("/game/invite-respond")
     public void respondToInvite(RespondInviteMessage request,
                                 Authentication auth) {
         try {
@@ -241,7 +241,7 @@ public class InviteController {
     /**
      * Cancel an invitation.
      */
-    @MessageMapping("/app/game/invite-cancel")
+    @MessageMapping("/game/invite-cancel")
     public void cancelInvite(CancelInviteMessage request,
                              Authentication auth) {
         try {

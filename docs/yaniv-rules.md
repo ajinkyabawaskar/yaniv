@@ -12,7 +12,7 @@ A player may discard any **one** of the following valid combination types on the
 | --- | --- | --- | --- |
 | **Single Card** | 1 | 1 | Any single card in hand. |
 | **Set** | 2 | 4 | All cards must share the **exact same rank**. |
-| **Sequence (Run)** | 2 | Hand Size | Cards must be in **consecutive order** and share the **same suit** *(Exception: Mixed-Suit Hand Clear)*. |
+| **Sequence (Run)** | 2 | Hand Size | Cards must be in **consecutive order** and share the **same suit** *(Exception: a 5-card Mixed-Suit Run)*. |
 
 ---
 
@@ -26,9 +26,10 @@ When validating discards, explicitly reject any combination matching the followi
 * Valid sequence examples: $A\diamondsuit - 2\diamondsuit$, $Q\spadesuit - K\spadesuit - A\spadesuit$.
 * Corner-wrapping sequences like $K-A-2$ are **illegal**.
 
-2. **Mixed-Suit Sequences with Remaining Cards:**
+2. **Mixed-Suit Sequences Shorter Than 5 Cards:**
 
-* Sequence combinations across different suits are **strictly illegal** if any unplayed cards remain in the hand after the discard.
+* Sequence combinations across different suits are **strictly illegal** unless the run is exactly **5 cards**.
+* A 2, 3 or 4 card mixed-suit run is illegal **even when it would empty the hand**. At those lengths the run must be single-suit.
 
 3. **Duplicate Rank Sequences:**
 
@@ -82,8 +83,60 @@ After a player plays a valid discard combination, the discarded cards are placed
 * **Ace Flexibility:**
 * **Low:** Ace pairs below 2 (e.g., $A\clubsuit - 2\clubsuit$ or $A\clubsuit - 2\clubsuit - 3\clubsuit$).
 * **High:** Ace pairs above King (e.g., $Q\clubsuit - K\clubsuit - A\clubsuit$).
-* **Special Rule — Hand-Clearing Mixed-Suit Sequence:**
-* A consecutive sequence across **different suits** (e.g., $4\heartsuit - 5\spadesuit - 6\diamondsuit$) is **VALID** if and only if discarding it empties your entire hand (i.e., `discard.length == hand.length`).
+* **Special Rule — 5-Card Mixed-Suit Sequence:**
+* A consecutive sequence across **different suits** is **VALID** if and only if it is exactly **5 cards** (i.e., `discard.length == 5`).
+* Because a hand never exceeds 5 cards, such a discard always empties the hand — but the length, not the hand-clear, is the condition.
+* Legal: $3\spadesuit - 4\heartsuit - 5\spadesuit - 6\diamondsuit - 7\heartsuit$ (5 cards, mixed suits).
+* Illegal: $4\heartsuit - 5\spadesuit - 6\diamondsuit$ (only 3 cards), even from a 3-card hand.
+
+---
+
+## 4b. Calling Yaniv, Scoring and Elimination
+
+### Card values
+
+Ace = 1, pip cards = face value, **J / Q / K = 10**. There are no Jokers. A hand's score is the
+plain sum of its cards.
+
+*(Sequence adjacency uses a different ladder — Ace is 1 **or** 14, J/Q/K are 11/12/13. Never score
+with the sequence ladder or vice versa.)*
+
+### Calling Yaniv
+
+* Legal on your turn, **before discarding**, when your hand totals **7 or less** (inclusive).
+* A Yaniv call opens a **15-second contest window**. Any other player still in the game may contest
+  it, which resolves the round immediately.
+
+### Asaf
+
+* If any opponent's hand is **strictly lower** than the caller's, it is an **Asaf**.
+* The caller takes their **own hand score + 30**. The lowest opponent scores **0**.
+* A **tie is not an Asaf** — the caller keeps their 0, and every player tied with them also scores 0.
+* Who contested is irrelevant to who is credited: the Asaf always goes to the lowest hand. If two
+  opponents tie for lowest, the **earlier seat** takes it.
+* Everyone else scores their own hand.
+
+### Halving
+
+If a round moves a player's running score **exactly onto a positive multiple of 50**, that score is
+**halved** (not reset).
+
+* `95 + 5 = 100` → halved to **50**.
+* A player already sitting on 50 who then scores **0** stays at **50** — halving only fires when the
+  round actually moved them onto the number.
+
+### Elimination and winning
+
+* A player whose running score **reaches `targetScore`** (default 100) is eliminated.
+* The last player still in the game wins.
+* **Placement** is the winner first, then the remaining players in **reverse elimination order** —
+  the last player knocked out places second. Surviving longer outranks a lower final score, because
+  an eliminated player's score stops accumulating the moment they go out.
+
+### Table size
+
+A room seats **2 to 6** players. Each is dealt **5 cards**, with one card turned face up to start
+the discard pile.
 
 ---
 
@@ -103,7 +156,7 @@ After a player plays a valid discard combination, the discarded cards are placed
 │                                                                        │
 │ 3. SEQUENCES (Consecutive, Minimum 2)                                  │
 │    ├── Standard Run:[Same Suit, Consecutive]                           │
-│    └── Hand Clear:  [Mixed Suits, Consecutive, Discards ALL Hand Cards]│
+│    └── Mixed Run:   [Mixed Suits, Consecutive, EXACTLY 5 Cards]        │
 └────────────────────────────────────────────────────────────────────────┘
 
 ┌────────────────────────────────────────────────────────────────────────┐
@@ -170,5 +223,6 @@ def isValidPickup(chosenCard, topDiscardSet):
 | 4 | $[3\heartsuit, 4\heartsuit, 5\heartsuit]$ | $[3\heartsuit]$ | **VALID** | Lowest card (end) of a sequence. |
 | 5 | $[3\heartsuit, 4\heartsuit, 5\heartsuit]$ | $[5\heartsuit]$ | **VALID** | Highest card (end) of a sequence. |
 | 6 | $[3\heartsuit, 4\heartsuit, 5\heartsuit]$ | $[4\heartsuit]$ | **INVALID** | Middle cards of a sequence are locked. |
-| 7 | $[4\heartsuit, 5\spadesuit, 6\diamondsuit]$ *(Mixed Hand Clear)* | $[4\heartsuit]$ | **VALID** | First card of mixed sequence. |
-| 8 | $[4\heartsuit, 5\spadesuit, 6\diamondsuit]$ *(Mixed Hand Clear)* | $[5\spadesuit]$ | **INVALID** | Middle card of mixed sequence remains locked. |
+| 7 | $[3\spadesuit, 4\heartsuit, 5\spadesuit, 6\diamondsuit, 7\heartsuit]$ *(5-card Mixed Run)* | $[3\spadesuit]$ | **VALID** | First card of mixed sequence. |
+| 8 | $[3\spadesuit, 4\heartsuit, 5\spadesuit, 6\diamondsuit, 7\heartsuit]$ *(5-card Mixed Run)* | $[5\spadesuit]$ | **INVALID** | Middle card of mixed sequence remains locked. |
+| 9 | hand $[4\heartsuit, 5\spadesuit, 6\diamondsuit]$ discarded as a run | — | **INVALID DISCARD** | A mixed-suit run must be exactly 5 cards; clearing the hand is not enough. |

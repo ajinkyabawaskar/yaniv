@@ -1,0 +1,12 @@
+#!/bin/sh
+# Keeps the game-engine documentation honest.
+#
+# The rules engine is the part of this codebase with no second source of truth:
+# if docs/game-engine.md drifts from the code, the next person to touch scoring
+# or combination validation has to re-derive it from scratch. So a commit that
+# changes engine behaviour must carry the doc change with it.
+#
+# Installed via scripts/install-hooks.sh. Bypass a false positive with:
+#   git commit --no-verify
+
+exec scripts/check-engine-docs.sh

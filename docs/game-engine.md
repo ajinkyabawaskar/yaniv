@@ -1,0 +1,666 @@
+# Game Engine — rules, scoring and lifecycle
+
+The complete behaviour of the Yaniv rules engine, derived from the source. If you are changing
+scoring, combination validation, the turn state machine or the round lifecycle, read this first.
+
+**The code is the authority; this document tracks it.** Every claim below cites the method and
+`file:line` it came from. Where a rule contradicts something in `docs/yaniv-rules.md`, `docs/prd.md`
+or `docs/ui-ux-spec.md`, the contradiction is recorded explicitly in
+[Documentation contradictions](#documentation-contradictions) rather than silently reconciled.
+
+Line numbers drift; method names don't. If a citation doesn't land, search for the method name.
+
+## Where the behaviour lives
+
+| File | Owns |
+|---|---|
+| `game/YanivGameEngine.java` | The state machine, scoring, Asaf, halving, elimination, round advance |
+| `game/validator/CardCombinationValidator.java` | What may be discarded (singles, sets, runs) |
+| `game/model/DiscardPile.java` | What may be picked up |
+| `game/model/Card.java` | Suits, ranks, scoring values, card identity |
+| `game/model/Deck.java` | 52-card composition, shuffle, draw |
+| `game/model/Hand.java` | Hand score |
+| `game/model/DiscardCombination.java` | One discard, and the sort that decides a run's "ends" |
+| `game/AutoPlayStrategy.java` | The move a bot plays for a disconnected player |
+| `game/GameSnapshot.java` | The engine state that survives a restart |
+| `websocket/GameStateController.java` | Orchestration: turn timers, contest timer, dedup, persistence |
+| `frontend/src/utils/yanivRules.ts` | **A second copy of the discard rules, in TypeScript**, for client-side validation |
+| `shared/rules-contract.json` | The case table both implementations are tested against |
+
+> **The discard rules exist twice.** `frontend/src/utils/yanivRules.ts` reimplements combination
+> validation client-side so the UI can grey out illegal selections without a round trip. Change one
+> without the other and the UI will either offer a move the server rejects, or block a legal one.
+>
+> **A shared contract guards this.** `shared/rules-contract.json` holds one case table that both
+> implementations are tested against — `RulesContractTest.java` on the server,
+> `yanivRules.contract.test.ts` on the client. A rule change that updates only one side fails.
+> Add a case there whenever you change a rule. The contract also pins the sequence ladder, so the
+> Java and TypeScript copies of it cannot drift apart either.
+
+Changing any of these means updating this document — `scripts/check-engine-docs.sh` enforces it at
+commit time.
+
+## Cards
+
+**52 cards, four suits, thirteen ranks. There are no jokers** (`Deck.java:31-43`,
+`Card.java:10-16`). The validator says so outright: "No Jokers in this version"
+(`CardCombinationValidator.java:9`). Joker references elsewhere in the repo are dead — see
+[contradictions](#documentation-contradictions).
+
+Card ids are positional and deterministic: `card_1` … `card_52`, suit-major in the order HEARTS,
+DIAMONDS, CLUBS, SPADES, and ACE→KING within each suit (`Deck.java:32-42`). This encoding is
+load-bearing: deck recycling reconstructs cards from the id space rather than shuffling the pile
+back in.
+
+**`Card.equals` and `hashCode` use the id alone** — suit and rank are ignored (`Card.java:51-62`).
+So `Hand.removeCard`, `Hand.containsCard` and `DiscardPile.getDrawableCard` all match by id, and the
+engine will accept a fabricated `Card` carrying a real id but a lying rank (see
+[Known defects](#known-defects)).
+
+### A rank has two different values depending on context
+
+This is the single easiest thing to get wrong in this codebase.
+
+| Rank | Scoring value | Sequence value (Ace low) | Sequence value (Ace high) |
+|---|---|---|---|
+| ACE | 1 | 1 | 14 |
+| 2–10 | face value | face value | face value |
+| JACK | 10 | 11 | 11 |
+| QUEEN | 10 | 12 | 12 |
+| KING | 10 | 13 | 13 |
+
+`Card.getValue()` returns the **scoring** value (`Card.java:47-49`). Sequence adjacency uses a
+separate ladder in `CardCombinationValidator.getRankValueLow/High` (`:138-177`).
+
+Never use `Card.getValue()` for run adjacency — a Jack, Queen and King all score 10 and would look
+like a "run" of identical values. `AutoPlayStrategy.seqRankValue` carries a comment warning about
+exactly this (`AutoPlayStrategy.java:197-220`).
+
+**Both ladders live on `Card.Rank`.** Each constant carries its scoring `value` plus
+`sequenceLow`/`sequenceHigh`, read through `rank.sequenceValue(aceHigh)`. `CardCombinationValidator`,
+`AutoPlayStrategy` and `DiscardCombination` all call that one method — they used to keep three
+private copies of the ladder between them.
+
+The client has its own copy in `yanivRules.ts`, unavoidably, since it is a different language. The
+two are pinned together by the `sequenceValues` section of `shared/rules-contract.json`, so changing
+one without the other fails a test.
+
+## Setting up a round
+
+- **5 cards per player** (`YanivGameEngine.java:165-170`, and `:662-668` for later rounds).
+- **One card turned face up** as a `SINGLE` combination, so the first player always has a pickup
+  available (`:172-174`, `:670-672`).
+- Deck after the deal: `52 − 5×players − 1`.
+- **Minimum 2 players**, enforced in the controller, not the engine
+  (`GameStateController.java:605-608`). The engine itself accepts one player, or zero.
+- **Maximum 6 players** by default, also outside the engine (`entity/Game.java:54`,
+  `RoomController.java:101,164-167`).
+
+**Round 1 starts with `playerIds.get(0)`** — in practice the host, who is added first
+(`RoomController.java:107`).
+
+**Later rounds start with the player seated after the Yaniv caller, not the round winner**
+(`:674-678`). A Yaniv call does not advance `currentPlayerIndex`, so the next round begins one seat
+past whoever called. This differs from the common house rule where the winner leads.
+
+## A turn
+
+The engine is an explicit state machine (`YanivGameEngine.java:18-20`). The order is **always
+discard, then draw** — there is no draw-first path.
+
+```
+WAIT_FOR_TURN → (discard) → DRAW_CARD → (draw) ─┬─→ finalizeTurn → WAIT_FOR_TURN (next player)
+                                                └─→ BONUS_DISCARD → (accept/decline) → finalizeTurn
+```
+
+### 1. `processDiscard(playerId, cards)` — `:184-215`
+
+Rejects a discard that isn't the current player's (`:185-187`), fails validation (`:192-194`), or
+names a card not in hand (`:197-201`). On success it removes the cards from the hand and parks them
+in **`pendingDiscard`** — they are *not* on the pile yet (`:204-205`).
+
+**The staging buffer is the important part.** Because the current player's discard only reaches the
+pile after they draw, the pile top during their draw is still the *previous* player's discard. This
+is what makes it impossible to re-take the card you just threw.
+
+### 2. `processDraw(playerId, drawSource, drawnCard)` — `:224-263`
+
+State must be `DRAW_CARD` (`:229-231`). Source is case-insensitive and must be `DECK` or
+`DISCARD_PILE` (`:235,251,257-259`).
+
+- **DECK**: if the deck is empty, recycle first (§[Deck exhaustion](#deck-exhaustion)); take the top
+  card. Then test the bonus-discard trigger — if it fires, the method **returns early in state
+  `BONUS_DISCARD` with the pending discard still off the pile** (`:244-250`).
+- **DISCARD_PILE**: the card must be in `discardPile.isDrawable(id)` (`:252-255`).
+
+### 3. `finalizeTurn()` — `:310-326`
+
+Classifies `pendingDiscard`, pushes it onto the pile, clears the bonus fields, and advances to the
+next non-eliminated player (`:535-541`).
+
+**A drawn card is never removed from the discard pile.** `processDraw` only adds it to the hand
+(`:256`); `DiscardPile` has no removal API. The taken card just becomes unreachable once a newer
+combination lands on top. It still appears in `getAllDiscardedCards()`.
+
+### Hand size only ever shrinks
+
+A turn removes N ≥ 1 cards and adds exactly 1, so a hand never exceeds the 5 dealt. With a bonus
+discard it can shrink twice in one turn. Maximum combination length is therefore 5 — which is why
+the Ace-high heuristic in `DiscardCombination.sortSequenceCards` can never misfire in practice
+(it would need a 12-card combination).
+
+## What may be discarded
+
+`isValidCombination(cards, handSize)` = single **or** set **or** sequence
+(`CardCombinationValidator.java:183-185`).
+
+### Single
+Any one card (`:17-19`). An empty list is invalid at every branch, so `processDiscard([])` throws.
+
+### Set
+- **2 to 4 cards inclusive** (`:26-28`). A pair is a set.
+- All must share the same rank; **suits are unrestricted** (`:31-34`).
+- **Cards must be distinct.** Listing the same card twice is rejected (`hasDuplicateCardIds`);
+  it is not a pair. Card identity is the id alone, so without this a caller could name one card
+  repeatedly and have it removed from the hand more than once.
+
+### Sequence (run)
+- **Minimum 2 cards** (`:46-48`). Maximum is bounded by hand size, so 5.
+- **K-A-2 wrap is explicitly rejected** (`:51-53`, `hasCornerWrapping` `:86-97`).
+- **Normally all one suit** (`:56-61`).
+- **Mixed-suit runs are legal only at exactly 5 cards** — `cards.size() != FULL_HAND_SIZE` is
+  rejected. A 2, 3 or 4-card run must be single-suit **even if it would empty the hand**. Because a
+  hand never exceeds 5, such a discard always clears it, but the length is the condition, not the
+  clear. The `handSize` parameter is retained for API compatibility and no longer affects the
+  result.
+- **Ace is low or high, chosen per combination, never both within one.** The ranks are mapped
+  through both ladders and the run is valid if *either* is strictly consecutive (`:103-115`).
+  `A-2-3` valid, `Q-K-A` valid, `K-A-2` invalid.
+- Duplicate ranks produce a gap of −1 and are rejected (`:120-133`).
+
+`getCombinationType` matches in the order SINGLE → SET → SEQUENCE/MIXED_SEQUENCE (`:200-217`), so a
+same-rank pair is always classified a SET.
+
+## What may be picked up
+
+**Only the top (most recent) combination is ever drawable** (`DiscardPile.getDrawableCards`,
+`:53-79`). Everything below it is permanently locked.
+
+| Top combination | Drawable |
+|---|---|
+| SINGLE | that card |
+| SET | **any one** card of the set |
+| SEQUENCE / MIXED_SEQUENCE | **only the two ends** — first and last after sorting |
+
+Exactly one card is taken; there is no API to take a whole combination.
+
+Runs are **sorted at construction** (`DiscardCombination.java:20-28`), so the caller may pass them
+in any order and "the ends" are the low and high cards, not the first and last passed. Sets and
+singles keep insertion order.
+
+`getTopCard()` is a display field only (`GameStateController.java:658`) — for a sorted run it
+returns the *low end*, not "the card on top". The authoritative list pushed to clients is
+`drawableDiscardCards` (`:703-713`).
+
+This section matches the pickup rules in `docs/yaniv-rules.md`, and the matrix there is encoded in
+`YanivRulesTest`. Because a mixed-suit run is only legal at 5 cards, a `MIXED_SEQUENCE` on the pile
+is always 5 cards, with its two ends drawable.
+
+## The bonus discard
+
+A non-standard house rule built into the engine.
+
+**Trigger** — all three must hold (`processDraw:242-250`):
+1. the discard this turn was **exactly one card**;
+2. the draw source was **DECK** (a discard-pile draw never reaches the check);
+3. the drawn card has the **same rank but a different suit** as the discarded card.
+
+The engine parks in `BONUS_DISCARD` and waits for `processBonusDiscard(playerId, shouldDiscard)`
+(`:270-294`). Accepting removes the card and pushes it as its **own SINGLE combination**; the player
+draws **no replacement**, so the hand shrinks by one. All 13 ranks can trigger it.
+
+> **The bonus card buries itself.** `processBonusDiscard` pushes the bonus card at `:284`, and
+> `finalizeTurn` then pushes the turn's *original* discard at `:293`→`:315`. The pile ends
+> `[…, bonusCard, originalDiscard]`, so the top combination is the original card and the bonus card
+> is never drawable by anyone. Both are the same rank, so the next player can still take that rank
+> — but only one card, and not the one just bonus-discarded.
+
+Auto-play always declines the bonus (`GameStateController.java:1256-1259`). No test exercises the
+accept path; `BonusDiscardTest.java:142-153` says outright that it cannot force the state.
+
+## Calling Yaniv
+
+`callYaniv(playerId)` (`:333-349`).
+
+- Must be the current player (`:335-337`).
+- **Legal when `handScore <= yanivThreshold` — inclusive.** The guard throws on `>` (`:341-344`).
+- **Threshold is 7**, from `game.yaniv-threshold` (`application.properties:52`). It is
+  **server-wide, not per-room** — a room can customise `targetScore` but not this.
+- **No round-number and no "must have taken a turn" precondition.** A player dealt ≤ 7 may call
+  Yaniv as the first action of round 1.
+
+Effects: sets `callerId`, stamps `yanivCalledTimestamp`, state → `YANIV_CALLED`. **`currentPlayerIndex`
+is not advanced** — which is why the next round starts one seat past the caller.
+
+**`callYaniv` requires `WAIT_FOR_TURN`.** Without that guard a player could discard first — state
+`DRAW_CARD`, cards already out of hand — and then call Yaniv on a hand that excludes the staged
+cards while those cards never reached the pile, or re-send the call to reset the contest window.
+`handleGameAction` deliberately exempts `CALL_YANIV` from its own turn check (`:264`) and relies on
+the engine for both checks.
+
+## Asaf
+
+After a Yaniv call the round sits in `YANIV_CALLED` for a **15-second contest window**
+(`game.yaniv-contest-timer-seconds`, `application.properties:50`), enforced by a scheduled task in
+the controller (`:1079-1101`), not the engine.
+
+`contestYaniv(playerId)` resolves **immediately** (`:355-367`). It rejects a contest when there is
+no active call, from the caller themselves, or from an eliminated player.
+
+**Who contested has no bearing on the outcome.** `evaluateHands` (`:439-477`) independently:
+
+1. takes the caller's hand score;
+2. scans all **non-caller** players for the single lowest hand;
+3. declares Asaf **iff `minOpponentScore < callerScore` — strictly less** (`:470-474`).
+
+So a **tie means no Asaf** — the caller keeps their 0. And contesting costs nothing: a player whose
+hand is nowhere near lowest can contest to skip the wait, and the Asaf credit still goes to whoever
+actually holds the lowest hand.
+
+**`contestYaniv` checks membership** against `playerIds`, so an authenticated stranger who knows
+the room id cannot force early resolution of a game they are not in. `next-round` is checked in the
+controller the same way.
+
+**A tie between two equally-lowest opponents resolves to the earlier seat.** `evaluateHands`
+scans `playerIds` in seat order rather than iterating the score `HashMap`, so the outcome is
+deterministic. The other tied player takes their full hand. (This was previously decided by hash
+order; pinned now by `YanivResolutionTest`.)
+
+## Scoring
+
+Hand value is a plain sum of `Card.getValue()` (`Hand.java:59-63`) — A=1, 2–10 face, J/Q/K=10. No
+zero-valued card, no cap, no special case for a Yaniv hand.
+
+`applyScores` (`:548-593`) assigns the round score added to each running total:
+
+An **eliminated player's hand is emptied** when they go out. They are never dealt to again, so an
+uncleared hand would linger as a phantom card count on every client and would be counted as neither
+held nor in the deck when the deck is rebuilt — putting those card ids in two places at once.
+
+| Player | Round score |
+|---|---|
+| Already eliminated | 0, skipped |
+| **Caller, no Asaf** | **0** |
+| **Caller, Asaf'd** | **their own hand score + 30** |
+| The Asaf player (lowest opponent) | **0** |
+| Opponent tied with the caller (non-Asaf case) | **0** — co-winner |
+| Everyone else | their own hand score |
+
+**The Asaf penalty is `hand + 30`, not a flat 30** (`:571-573`). A caller Asaf'd holding 6 takes 36.
+`docs/ui-ux-spec.md:127` renders this as "ASAF! +30 Penalty", which understates it.
+
+`getRoundWinners()` is every player scoring exactly 0 (`:699-710`). In an Asaf that is only the Asaf
+player. Note `GameStateController.java:747` still reports `roundWinner = callerId` as a legacy field
+even when the caller *lost* the Asaf.
+
+## The halving rule
+
+```java
+if (score > 0 && score % 50 == 0) {
+    playerScores.put(playerId, score / 2);
+}
+```
+`applyHalvingRule` (`:598-603`), called from `checkEliminations` for **every non-eliminated player at
+every round end, before the elimination test** (`:610-616`).
+
+Any positive exact multiple of 50 is **halved, not reset**: 50→25, 100→50, 150→75, 200→100.
+
+**It only fires when the round actually moved the score onto that multiple.** A player parked on a
+multiple of 50 who then scores 0 keeps their total — the guard is `roundScore == 0 → return`.
+
+```
+round N:   95 + 5  = 100 -> halved to 50   (landed on it)
+round N+1: 50 + 0  = 50  -> stays 50       (round did not move them)
+round N+2: 50 + 25 = 75  -> stays 75
+```
+
+(Previously it ran unconditionally at every round end, so an unchanged score kept re-halving:
+100 → 50 → 25. Pinned now by `ScoringAndEliminationTest`.)
+
+Interaction with the default `targetScore = 100`: landing on exactly 100 halves to 50 and you
+survive; landing on 200 halves to 100, which is still `>= 100`, so you are eliminated in the same
+pass.
+
+It is now covered by `ScoringAndEliminationTest`, which pins both the landing and the
+did-not-move cases.
+
+## Elimination and game end
+
+`checkEliminations` (`:609-635`): halve, then **eliminate iff `score >= targetScore`** — inclusive
+(`:614-616`).
+
+`targetScore` defaults to **100**, is **per-room** and caller-supplied via `POST /api/v1/rooms`, with
+**no range validation** (`RoomController.java:99`).
+
+Game over when `activePlayers <= 1` (`:621-625`). Otherwise state → `ROUND_OVER`, awaiting a client
+`next-round`.
+
+If every remaining player were to cross `targetScore` in the same round, the winner is the one
+with the **lowest running score** among them; an exact tie leaves `winnerId` null, recorded as a
+genuine draw rather than an arbitrary pick.
+
+> In practice this is unreachable: `applyScores` always gives **someone** 0 (the caller when not
+> Asaf'd, otherwise the Asaf player), and a player scoring 0 cannot cross the target. The branch is
+> a guard, not a live path.
+
+`startNextRound` (`:641-681`) requires `ROUND_OVER`, then builds a **brand-new 52-card deck** —
+it does not reuse the remainder. `winnerId` and `yanivCalledTimestamp` are deliberately *not* reset.
+
+## Deck exhaustion
+
+`recycleDeck` (`:485-530`) does **not** shuffle the discard pile back in. It reconstructs the deck
+from the 52-id space: collect every id held in a non-eliminated hand plus the top discard
+combination, regenerate the canonical 52 ids, and keep the ones not held (`:488-518`). Then it drops
+every combination except the newest (`:524-526`) and reshuffles.
+
+Eliminated players' hands are deliberately *excluded* from the held set (`:489`), returning their
+stale cards to circulation. Their hands are never cleared, only hidden from clients (`:424-432`).
+
+---
+
+# Orchestration
+
+The engine is pure. Everything below lives in `GameStateController` and is where most of the
+surprises are.
+
+## Where live state actually is
+
+`gameEngines` maps room id → engine (`GameStateController.java:43`). Engines are created only by
+`/start` (`:615-619`) and by `getOrRestoreEngine` restoring a snapshot (`:970`), and removed only
+when the game ends (`:1061`). **There is no TTL and no idle eviction** — a game everyone abandons
+keeps its engine for the process lifetime.
+
+A restart loses everything in memory: engines, disconnect sets, dedup entries, all timers. Games are
+restored **lazily, on first touch** — there is no warm-up at boot.
+
+**Idle rooms are evicted.** `evictIdleEngines` drops engines untouched for
+`game.engine-idle-eviction-minutes` (default **5**), skipping any room with a timer still pending.
+The sweep runs at half the idle window, so a room lingers at most one interval past the threshold.
+Five minutes is comfortable: a round is short and every player action touches the room, so an
+untouched table is genuinely done. This
+is safe precisely because the engine map is a cache: the snapshot is the source of truth, so the next
+player to touch an evicted room gets it rebuilt by `getOrRestoreEngine`. Without it, a game everyone
+abandons mid-round — never finished, never aborted — would hold memory for the life of the process.
+
+Two consequences worth knowing:
+
+- **A room whose snapshot write failed is never evicted.** `finishMutation` persists best-effort, so
+  a Redis outage leaves memory ahead of the snapshot. Those rooms are tracked in `unpersistedRooms`
+  and held — evicting one would silently roll the game back to a stale snapshot, or lose it
+  entirely. The sweep **retries the write** under the engine lock before giving up on a room:
+  an abandoned game gets no further actions, so that retry is its only route back to being
+  evictable rather than resident forever.
+- **A finished game is kept in memory until its result reaches the database.** `GAME_OVER` releases
+  the engine only once `completeGame` succeeds; the snapshot is deleted last, so the game stays
+  recoverable until then. Nothing else would retry — a terminal engine accepts no further actions —
+  so the sweep re-attempts it via `pendingFinalization`.
+- **Eviction clears the room's `disconnectedInGame` entry**, so a player who was disconnected before
+  eviction is not known to be disconnected after the restore. This is deliberate: it matches what
+  already happens across a server restart (`C9`), and keeping the entry would leak it for rooms that
+  are never finished or aborted. It costs nothing while `game.auto-play-enabled` is false, since
+  nothing acts on that set — but it is worth revisiting alongside presence.
+
+### When a snapshot is trusted
+
+`getOrRestoreEngine` (`:935-978`) discards a snapshot and deletes it if MySQL does not say
+`IN_PROGRESS` (`:958-967`) — a FINISHED or LOBBY row is a tombstone.
+
+A room is rewound to LOBBY only if **storage is reachable**, there is **no restorable snapshot**, and
+MySQL says `IN_PROGRESS` (`shouldAbortToLobby`, `:985-999`). A corrupt snapshot counts as absent; a
+thrown exception returns `false`. **A storage outage therefore never aborts a room** — this is
+deliberate and test-backed (`F2`, `F3` in `GameLifecycleScenariosTest.java`).
+
+## `finishMutation` — the single post-mutation hook
+
+`:1029-1075`. Every mutation ends here, in this order:
+
+1. **Save the snapshot** to Redis (try/catch — an outage only logs).
+2. If `isRoundOver()`, **persist round history**.
+3. **Branch**: game over → cancel timers, `finishGame`, delete snapshot, evict engine.
+   Yaniv called → schedule the contest timer. Round over → schedule the auto-advance.
+   Otherwise → schedule the turn timer if needed.
+4. **Broadcast** per-player state.
+
+**The order is load-bearing.** Snapshot before broadcast, or a client that reconnects on receipt
+would be handed pre-mutation state. Timers before broadcast, because `scheduleTurnTimerIfNeeded`
+writes `turnDeadlines`, which the broadcast reads to fill `turnEndsAt` (`:778`) — swap them and every
+client gets the *previous* turn's countdown.
+
+## Per-player filtering
+
+All of it happens in `buildGameStateForPlayers` (`:644-803`), and every push goes to a **user
+destination**, never a shared topic. Only two fields differ per recipient:
+
+- `hand` — the recipient's own cards only (`:688-701`)
+- `opponentCounts` — every *other* player's hand **size**, never card identities (`:731-740`)
+
+On `ROUND_OVER`/`GAME_OVER`, `allPlayerHands` is revealed to everyone (`:757-774`). The deck's
+remaining order is never sent — only `deckCount`.
+
+> `PlayerInfo.status` is hardcoded `"ONLINE"` in every builder (`:454`, `:535`, `:680`); the roster
+> never reflects real presence. Clients learn about disconnects only from the separate
+> `broadcastPlayerDisconnected` message (`:1273-1289`).
+
+**Cost: three queries per mutation, whatever the player count.** `loadRoomView` fetches the game
+row, the player rows and every display name (one batched `getUsersByIds`) once per broadcast, and
+each recipient's message is built from that shared `RoomView`. It used to re-query per recipient —
+roughly `1 + N·(2 + N)` round-trips, so 49 for a 6-player table on every single action.
+`GameLifecycleScenariosTest.F7` pins the count.
+
+## Turn timers and auto-play
+
+**Only a disconnected player is ever auto-played.** `scheduleTurnTimerIfNeeded` (`:1182-1209`) arms
+a timer only when auto-play is enabled, the state is `WAIT_FOR_TURN`, and the **current** player is
+in the room's `disconnectedInGame` set. Connected players get unlimited thinking time.
+
+> **`game.turn-timer-seconds` is not the turn timer.** The auto-play delay is a hardcoded **800 ms**
+> (`:1201`). The 45-second value is used only as a display field (`:780`) and as the ROUND_OVER
+> auto-advance delay (`:1128`). Clients render a 45-second countdown against a deadline 800 ms away.
+
+> **Auto-play is disabled in the shipped config, deliberately.** `game.auto-play-enabled=false`
+> (`application.properties:48`), and the `@Value` default now matches. It is held off because the
+> presence/connection status it depends on is not yet reliable — see the `PlayerInfo.status` note
+> under [Per-player filtering](#per-player-filtering). That one flag gates every turn timer
+> (`:1189`) and the round-over self-advance (`:1109`), so in production nothing is ever auto-played
+> and `turnEndsAt` is never populated. Every lifecycle test constructs the controller with `true`,
+> so no test covers the shipped default.
+>
+> A consequence worth knowing: because `turnDeadlines` is never written, the 45s-vs-800ms countdown
+> mismatch above **cannot occur in production today**. It is latent, waiting for auto-play to be
+> switched on.
+
+### Intended design, not yet built
+
+The intended behaviour is a **45-second turn timer for connected players** and the short ~800ms
+delay only for players who are disconnected or reconnecting. Today the code has no connected-player
+timer at all — `scheduleTurnTimerIfNeeded` returns unless the current player is in
+`disconnectedInGame`. Building it depends on presence status being trustworthy first. Until then,
+connected players have unlimited thinking time.
+
+**Round-over self-advance** fires only when *every non-eliminated* player is disconnected
+(`:1113-1115`), after `turnTimerSeconds`. Note "active" means non-eliminated, not connected — an
+eliminated spectator who is still connected does not hold the round open. A player who drops during
+`ROUND_OVER` is *not* added to `disconnectedInGame` (`:116-120`), so their drop cannot trigger it.
+
+### What the bot plays
+
+`AutoPlayStrategy.decide` (`:47-62`) is static and deterministic:
+
+1. **If the hand is at or below the Yaniv threshold, call Yaniv** — unconditionally, with no regard
+   for Asaf risk (`:48-50`).
+2. Otherwise enumerate every single, every set, every consecutive same-suit window (computed twice,
+   Ace low and Ace high), plus the whole hand as a mixed-suit run when that would empty it
+   (`:121-157`). Pick the lowest resulting total; tie-break on more cards discarded, then
+   lexicographically by joined card ids (`:105-114`).
+
+Two caveats: a deck draw is scored as **value-neutral**, ignoring that the drawn card adds to the
+hand (`:78-80`); and the evaluation models taking a pile card as a *swap* for the worst card, while
+the engine only ever **adds** it (`:82-97`). It is a heuristic ranking, not a faithful simulation.
+
+Auto-play always **declines** a bonus discard (`:1256-1259`). Any exception in `runAutoPlay` is
+logged and swallowed (`:1265-1267`), leaving the turn **stuck with no re-armed timer**.
+
+## The contest timer
+
+Scheduled by `finishMutation` when the engine enters `YANIV_CALLED` (`:1080-1102`). On expiry it
+calls `resolveYanivCall()` and runs `finishMutation` again. If someone contests first, the engine
+resolves inline and the handler cancels the future (`:393-396`).
+
+The duration is captured **at engine construction** (`:618`) and carried in the snapshot, so a config
+change does not apply to in-flight games.
+
+The frontend computes the countdown as `yanivCalledAt + timerSeconds` against `Date.now()`
+(`GameView.tsx:124-140`), so **client clock skew shifts the displayed countdown**. The server's own
+timer is unaffected.
+
+## Action deduplication
+
+Keyed `roomId:userId:actionId` in a `ConcurrentHashMap` (`:62-64`, `:235`). A duplicate is not
+re-applied; the server re-sends the caller's personal state instead — **or nothing at all** if the
+engine is not currently in memory (`:240-244`). Entries older than 5 minutes are swept, but **only on
+the success path of an action that carried an `actionId`** (`:247-249`).
+
+Applies to `/action` only — `call-yaniv`, `contest-yaniv`, `next-round`, `start` and `join` have no
+dedup.
+
+The client sends an `actionId` with every action (`GameView.tsx`, `newActionId`). It is generated
+when the action is *created*, not when it is sent, so a frame replayed from the offline queue
+(`StompContext.tsx:74-76`) after a reconnect carries the same id and is ignored rather than applied
+twice — the case this exists for.
+
+## Disconnect and reconnect
+
+A mid-game drop adds the player to `disconnectedInGame`, sets presence to `DISCONNECTED_IN_GAME`
+(30-minute Redis TTL), arms their timer if it is already their turn, and notifies the others
+(`:93-138`).
+
+**A disconnected player is never removed from the game.** No code path calls
+`removePlayerFromGame` — it exists (`GameService.java:175-180`) with zero callers. They keep their
+seat, hand and turn position until the game ends or the process restarts. The 30-minute TTL affects
+only the presence badge, not membership.
+
+On reconnect (`:145-209`) the player is removed from the set, presence goes to `IN_GAME`, the others
+are notified, and a **proactive** full state push is sent before the client asks — deliberately, to
+dodge the subscribe-then-request race (`:191-194`).
+
+In LOBBY the picture differs: a lobby member is not tracked as disconnected at all, and a new player
+may still join. Once IN_PROGRESS, new joins are rejected (`RoomController.java:155-158`) but
+**existing members may always re-enter**, idempotently (`:151-152`).
+
+## What reaches MySQL
+
+| Written | When |
+|---|---|
+| `games.status = IN_PROGRESS` | host `/start` succeeds (`:610`) |
+| `games.status = FINISHED` + `winnerId` + `finishedAt` | engine reaches GAME_OVER, in `finishMutation` (`:1052`) |
+| `games.status = LOBBY` | `abortStaleGame` rewind (`:1009`) |
+| `game_players.finalScore` + `.placement` | game over, via `saveFinalStandings` — placement is the winner first, then **reverse elimination order** (last knocked out places higher), because an eliminated player's score freezes and ranking by points would favour whoever went out earlier |
+| `game_players` row | room create, room join |
+| `round_histories` row | each transition into `ROUND_OVER` (`:1041-1043`, `:1161-1176`) |
+
+Live hands, deck and pile are **never** written to MySQL — only to the Redis snapshot
+(`game:{id}:state`, 24-hour TTL, re-applied on every write, `GameService.java:24-26`).
+
+`persistRoundHistory` also early-returns when `callerId` is null (`:1162-1164`).
+
+---
+
+# Known defects
+
+The card-conservation, scoring and authorisation defects that used to fill this section are
+**fixed**, each pinned by a test that was verified to fail against the pre-fix code:
+
+| Was | Now | Pinned by |
+|---|---|---|
+| Duplicate card ids removed a card from the game | rejected as a non-distinct combination | `CardConservationTest` |
+| `recycleDeck` regenerated a staged discard | `pendingDiscard` counted as held | `CardConservationTest` |
+| `processDiscard` had no state guard | requires `WAIT_FOR_TURN` | `CardConservationTest` |
+| `callYaniv` had no state guard | requires `WAIT_FOR_TURN` | `ScoringAndEliminationTest` |
+| Halving re-fired on an unchanged score | only on landing | `ScoringAndEliminationTest` |
+| Asaf tie-break followed hash order | seat order | `YanivResolutionTest` |
+| `contestYaniv` accepted non-members | membership checked | `YanivResolutionTest` |
+| `next-round` accepted non-members | membership checked | `GameLifecycleScenariosTest.F4` |
+| The deciding round was never persisted | persisted on the `GAME_OVER` path | `GameLifecycleScenariosTest.E5` |
+| `finalScore`/`placement` never written | written at game over | `GameLifecycleScenariosTest.E5b` |
+| `/start` re-dealt a FINISHED game | rejected | `GameLifecycleScenariosTest.F5` |
+| An unknown `actionType` silently persisted and broadcast | errors | `GameLifecycleScenariosTest.F6` |
+| `processDraw` trusted the caller's `Card` | resolves it from the pile | `ScoringAndEliminationTest` |
+| `gameEngines` was a bare `HashMap` | `ConcurrentHashMap` | — |
+| Turn-advance loops could spin forever | bounded, then throw | — |
+| Disconnect during `BONUS_DISCARD` stalled the room | covered by the turn timer | — |
+| `handleNextRound` never restored from a snapshot | restores like every other handler | — |
+| Reconnect during a storage outage NPE'd | returns without touching the room | — |
+| Unauthenticated STOMP CONNECT passed through | rejected | — |
+| `maxPlayers` was unvalidated | constrained to 2–6 | — |
+| Invite handlers were unreachable | destination prefix corrected | — |
+| Dedup was dead (no client `actionId`) | client sends a stable `actionId` | — |
+
+Fixing the `processDiscard` guard also exposed three latent test flakes that had been silently
+exercising the bug; those are fixed too, and the suite is stable across repeated runs.
+
+## Still open
+
+- **Presence status is not real.** `PlayerInfo.status` is hardcoded `"ONLINE"` in every builder
+  (`:454`, `:535`, `:680`), so the pushed roster never reflects who is actually connected. Clients
+  learn about disconnects only from the separate `broadcastPlayerDisconnected` message. This is the
+  reason auto-play is held off, and it blocks the connected-player turn timer.
+- **The invite feature has no test coverage.** Its handlers were unreachable until now, so nothing
+  has ever exercised send / respond / cancel end to end.
+- **`AutoPlayStrategy.evaluate` does not model the real move.** A deck draw is scored as
+  value-neutral (`:78-80`), and taking a pile card is modelled as a *swap* while the engine only
+  **adds** it (`:82-97`). It is a heuristic ranking, not a simulation.
+- **`handSize` is now a dead parameter** threaded through three validator signatures, and
+  `handSizeAtDiscard` is stored and snapshotted but read by no rule.
+- **The rules still exist in two languages.** Consolidated to one copy per side and pinned by the
+  shared contract, but a single implementation would need either a server-authoritative UI or
+  generating the client rules at build time.
+
+# Documentation contradictions
+
+Where the rest of the repo disagrees with the code. **The code wins**; these are listed so you know
+not to trust the other document.
+
+| Topic | Other doc says | Code does |
+|---|---|---|
+| Jokers | ~~`docs/prd.md` sample and `cardPreload.ts` preloads~~ — **both removed**; the code never had jokers | No `JOKER` rank, no `NONE` suit, 52 cards |
+| Halving | now documented in `docs/yaniv-rules.md` | halves only when a round lands the score on a multiple of 50 |
+| Scoring / Asaf / elimination | **now documented** in `docs/yaniv-rules.md` §4b | `hand + 30` Asaf, Yaniv ≤ 7, elimination at `>= targetScore` |
+| Asaf penalty | `docs/ui-ux-spec.md:127` renders "ASAF! +30 Penalty" | the caller takes **hand + 30**, not a flat 30 |
+| Turn timer | ~~`CLAUDE.md`: auto-play fires after `game.turn-timer-seconds`~~ — **corrected** | hardcoded **800 ms** (`:1201`); 45 s is display-only and the round-over delay |
+| Auto-play | `CLAUDE.md` describes it as active machinery | `game.auto-play-enabled=false` ships, **deliberately** — presence/connection status is unreliable, so auto-play is held off. The `@Value` default now also reads `false` so code and config agree. |
+| Round history | `docs/lifecycle-scenario-matrix.md:60` (E5): "exactly one row per round transition" | **now true** — `finishMutation` persists on the `GAME_OVER` path too, and `E5_` exists |
+| Redis | ~~`CLAUDE.md`: "Redis is used only for presence"~~ — **corrected** | also holds the game snapshot and invites |
+| Round starter | undocumented | the player after the **caller**, not the round winner |
+| Invites | the UI has always offered them | the handlers were unreachable until the destination prefix was corrected; still untested |
+| Discard/pickup matrix | `docs/yaniv-rules.md` | **agrees exactly** — this part is trustworthy |
+| Mixed-suit runs | previously "valid iff it empties the hand", in both the doc and the code | changed by decision to **exactly 5 cards**; doc, both validators and tests updated together |
+
+`CLAUDE.md` is verified **correct** about: connected players never being auto-played, the
+`finishMutation` ordering, the `game:{id}:state` key, snapshots only being trusted while MySQL says
+`IN_PROGRESS`, and storage outages never aborting a room to LOBBY.
+
+# Configuration
+
+These are the only `game.*` keys in the codebase, all read in `GameStateController` and nowhere
+else.
+
+| Key | Ships as | Effect |
+|---|---|---|
+| `game.yaniv-threshold` | `7` | Highest hand that may call Yaniv. **Server-wide, not per-room.** |
+| `game.yaniv-contest-timer-seconds` | `15` | Asaf window. Captured at engine construction, so changes don't reach in-flight games. |
+| `game.turn-timer-seconds` | `45` | Display field and the round-over auto-advance delay. **Not the auto-play delay.** |
+| `game.auto-play-enabled` | `false` (`@Value` default now also `false`) | Gates every turn timer and the round-over self-advance. **Deliberately off** while presence status is unreliable. |
+| `game.engine-idle-eviction-minutes` | `5` | How long a room may go untouched before its engine is dropped from memory. State survives in the snapshot, so eviction costs at most one restore. |
+
+Per-room, supplied in the `POST /api/v1/rooms` body: `targetScore` (default 100, unvalidated) and
+`maxPlayers` (default 6, unvalidated upper bound).

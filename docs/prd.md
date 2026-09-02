@@ -147,7 +147,7 @@ All game mechanics, state transitions, discard/pickup validations, and scoring p
   "turnPhase": "AWAITING_ACTION",
   "myHand": [
     {"id": "c_12", "suit": "HEARTS", "rank": "FIVE", "value": 5},
-    {"id": "c_88", "suit": "NONE", "rank": "JOKER", "value": 0}
+    {"id": "c_88", "suit": "SPADES", "rank": "KING", "value": 10}
   ],
   "opponentCounts": { "usr_4412": 4, "usr_8819": 5 },
   "topDiscardPile": [{"id": "c_99", "suit": "CLUBS", "rank": "TEN"}],

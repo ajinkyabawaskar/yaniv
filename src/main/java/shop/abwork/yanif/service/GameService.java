@@ -180,6 +180,41 @@ public class GameService {
     }
 
     /**
+     * Finish a game and record its standings as one unit.
+     *
+     * Both writes happen in a single transaction, so a failure part-way leaves the game
+     * IN_PROGRESS with its snapshot intact and the whole thing retryable, rather than a
+     * FINISHED row whose standings were silently lost.
+     *
+     * @param finishingOrder best first; empty for a drawn game, which records no placements
+     */
+    public void completeGame(String gameId, String winnerId, List<String> finishingOrder,
+                             Map<String, Integer> finalScores) {
+        finishGame(gameId, winnerId);
+        saveFinalStandings(gameId, finishingOrder, finalScores);
+    }
+
+    /**
+     * Record each player's final standing when a game ends.
+     *
+     * @param finishingOrder best first; index 0 places 1st
+     * @param finalScores    running score per player at game end
+     */
+    public void saveFinalStandings(String gameId, List<String> finishingOrder,
+                                   Map<String, Integer> finalScores) {
+        for (int i = 0; i < finishingOrder.size(); i++) {
+            String userId = finishingOrder.get(i);
+            GamePlayer gamePlayer = gamePlayerRepository.findByGameIdAndUserId(gameId, userId);
+            if (gamePlayer == null) {
+                continue;
+            }
+            gamePlayer.setPlacement(i + 1);
+            gamePlayer.setFinalScore(finalScores.getOrDefault(userId, 0));
+            gamePlayerRepository.save(gamePlayer);
+        }
+    }
+
+    /**
      * Get all players in a game.
      *
      * @param gameId Game ID

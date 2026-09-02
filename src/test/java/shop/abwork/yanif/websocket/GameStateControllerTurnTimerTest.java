@@ -15,6 +15,7 @@ import shop.abwork.yanif.service.PresenceService;
 import shop.abwork.yanif.service.UserService;
 
 import java.lang.reflect.Field;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -74,6 +75,18 @@ class GameStateControllerTurnTimerTest {
 
         when(userService.getUserById(HOST)).thenReturn(Optional.of(new User("fp-host", "Host", "AAAAAA")));
         when(userService.getUserById(OTHER)).thenReturn(Optional.of(new User("fp-other", "Other", "BBBBBB")));
+
+        // The broadcast resolves every player's name in one batch call.
+        User hostUser = new User("fp-host", "Host", "AAAAAA");
+        User otherUser = new User("fp-other", "Other", "BBBBBB");
+        when(userService.getUsersByIds(any())).thenAnswer(inv -> {
+            Map<String, User> byId = new HashMap<>();
+            for (Object id : (Iterable<?>) inv.getArgument(0)) {
+                if (HOST.equals(id)) byId.put(HOST, hostUser);
+                if (OTHER.equals(id)) byId.put(OTHER, otherUser);
+            }
+            return byId;
+        });
 
         controller = new GameStateController(gameService, presenceService, userService,
                 messagingTemplate, 1 /* turn timer seconds */, true /* auto-play */,

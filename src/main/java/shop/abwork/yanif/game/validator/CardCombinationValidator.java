@@ -10,6 +10,9 @@ import java.util.*;
  */
 public class CardCombinationValidator {
 
+    /** Cards dealt to each player at the start of a round; hands never exceed this. */
+    public static final int FULL_HAND_SIZE = 5;
+
     /**
      * Validate if cards form a valid single card.
      * Any single card is valid.
@@ -20,10 +23,15 @@ public class CardCombinationValidator {
 
     /**
      * Validate if cards form a valid set.
-     * A set requires 2 to 4 cards of the same rank.
+     * A set requires 2 to 4 distinct cards of the same rank.
      */
     public static boolean isValidSet(List<Card> cards) {
         if (cards == null || cards.size() < 2 || cards.size() > 4) {
+            return false;
+        }
+
+        // The same card listed twice is not a pair
+        if (hasDuplicateCardIds(cards)) {
             return false;
         }
 
@@ -35,12 +43,29 @@ public class CardCombinationValidator {
     }
 
     /**
+     * True if the same card appears more than once.
+     * Card identity is the id alone, so a caller can name one card repeatedly;
+     * accepting that would let a discard remove a card the hand does not have.
+     */
+    private static boolean hasDuplicateCardIds(List<Card> cards) {
+        Set<String> ids = new HashSet<>();
+        for (Card card : cards) {
+            if (!ids.add(card.getId())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Validate if cards form a valid sequence.
      * A sequence requires 2 or more consecutive cards of the same suit.
      * Supports both Ace-low (A-2-3) and Ace-high (10-J-Q-K-A) sequences.
-     * 
-     * Special rule: A mixed-suit sequence is valid ONLY if it empties the entire hand
-     * (i.e., discard.length == handSize).
+     *
+     * Special rule: A mixed-suit sequence is valid ONLY at exactly FULL_HAND_SIZE cards.
+     * Shorter mixed-suit runs are illegal even when they would empty the hand.
+     *
+     * @param handSize retained for API compatibility; no longer affects the result.
      */
     public static boolean isValidSequence(List<Card> cards, int handSize) {
         if (cards == null || cards.size() < 2) {
@@ -58,11 +83,11 @@ public class CardCombinationValidator {
             suits.add(card.getSuit());
         }
 
-        boolean isStandardSequence = suits.size() <= 1;
         boolean isMixedSuitSequence = suits.size() > 1;
 
-        // Mixed-suit sequence is only valid if it clears the entire hand
-        if (isMixedSuitSequence && cards.size() != handSize) {
+        // Mixed-suit sequence is only valid at exactly a full hand's worth of cards.
+        // Hands never exceed FULL_HAND_SIZE, so such a discard always clears the hand.
+        if (isMixedSuitSequence && cards.size() != FULL_HAND_SIZE) {
             return false;
         }
 
@@ -106,8 +131,8 @@ public class CardCombinationValidator {
         List<Integer> ranksHigh = new ArrayList<>();
 
         for (Card card : cards) {
-            ranksLow.add(getRankValueLow(card.getRank()));
-            ranksHigh.add(getRankValueHigh(card.getRank()));
+            ranksLow.add(card.getRank().sequenceValue(false));
+            ranksHigh.add(card.getRank().sequenceValue(true));
         }
 
         // Check both Ace-low and Ace-high sequences
@@ -132,49 +157,7 @@ public class CardCombinationValidator {
         return true;
     }
 
-    /**
-     * Get numeric value of a rank for sequence validation (Ace-low: A=1).
-     */
-    private static int getRankValueLow(Card.Rank rank) {
-        return switch (rank) {
-            case ACE -> 1;
-            case TWO -> 2;
-            case THREE -> 3;
-            case FOUR -> 4;
-            case FIVE -> 5;
-            case SIX -> 6;
-            case SEVEN -> 7;
-            case EIGHT -> 8;
-            case NINE -> 9;
-            case TEN -> 10;
-            case JACK -> 11;
-            case QUEEN -> 12;
-            case KING -> 13;
-            default -> -1; // Invalid for sequence
-        };
-    }
 
-    /**
-     * Get numeric value of a rank for sequence validation (Ace-high: A=14).
-     */
-    private static int getRankValueHigh(Card.Rank rank) {
-        return switch (rank) {
-            case ACE -> 14;
-            case TWO -> 2;
-            case THREE -> 3;
-            case FOUR -> 4;
-            case FIVE -> 5;
-            case SIX -> 6;
-            case SEVEN -> 7;
-            case EIGHT -> 8;
-            case NINE -> 9;
-            case TEN -> 10;
-            case JACK -> 11;
-            case QUEEN -> 12;
-            case KING -> 13;
-            default -> -1; // Invalid for sequence
-        };
-    }
 
     /**
      * Validate if a combination is valid (single, set, or sequence).

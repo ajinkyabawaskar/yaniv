@@ -8,9 +8,6 @@
 const RANKS = ['ace', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'jack', 'queen', 'king'] as const;
 const SUITS = ['hearts', 'diamonds', 'clubs', 'spades'] as const;
 
-// Optional: include jokers if your game uses them
-const JOKERS = ['black_joker', 'red_joker'] as const;
-
 /**
  * Generate all card image paths
  */
@@ -22,11 +19,6 @@ export function getAllCardPaths(): string[] {
     for (const rank of RANKS) {
       paths.push(`/cards/${rank}_of_${suit}.svg`);
     }
-  }
-
-  // Jokers (if used)
-  for (const joker of JOKERS) {
-    paths.push(`/cards/${joker}.svg`);
   }
 
   return paths;

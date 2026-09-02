@@ -4,6 +4,7 @@ import shop.abwork.yanif.security.JwtProvider;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
+import org.springframework.messaging.MessagingException;
 import org.springframework.messaging.simp.config.ChannelRegistration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
 import org.springframework.scheduling.TaskScheduler;
@@ -65,17 +66,21 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                     return message;
                 }
 
+                // Reject rather than pass through: an unauthenticated CONNECT used to be
+                // accepted, and every downstream handler then NPE'd on auth.getName().
                 String authorization = accessor.getFirstNativeHeader("Authorization");
                 if (authorization == null || !authorization.startsWith("Bearer ")) {
-                    return message;
+                    throw new MessagingException("CONNECT requires a Bearer token");
                 }
 
                 String token = authorization.substring(7);
-                if (jwtProvider.validateToken(token)) {
-                    String userId = jwtProvider.extractUserId(token);
-                    accessor.setUser(new UsernamePasswordAuthenticationToken(
-                            userId, null, Collections.emptyList()));
+                if (!jwtProvider.validateToken(token)) {
+                    throw new MessagingException("CONNECT carried an invalid token");
                 }
+
+                String userId = jwtProvider.extractUserId(token);
+                accessor.setUser(new UsernamePasswordAuthenticationToken(
+                        userId, null, Collections.emptyList()));
 
                 return message;
             }

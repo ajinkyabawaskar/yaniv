@@ -7,6 +7,9 @@ import shop.abwork.yanif.util.FriendCode;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -70,6 +73,23 @@ public class UserService {
      */
     public Optional<User> getUserById(String userId) {
         return userRepository.findById(userId);
+    }
+
+    /**
+     * Look up many users at once, keyed by id.
+     *
+     * One query instead of one per id — the game-state broadcast needs every player's
+     * display name on every mutation.
+     */
+    public Map<String, User> getUsersByIds(Collection<String> userIds) {
+        Map<String, User> byId = new HashMap<>();
+        if (userIds == null || userIds.isEmpty()) {
+            return byId;
+        }
+        for (User user : userRepository.findAllById(userIds)) {
+            byId.put(user.getId(), user);
+        }
+        return byId;
     }
 
     /**

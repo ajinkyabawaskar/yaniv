@@ -31,6 +31,20 @@ run_backend_tests() {
   fi
 }
 
+# Function to run frontend unit tests (Jest). Fast, no servers needed.
+run_frontend_unit_tests() {
+  echo -e "\n${YELLOW}Running Frontend Unit Tests (Jest)...${NC}"
+  cd "$FRONTEND_DIR"
+
+  if CI=true npm test -- --watchAll=false; then
+    echo -e "${GREEN}✓ Frontend unit tests passed${NC}"
+    return 0
+  else
+    echo -e "${RED}✗ Frontend unit tests failed${NC}"
+    return 1
+  fi
+}
+
 # Function to run frontend tests
 run_frontend_tests() {
   echo -e "\n${YELLOW}Running Frontend E2E Tests (Playwright)...${NC}"
@@ -115,6 +129,13 @@ else
   BACKEND_RESULT=1
 fi
 
+# Run frontend unit tests (includes the shared rules contract)
+if run_frontend_unit_tests; then
+  UNIT_RESULT=0
+else
+  UNIT_RESULT=1
+fi
+
 # Run frontend tests
 if run_frontend_tests; then
   FRONTEND_RESULT=0
@@ -132,13 +153,19 @@ else
   echo -e "${RED}Backend Tests: FAILED${NC}"
 fi
 
+if [ $UNIT_RESULT -eq 0 ]; then
+  echo -e "${GREEN}Frontend Unit Tests: PASSED${NC}"
+else
+  echo -e "${RED}Frontend Unit Tests: FAILED${NC}"
+fi
+
 if [ $FRONTEND_RESULT -eq 0 ]; then
   echo -e "${GREEN}Frontend E2E Tests: PASSED${NC}"
 else
   echo -e "${RED}Frontend E2E Tests: FAILED${NC}"
 fi
 
-if [ $BACKEND_RESULT -eq 0 ] && [ $FRONTEND_RESULT -eq 0 ]; then
+if [ $BACKEND_RESULT -eq 0 ] && [ $UNIT_RESULT -eq 0 ] && [ $FRONTEND_RESULT -eq 0 ]; then
   echo -e "\n${GREEN}All tests passed!${NC}"
   exit 0
 else
