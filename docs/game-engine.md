@@ -364,7 +364,8 @@ combination, regenerate the canonical 52 ids, and keep the ones not held (`:488-
 every combination except the newest (`:524-526`) and reshuffles.
 
 Eliminated players' hands are deliberately *excluded* from the held set (`:489`), returning their
-stale cards to circulation. Their hands are never cleared, only hidden from clients (`:424-432`).
+stale cards to circulation. Their hands are emptied on elimination, so there is nothing stale to
+return — see [Scoring](#scoring).
 
 ---
 
@@ -377,8 +378,7 @@ surprises are.
 
 `gameEngines` maps room id → engine (`GameStateController.java:43`). Engines are created only by
 `/start` (`:615-619`) and by `getOrRestoreEngine` restoring a snapshot (`:970`), and removed only
-when the game ends (`:1061`). **There is no TTL and no idle eviction** — a game everyone abandons
-keeps its engine for the process lifetime.
+when the game ends, when a room is aborted, and when the idle sweep reclaims it — see below.
 
 A restart loses everything in memory: engines, disconnect sets, dedup entries, all timers. Games are
 restored **lazily, on first touch** — there is no warm-up at boot.
@@ -570,9 +570,9 @@ Leaving during `ROUND_OVER` now records an absence like any other — the player
 It used to report plain offline, which meant a table where everyone had gone could never
 self-advance.
 
-`GameStateController.handleSessionDisconnect` no longer keeps a record of its own; it sets the Redis
-presence status and notifies the other players. It cannot decide absence, because a handler keyed by
-user cannot tell a closed spare tab from a player who left.
+`GameStateController.handleSessionDisconnect` no longer keeps a record of its own and no longer
+writes Redis — `PresenceRedisProjection` is the sole writer. It cannot decide absence either,
+because a handler keyed by user cannot tell a closed spare tab from a player who left.
 
 **A disconnected player is never removed from the game.** No code path calls
 `removePlayerFromGame` — it exists (`GameService.java:175-180`) with zero callers. They keep their
@@ -690,4 +690,4 @@ else.
 | `game.engine-idle-eviction-minutes` | `5` | How long a room may go untouched before its engine is dropped from memory. State survives in the snapshot, so eviction costs at most one restore. |
 
 Per-room, supplied in the `POST /api/v1/rooms` body: `targetScore` (default 100, unvalidated) and
-`maxPlayers` (default 6, unvalidated upper bound).
+`maxPlayers` (default 6, valid range 2–6, validated on create).

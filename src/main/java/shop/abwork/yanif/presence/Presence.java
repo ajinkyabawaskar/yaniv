@@ -112,9 +112,11 @@ public class Presence {
      * navigated away rather than leaving.
      */
     public void detachedFromRoom(String sessionId, String roomId) {
-        if (roomId.equals(roomBySession.get(sessionId))) {
-            detach(sessionId);
+        String playerId = playerBySession.get(sessionId);
+        if (playerId == null || !roomId.equals(roomBySession.get(sessionId))) {
+            return;
         }
+        announcingChange(playerId, () -> detach(sessionId));
     }
 
     /**
@@ -124,11 +126,28 @@ public class Presence {
      * DISCONNECTED_IN_GAME for good.
      */
     public void roomClosed(String roomId) {
-        absentSince.keySet().removeIf(k -> k.startsWith(roomId + "\u0000"));
-        Set<String> sessions = sessionsByRoom.remove(roomId);
-        if (sessions != null) {
-            sessions.forEach(roomBySession::remove);
+        // Everyone this room had an opinion about may now be reachable differently.
+        Set<String> affected = new java.util.HashSet<>();
+        String prefix = roomId + "\u0000";
+        absentSince.keySet().stream().filter(k -> k.startsWith(prefix))
+                .forEach(k -> affected.add(k.substring(prefix.length())));
+        Set<String> sessions = sessionsByRoom.getOrDefault(roomId, Set.of());
+        sessions.stream().map(playerBySession::get).filter(java.util.Objects::nonNull).forEach(affected::add);
+
+        Map<String, PresenceStatus> before = new java.util.HashMap<>();
+        affected.forEach(playerId -> before.put(playerId, status(playerId)));
+
+        absentSince.keySet().removeIf(k -> k.startsWith(prefix));
+        Set<String> removed = sessionsByRoom.remove(roomId);
+        if (removed != null) {
+            removed.forEach(roomBySession::remove);
         }
+
+        before.forEach((playerId, was) -> {
+            if (was != status(playerId)) {
+                presenceListeners.forEach(listener -> listener.accept(playerId));
+            }
+        });
     }
 
     /**

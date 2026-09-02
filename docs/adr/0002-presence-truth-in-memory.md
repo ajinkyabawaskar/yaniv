@@ -11,8 +11,9 @@ in your game. A read for a user we hold no session for returns *unknown*, never 
 The rejected alternative was making Redis authoritative, on the general principle of not trusting
 in-memory state. It fails in the one direction that matters: after a restart every socket is dead,
 memory correctly reports nobody present, while Redis would still list sessions that no longer exist
-and keep claiming those players are here. Stale-*present* is exactly the failure that lets the server
-play a turn on behalf of someone who is sitting there watching. Clients reconnect within about three
+and keep claiming those players are here. Stale-*present* is the wrong way round in the way that
+matters: the server would believe an absent player is still at the table, so it would never play for
+them and the game would sit there waiting on somebody who has gone. Clients reconnect within about three
 seconds and re-announce themselves, so the cost of forgetting on restart is small and self-correcting.
 
 This holds because the application deploys as a single instance, and cannot currently be otherwise:

@@ -1304,18 +1304,21 @@ class GameLifecycleScenariosTest {
             return last != null && current.equals(last.autoPlayedPlayerId);
         }, 10_000), "the grace should expire and the turn be auto-played");
 
-        // They come back, then drop again: a new absence, so a new grace.
+        java.time.Instant firstAbsence = presence.absentSince(ROOM, current).orElseThrow();
+
+        // They come back...
         presence.sessionOpened("session-b", current);
         presence.attachedToRoom("session-b", ROOM);
+        assertTrue(presence.absentSince(ROOM, current).isEmpty(), "back at the table");
+
+        // ...and drop again. A later drop is a NEW absence with its own instant, which is
+        // what makes the grace fresh: the spent-grace record is keyed on the old one.
         presenceNow = presenceNow.plusSeconds(60);
         presence.sessionClosed("session-b");
 
-        Long secondDeadline = turnDeadlines().get(ROOM);
-        if (secondDeadline != null) {
-            long waitMs = secondDeadline - System.currentTimeMillis();
-            assertTrue(waitMs > 1_500,
-                    "a later absence is a new episode and gets its own grace; waited " + waitMs);
-        }
+        java.time.Instant secondAbsence = presence.absentSince(ROOM, current).orElseThrow();
+        assertNotEquals(firstAbsence, secondAbsence,
+                "coming back and leaving again earns a fresh grace, not the spent one");
     }
 
     @Test
@@ -1324,18 +1327,35 @@ class GameLifecycleScenariosTest {
         String current = liveEngine().getCurrentPlayer();
         String other = current.equals(HOST) ? OTHER : HOST;
 
-        // Everyone is watching to begin with.
+        // Everyone is watching to begin with — including the player we later remove.
         presence.sessionOpened("s-" + other, other);
         presence.attachedToRoom("s-" + other, ROOM);
+        presence.sessionOpened("s-" + current, current);
+        presence.attachedToRoom("s-" + current, ROOM);
         controller.getGameState(ROOM, auth(other));
         assertEquals("IN_GAME", rosterStatusOf(other, current),
                 "precondition: the roster shows a watching player as in the game");
 
-        makeAbsentFromRoom(current);
+        presence.sessionClosed("s-" + current);
         controller.getGameState(ROOM, auth(other));
 
         assertEquals("DISCONNECTED_IN_GAME", rosterStatusOf(other, current),
                 "absence rides on every state push, so a reloading client sees it too");
+    }
+
+    @Test
+    void H5_aPlayerWhoNeverConnectedIsNotReportedAsPlaying() {
+        startStartedGame();
+        String current = liveEngine().getCurrentPlayer();
+        String other = current.equals(HOST) ? OTHER : HOST;
+
+        // `other` watches; `current` has never opened a session at all.
+        presence.sessionOpened("s-" + other, other);
+        presence.attachedToRoom("s-" + other, ROOM);
+        controller.getGameState(ROOM, auth(other));
+
+        assertEquals("OFFLINE", rosterStatusOf(other, current),
+                "never connected is not the same as watching the game");
     }
 
     /** The status the roster in {@code recipient}'s latest message gives for {@code subject}. */

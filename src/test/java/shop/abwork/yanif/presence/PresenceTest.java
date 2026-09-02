@@ -190,4 +190,32 @@ class PresenceTest {
 
         assertTrue(announced.isEmpty(), "she was already in this game; nothing changed");
     }
+
+    @Test
+    @DisplayName("Leaving a game without closing the tab is announced too")
+    void detachingAnnouncesThePresenceChange() {
+        presence.sessionOpened("session-a", "alice");
+        presence.attachedToRoom("session-a", "room-1");
+
+        List<String> announced = new ArrayList<>();
+        presence.onPresenceChanged(announced::add);
+        presence.detachedFromRoom("session-a", "room-1");
+
+        assertEquals(List.of("alice"), announced, "IN_GAME -> ONLINE is a change");
+    }
+
+    @Test
+    @DisplayName("Closing a game announces the players it stops expecting")
+    void roomClosedAnnouncesThePresenceChange() {
+        presence.sessionOpened("session-a", "alice");
+        presence.attachedToRoom("session-a", "room-1");
+        presence.sessionClosed("session-a");
+
+        List<String> announced = new ArrayList<>();
+        presence.onPresenceChanged(announced::add);
+        presence.roomClosed("room-1");
+
+        assertEquals(List.of("alice"), announced, "DISCONNECTED_IN_GAME -> OFFLINE is a change");
+        assertEquals(PresenceStatus.OFFLINE, presence.status("alice"));
+    }
 }

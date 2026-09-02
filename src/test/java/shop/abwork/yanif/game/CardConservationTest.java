@@ -61,9 +61,13 @@ public class CardConservationTest {
         }
     }
 
-    private Set<String> deckCardIds(YanivGameEngine engine) {
+    /**
+     * Every id in the deck, duplicates included — a Set here would hide exactly the
+     * defect these tests exist to catch.
+     */
+    private List<String> deckCardIds(YanivGameEngine engine) {
         GameSnapshot snapshot = GameSnapshot.fromJson(engine.toSnapshot());
-        Set<String> ids = new HashSet<>();
+        List<String> ids = new ArrayList<>();
         for (GameSnapshot.CardDto card : snapshot.deckRemaining) {
             ids.add(card.id);
         }
@@ -136,7 +140,7 @@ public class CardConservationTest {
         engine.processDiscard(current, List.of(discarded));
         drawFromDeckAndFinishTurn(engine, current);
 
-        Set<String> inDeck = deckCardIds(engine);
+        List<String> inDeck = deckCardIds(engine);
         List<String> onPile = engine.getDiscardPile().getAllDiscardedCards()
                 .stream().map(Card::getId).toList();
 

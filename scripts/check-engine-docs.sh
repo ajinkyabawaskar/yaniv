@@ -11,11 +11,12 @@ DOC="docs/game-engine.md"
 ENGINE_PATHS="
 src/main/java/shop/abwork/yanif/game/
 src/main/java/shop/abwork/yanif/websocket/GameStateController.java
+src/main/java/shop/abwork/yanif/presence/
 "
 
 PROPERTIES="src/main/resources/application.properties"
 
-staged=$(git diff --cached --name-only --diff-filter=ACMR)
+staged=$(git diff --cached --name-only --diff-filter=ACMRD)
 [ -n "$staged" ] || exit 0
 
 touched=""

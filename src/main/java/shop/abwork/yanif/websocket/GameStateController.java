@@ -731,11 +731,13 @@ public class GameStateController {
             info.userId = playerUserId;
             info.displayName = user.getDisplayName();
             info.isHost = game != null && game.getHostUserId().equals(playerUserId);
-            // Real, per-game: is this player watching THIS game right now. Was a
-            // hardcoded literal that no client could learn anything from.
+            // Real, per-game. Absence from THIS game outranks overall reachability, so a
+            // player watching another game still reads as gone from this one. Falling back
+            // to overall status matters for someone who never connected at all: they are
+            // OFFLINE, not sitting at the table.
             info.status = presence.absentSince(roomId, playerUserId).isPresent()
                     ? PresenceStatus.DISCONNECTED_IN_GAME.name()
-                    : PresenceStatus.IN_GAME.name();
+                    : presence.status(playerUserId).name();
             playerInfos.add(info);
         }
         return new RoomView(game, players, playerNames, playerInfos);
@@ -1073,7 +1075,13 @@ public class GameStateController {
         engineLastTouched.remove(roomId);
         unpersistedRooms.remove(roomId);
         presence.roomClosed(roomId); // an absence must not outlive the game that recorded it
+        forgetGracedAbsences(roomId);
         return true;
+    }
+
+    /** The room is gone; its spent-grace records go with it. */
+    private void forgetGracedAbsences(String roomId) {
+        gracedAbsences.keySet().removeIf(k -> k.startsWith(roomId + "\u0000"));
     }
 
     private static String graceKey(String roomId, String playerId) {
@@ -1155,6 +1163,8 @@ public class GameStateController {
                     engineLastTouched.remove(roomId);
                     unpersistedRooms.remove(roomId);
                     presence.roomClosed(roomId);
+                forgetGracedAbsences(roomId);
+                    forgetGracedAbsences(roomId);
                     System.out.println("Evicted idle engine for room " + roomId
                             + "; it will be restored from its snapshot on next use");
                 }
@@ -1176,7 +1186,6 @@ public class GameStateController {
      *
      * Registered here rather than in Presence so the module stays free of game concepts.
      */
-    @PostConstruct
     void watchForAbsenceChanges() {
         presence.onAbsenceChanged((roomId, playerId) -> {
             YanivGameEngine engine = gameEngines.get(roomId);
@@ -1189,6 +1198,11 @@ public class GameStateController {
     }
 
     @PostConstruct
+    void start() {
+        watchForAbsenceChanges();
+        startIdleEngineSweep();
+    }
+
     void startIdleEngineSweep() {
         long intervalSeconds = Math.max(30, engineIdleEvictionMinutes * 30);
         scheduler.scheduleAtFixedRate(this::evictIdleEngines,
@@ -1294,6 +1308,7 @@ public class GameStateController {
                 engineLastTouched.remove(roomId);
                 unpersistedRooms.remove(roomId);
                 presence.roomClosed(roomId);
+                forgetGracedAbsences(roomId);
                 System.err.println("Game state lost for room " + roomId + "; returned to lobby");
             }
         } catch (Exception e) {
@@ -1521,6 +1536,7 @@ public class GameStateController {
                 if (state == YanivGameEngine.GameState.BONUS_DISCARD) {
                     // They dropped mid-decision: decline and let the turn finish.
                     engine.processBonusDiscard(expectedPlayer, false);
+                    gracedAbsences.put(graceKey(roomId, expectedPlayer), absentSince.get());
                     finishMutation(engine, roomId, expectedPlayer);
                     return;
                 }
