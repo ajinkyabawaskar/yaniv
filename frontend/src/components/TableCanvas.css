@@ -731,11 +731,20 @@
   position: absolute;
   inset: 0;
   z-index: 100;
+  cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   background: rgba(40, 5, 5, 0.7);
   animation: crimsonFlash 1.5s ease;
+}
+
+.asaf-dismiss-hint {
+  margin-top: 14px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.7;
 }
 
 .asaf-strike-card {
@@ -1280,7 +1289,15 @@
     flex-shrink: 0;
   }
 
-  .dramatic-asaf-overlay .asaf-strike-card {
+  .dramatic-asaf-overlay .asaf-dismiss-hint {
+  margin-top: 14px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.asaf-strike-card {
     padding: 20px 28px;
     margin: 0 16px;
   }
