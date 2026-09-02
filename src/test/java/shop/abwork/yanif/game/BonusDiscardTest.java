@@ -156,6 +156,83 @@ class BonusDiscardTest {
         assertNull(engine.getPendingBonusCard());
     }
 
+    private record RiggedDeal(YanivGameEngine engine, String player, Card toDiscard, Card bonus) {}
+
+    /**
+     * Stack the deck so the next card drawn matches a card in the current player's hand:
+     * same rank, different suit. Left to chance the trigger is about one deck draw in
+     * fourteen, which is no way to test the accept path. A match always exists - only 11
+     * of the 52 cards are out of the deck after a two-player deal, so of the 15 same-rank
+     * siblings of a five-card hand at least nine are still in there.
+     */
+    private RiggedDeal dealWhereTheNextDeckCardMatchesAHandCard() {
+        GameSnapshot snapshot = GameSnapshot.fromJson(engine.toSnapshot());
+        String player = engine.getCurrentPlayer();
+
+        GameSnapshot.CardDto toDiscard = null;
+        GameSnapshot.CardDto bonus = null;
+        for (GameSnapshot.CardDto inHand : snapshot.playerHands.get(player)) {
+            for (GameSnapshot.CardDto inDeck : snapshot.deckRemaining) {
+                if (inDeck.rank.equals(inHand.rank) && !inDeck.suit.equals(inHand.suit)) {
+                    toDiscard = inHand;
+                    bonus = inDeck;
+                    break;
+                }
+            }
+            if (bonus != null) break;
+        }
+        if (bonus == null) {
+            throw new AssertionError("no rank in the hand has a sibling left in the deck");
+        }
+
+        snapshot.deckRemaining.remove(bonus);
+        snapshot.deckRemaining.add(0, bonus); // index 0 is the next card drawn
+        return new RiggedDeal(YanivGameEngine.fromSnapshot(snapshot.toJson()), player,
+                GameSnapshot.toCard(toDiscard), GameSnapshot.toCard(bonus));
+    }
+
+    @Test
+    @DisplayName("An accepted bonus card lands on top of the pile, not under the card it matched")
+    void acceptedBonusCardIsTheTopOfThePile() {
+        RiggedDeal deal = dealWhereTheNextDeckCardMatchesAHandCard();
+        YanivGameEngine rigged = deal.engine();
+
+        rigged.processDiscard(deal.player(), List.of(deal.toDiscard()));
+        rigged.processDraw(deal.player(), "DECK", null);
+
+        assertTrue(rigged.isBonusDiscardActive(), "precondition: the stacked deck parks on the bonus");
+        assertEquals(deal.bonus().getId(), rigged.getPendingBonusCard().getId());
+
+        rigged.processBonusDiscard(deal.player(), true);
+
+        assertEquals(deal.bonus().getId(), rigged.getDiscardPile().getTopCard().orElseThrow().getId(),
+                "the bonus card left the hand last, so it is what the next player sees");
+        assertTrue(rigged.getDiscardPile().isDrawable(deal.bonus().getId()),
+                "only the top combination is drawable - burying the bonus card takes it out of play");
+        assertFalse(rigged.getPlayerHand(deal.player()).containsCard(deal.bonus()),
+                "accepting the bonus must take the card out of the hand");
+        assertTrue(rigged.getDiscardPile().getAllDiscardedCards().stream()
+                        .anyMatch(c -> c.getId().equals(deal.toDiscard().getId())),
+                "the card that started the turn must still reach the pile");
+    }
+
+    @Test
+    @DisplayName("A declined bonus card stays in hand and the turn's discard tops the pile")
+    void declinedBonusCardStaysInHand() {
+        RiggedDeal deal = dealWhereTheNextDeckCardMatchesAHandCard();
+        YanivGameEngine rigged = deal.engine();
+
+        rigged.processDiscard(deal.player(), List.of(deal.toDiscard()));
+        rigged.processDraw(deal.player(), "DECK", null);
+        rigged.processBonusDiscard(deal.player(), false);
+
+        assertTrue(rigged.getPlayerHand(deal.player()).containsCard(deal.bonus()),
+                "declining keeps the drawn card");
+        assertEquals(deal.toDiscard().getId(), rigged.getDiscardPile().getTopCard().orElseThrow().getId(),
+                "with no bonus card, the turn's own discard tops the pile");
+        assertNotEquals(deal.player(), rigged.getCurrentPlayer(), "the turn ends either way");
+    }
+
     @Test
     @DisplayName("processBonusDiscard throws if not in BONUS_DISCARD state")
     void testProcessBonusDiscardWrongStateThrows() {

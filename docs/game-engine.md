@@ -133,10 +133,13 @@ State must be `DRAW_CARD` (`:229-231`). Source is case-insensitive and must be `
   `BONUS_DISCARD` with the pending discard still off the pile** (`:244-250`).
 - **DISCARD_PILE**: the card must be in `discardPile.isDrawable(id)` (`:252-255`).
 
-### 3. `finalizeTurn()` — `:310-326`
+### 3. `finalizeTurn()` — `:342-356`
 
-Classifies `pendingDiscard`, pushes it onto the pile, clears the bonus fields, and advances to the
-next non-eliminated player (`:535-541`).
+Pushes `pendingDiscard` onto the pile via `pushPendingDiscardToPile` (`:328-341`, which classifies
+the combination and is a no-op once the cards are already down), clears the bonus fields, and
+advances to the next non-eliminated player. The accept path of a bonus discard calls
+`pushPendingDiscardToPile` itself, *before* pushing the bonus card, so the two land in the order
+they left the hand.
 
 **A drawn card is never removed from the discard pile.** `processDraw` only adds it to the hand
 (`:256`); `DiscardPile` has no removal API. The taken card just becomes unreachable once a newer
@@ -216,17 +219,22 @@ A non-standard house rule built into the engine.
 3. the drawn card has the **same rank but a different suit** as the discarded card.
 
 The engine parks in `BONUS_DISCARD` and waits for `processBonusDiscard(playerId, shouldDiscard)`
-(`:270-294`). Accepting removes the card and pushes it as its **own SINGLE combination**; the player
+(`:282-311`). Accepting removes the card and pushes it as its **own SINGLE combination**; the player
 draws **no replacement**, so the hand shrinks by one. All 13 ranks can trigger it.
 
-> **The bonus card buries itself.** `processBonusDiscard` pushes the bonus card at `:284`, and
-> `finalizeTurn` then pushes the turn's *original* discard at `:293`→`:315`. The pile ends
-> `[…, bonusCard, originalDiscard]`, so the top combination is the original card and the bonus card
-> is never drawable by anyone. Both are the same rank, so the next player can still take that rank
-> — but only one card, and not the one just bonus-discarded.
+**Push order matters, because only the top combination is drawable.** Accepting pushes the turn's
+*original* discard first (`pushPendingDiscardToPile`, `:328-341`) and the bonus card second, so the
+pile ends `[…, originalDiscard, bonusCard]` and the next player can take the bonus card — the one
+that left the hand last. Pushing them the other way round buries the bonus card the instant it is
+discarded, which is what the engine used to do.
 
-Auto-play always declines the bonus (`GameStateController.java:1256-1259`). No test exercises the
-accept path; `BonusDiscardTest.java:142-153` says outright that it cannot force the state.
+**A parked bonus decision always has a deadline.** Nothing else in the engine waits on a client for
+an answer, and until `GameStateController` put a clock on it a client that never asked the question
+held the whole room. See [Turn timers](#turn-timers-and-auto-play).
+
+Auto-play declines the bonus (`GameStateController.java:1566-1568`), as does the deadline
+(`declineUnansweredBonus`, `:1528`). Both paths are exercised by `BonusDiscardTest`, which stacks
+the deck through the snapshot to force the state rather than waiting for a 1-in-14 draw.
 
 ## Calling Yaniv
 
@@ -465,11 +473,31 @@ roughly `1 + N·(2 + N)` round-trips, so 49 for a 6-player table on every single
 
 ## Turn timers and auto-play
 
-**Only an absent player is ever auto-played.** `scheduleTurnTimerIfNeeded` arms a timer only when
-auto-play is enabled, the state is `WAIT_FOR_TURN` or `BONUS_DISCARD`, and
-`presence.absentSince(roomId, currentPlayer)` reports an absence. A player with *any* session
-attached to the game — a second tab, say — is never auto-played. See **absence** and **room
-attachment** in `CONTEXT.md`.
+`scheduleTurnTimerIfNeeded` (`:1444`) puts a deadline on whatever the room is waiting for. There are
+two waits and they are **not** the same kind of thing:
+
+| Wait | Deadline armed when | Delay | On expiry |
+| --- | --- | --- | --- |
+| `WAIT_FOR_TURN` | auto-play on **and** the player is absent | `absence-grace-seconds`, then `spent-grace-delay-ms` | `autoPlayTurn` plays the whole turn |
+| `BONUS_DISCARD` | **always** | `bonus-discard-timeout-seconds` | `declineUnansweredBonus` answers "keep" |
+
+**Only an absent player is ever auto-played.** A player with *any* session attached to the game — a
+second tab, say — is never played for. See **absence** and **room attachment** in `CONTEXT.md`.
+
+**A parked bonus decision is different, and gets a deadline whoever is watching.** It is liveness,
+not auto-play: the player already made their move, only the yes/no is missing, and it blocks every
+other player in the room. Declining costs them nothing — they keep the card they drew — so the
+server can safely answer for them. It runs with `game.auto-play-enabled=false` too, pinned by
+`GameStateControllerTurnTimerTest.theBonusDeadlineStillRunsWithAutoPlaySwitchedOff`.
+
+> This is the bug the tester hit. A client that never rendered the prompt could not answer it, so
+> the engine sat in `BONUS_DISCARD` while every retry threw `Cannot discard in current state`. Their
+> discard stayed in `pendingDiscard`, off the pile — "I discarded a 10 and it never appeared."
+> The client now reads the fields (`GameStateMessageContractTest` pins that), and the deadline is
+> the guarantee that no future client can reintroduce the stall.
+
+Neither expiry is reported as auto-play: `declineUnansweredBonus` calls `finishMutation` without an
+`autoPlayedPlayerId`, because the player did discard and draw for themselves.
 
 **Grace is once per absence, and only counted while it is their turn.** The first time an absent
 player's turn comes round, the timer waits `game.absence-grace-seconds` (45). If they return inside
@@ -530,8 +558,8 @@ Two caveats: a deck draw is scored as **value-neutral**, ignoring that the drawn
 hand (`:78-80`); and the evaluation models taking a pile card as a *swap* for the worst card, while
 the engine only ever **adds** it (`:82-97`). It is a heuristic ranking, not a faithful simulation.
 
-Auto-play always **declines** a bonus discard (`:1256-1259`). Any exception in `runAutoPlay` is
-logged and swallowed (`:1265-1267`), leaving the turn **stuck with no re-armed timer**.
+Auto-play always **declines** a bonus discard (`:1566-1568`). Any exception in `runTurnDeadline` is
+logged and swallowed (`:1516-1518`), leaving the turn **stuck with no re-armed timer**.
 
 ## The contest timer
 
@@ -640,6 +668,9 @@ The card-conservation, scoring and authorisation defects that used to fill this 
 | `gameEngines` was a bare `HashMap` | `ConcurrentHashMap` | — |
 | Turn-advance loops could spin forever | bounded, then throw | — |
 | Disconnect during `BONUS_DISCARD` stalled the room | covered by the turn timer | — |
+| A *connected* player parked in `BONUS_DISCARD` stalled the room for good | every bonus decision has a deadline | `GameStateControllerTurnTimerTest.aBonusDecisionNobodyAnswersIsDeclinedInsteadOfStallingTheRoom` |
+| An accepted bonus card was buried under the discard it matched | pushed last, so it is the drawable top | `BonusDiscardTest.acceptedBonusCardIsTheTopOfThePile` |
+| The client never read `bonusDiscardActive` / `pendingBonusCard` | written to the store on every push | `GameStateMessageContractTest` |
 | `handleNextRound` never restored from a snapshot | restores like every other handler | — |
 | Reconnect during a storage outage NPE'd | returns without touching the room | — |
 | Unauthenticated STOMP CONNECT passed through | rejected | — |
@@ -700,6 +731,7 @@ else.
 | `game.auto-play-enabled` | `false` (`@Value` default now also `false`) | Gates every turn timer and the round-over self-advance. **Deliberately off** while presence status is unreliable. |
 | `game.absence-grace-seconds` | `45` | How long an absent player's turn is held before the server plays it for them. Once per absence, counted only during their turn. |
 | `game.spent-grace-delay-ms` | `800` | Pace of later turns in the same absence. Low keeps the table moving; too low and a whole game finishes while someone's phone is locked. |
+| `game.bonus-discard-timeout-seconds` | `15` | How long a matching-rank bonus decision is held before the server declines it. Applies to everyone, connected or not, and ignores `auto-play-enabled`: the decision blocks the whole room and declining costs the player nothing. |
 | `game.engine-idle-eviction-minutes` | `5` | How long a room may go untouched before its engine is dropped from memory. State survives in the snapshot, so eviction costs at most one restore. |
 
 Per-room, supplied in the `POST /api/v1/rooms` body: `targetScore` (default 100, unvalidated) and

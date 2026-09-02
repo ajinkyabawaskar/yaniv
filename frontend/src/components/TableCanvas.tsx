@@ -798,7 +798,9 @@ export default function TableCanvas({
                 <span className="bonus-title">Matching Rank Bonus!</span>
               </div>
               <div className="bonus-discard-explanation">
-                You discarded a <strong>{pendingBonusCard.rank} of {pendingBonusCard.suit}</strong> and drew a <strong>{pendingBonusCard.rank} of {pendingBonusCard.suit}</strong>!
+                {/* Only the drawn card is on the wire; the card it matched is staged
+                    server-side and never sent, so don't claim to know its suit. */}
+                You drew a <strong>{pendingBonusCard.rank} of {pendingBonusCard.suit}</strong>, matching the {pendingBonusCard.rank} you just discarded!
               </div>
               <div className="bonus-card-display">
                 <img
@@ -814,18 +816,18 @@ export default function TableCanvas({
                   onClick={() => onBonusDiscard(true)}
                   disabled={!isPlayerTurn}
                 >
-                  🗑️ Discard (End Turn)
+                  🗑️ Discard it
                 </button>
                 <button
                   className="bonus-btn bonus-btn-keep"
                   onClick={() => onBonusDiscard(false)}
                   disabled={!isPlayerTurn}
                 >
-                  🤚 Keep in Hand
+                  🤚 Keep it
                 </button>
               </div>
               <div className="bonus-discard-hint">
-                {isPlayerTurn ? '' : 'Waiting for your turn...'}
+                {isPlayerTurn ? 'Either way, your turn ends here.' : 'Waiting for your turn...'}
               </div>
             </div>
           </div>

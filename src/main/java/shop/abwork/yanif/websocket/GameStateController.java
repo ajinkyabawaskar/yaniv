@@ -121,6 +121,11 @@ public class GameStateController {
     private final boolean autoPlayEnabled;
     // Yaniv contest window (game.yaniv-contest-timer-seconds)
     private final int yanivContestTimerSeconds;
+    /**
+     * How long a parked bonus decision is held before the server declines it
+     * (game.bonus-discard-timeout-seconds).
+     */
+    private final int bonusDiscardTimeoutSeconds;
     // Max hand score for a legal Yaniv call (game.yaniv-threshold)
     private final int yanivThreshold;
 
@@ -140,7 +145,8 @@ public class GameStateController {
                               @Value("${game.auto-play-enabled:true}") boolean autoPlayEnabled,
                               @Value("${game.yaniv-contest-timer-seconds:15}") int yanivContestTimerSeconds,
                               @Value("${game.yaniv-threshold:7}") int yanivThreshold,
-                              @Value("${game.absence-grace-seconds:45}") long absenceGraceSeconds) {
+                              @Value("${game.absence-grace-seconds:45}") long absenceGraceSeconds,
+                              @Value("${game.bonus-discard-timeout-seconds:15}") int bonusDiscardTimeoutSeconds) {
         this.gameService = gameService;
         this.presenceService = presenceService;
         this.userService = userService;
@@ -151,6 +157,7 @@ public class GameStateController {
         this.yanivContestTimerSeconds = yanivContestTimerSeconds;
         this.yanivThreshold = yanivThreshold;
         this.absenceGraceSeconds = absenceGraceSeconds;
+        this.bonusDiscardTimeoutSeconds = bonusDiscardTimeoutSeconds;
 
     }
 
@@ -1426,8 +1433,13 @@ public class GameStateController {
     }
 
     /**
-     * Schedule auto-play for the current player's turn - only when that player is
-     * disconnected. Cancels any pending timer first.
+     * Put a deadline on whatever the room is waiting for, cancelling any pending one.
+     *
+     * Two different waits, and they are not the same kind of thing. A turn is only ever
+     * played for someone who is absent. A parked bonus decision gets a deadline whoever
+     * is watching, because it blocks every player in the room and it has a safe default:
+     * declining keeps the card they already drew. Without that, a client that never asks
+     * the question -- an old bundle, a render that failed -- holds the room for good.
      */
     private void scheduleTurnTimerIfNeeded(YanivGameEngine engine, String roomId) {
         ScheduledFuture<?> old = turnTimers.remove(roomId);
@@ -1437,16 +1449,24 @@ public class GameStateController {
         turnDeadlines.remove(roomId);
         turnTimerTotals.remove(roomId);
 
-        // BONUS_DISCARD is included: a player who drops while the engine waits for
-        // their bonus decision would otherwise stall the room permanently.
-        YanivGameEngine.GameState state = engine.getCurrentState();
-        boolean awaitingPlayer = state == YanivGameEngine.GameState.WAIT_FOR_TURN
-                || state == YanivGameEngine.GameState.BONUS_DISCARD;
-        if (!autoPlayEnabled || engine.isGameOver() || engine.isRoundOver() || !awaitingPlayer) {
+        if (engine.isGameOver() || engine.isRoundOver()) {
             return;
         }
 
+        YanivGameEngine.GameState state = engine.getCurrentState();
         String currentPlayer = engine.getCurrentPlayer();
+
+        if (state == YanivGameEngine.GameState.BONUS_DISCARD) {
+            // Liveness, not auto-play: their move already happened, only the bonus
+            // answer is missing. So this runs even with auto-play switched off.
+            armTurnDeadline(roomId, currentPlayer, bonusDiscardTimeoutSeconds * 1000L);
+            return;
+        }
+
+        if (!autoPlayEnabled || state != YanivGameEngine.GameState.WAIT_FOR_TURN) {
+            return;
+        }
+
         Optional<Instant> absentSince = presence.absentSince(roomId, currentPlayer);
         if (absentSince.isEmpty()) {
             return; // a session is still watching this game for them
@@ -1454,15 +1474,14 @@ public class GameStateController {
 
         // The grace clock starts now, when it becomes their turn -- not when they left.
         boolean graceSpent = absentSince.get().equals(gracedAbsences.get(graceKey(roomId, currentPlayer)));
-        long delayMs = graceSpent ? spentGraceDelayMs : absenceGraceSeconds * 1000L;
-        long deadline = System.currentTimeMillis() + delayMs;
-        turnTimerTotals.put(roomId, (int) Math.max(1, Math.round(delayMs / 1000.0)));
-        turnDeadlines.put(roomId, deadline);
+        armTurnDeadline(roomId, currentPlayer, graceSpent ? spentGraceDelayMs : absenceGraceSeconds * 1000L);
+    }
 
-        final String expectedPlayer = engine.getCurrentPlayer();
-        ScheduledFuture<?> future = scheduler.schedule(() -> runAutoPlay(roomId, expectedPlayer),
-                delayMs, TimeUnit.MILLISECONDS);
-        turnTimers.put(roomId, future);
+    private void armTurnDeadline(String roomId, String expectedPlayer, long delayMs) {
+        turnTimerTotals.put(roomId, (int) Math.max(1, Math.round(delayMs / 1000.0)));
+        turnDeadlines.put(roomId, System.currentTimeMillis() + delayMs);
+        turnTimers.put(roomId, scheduler.schedule(
+                () -> runTurnDeadline(roomId, expectedPlayer), delayMs, TimeUnit.MILLISECONDS));
     }
 
     private void cancelTurnTimer(String roomId) {
@@ -1474,66 +1493,83 @@ public class GameStateController {
     }
 
     /**
-     * Auto-play the current turn on behalf of a player whose timer expired.
-     * Re-validates under the engine lock so a human action racing the timer wins safely.
+     * The room's deadline expired. Re-validates under the engine lock so a human action
+     * racing the timer wins safely, then resolves whichever wait it was.
      */
-    private void runAutoPlay(String roomId, String expectedPlayer) {
+    private void runTurnDeadline(String roomId, String expectedPlayer) {
         YanivGameEngine engine = gameEngines.get(roomId);
         if (engine == null) {
             return;
         }
         try {
             synchronized (engine) {
-                Optional<Instant> absentSince = presence.absentSince(roomId, expectedPlayer);
-                if (absentSince.isEmpty()) {
-                    return; // player came back before the timer fired
-                }
-                YanivGameEngine.GameState state = engine.getCurrentState();
                 if (gameEngines.get(roomId) != engine
-                        || !expectedPlayer.equals(engine.getCurrentPlayer())
-                        || (state != YanivGameEngine.GameState.WAIT_FOR_TURN
-                            && state != YanivGameEngine.GameState.BONUS_DISCARD)) {
+                        || !expectedPlayer.equals(engine.getCurrentPlayer())) {
                     return; // human acted first, or game moved on
                 }
-
-                if (state == YanivGameEngine.GameState.BONUS_DISCARD) {
-                    // They dropped mid-decision: decline and let the turn finish.
-                    engine.processBonusDiscard(expectedPlayer, false);
-                    gracedAbsences.put(graceKey(roomId, expectedPlayer), absentSince.get());
-                    finishMutation(engine, roomId, expectedPlayer);
-                    return;
+                switch (engine.getCurrentState()) {
+                    case BONUS_DISCARD -> declineUnansweredBonus(engine, roomId, expectedPlayer);
+                    case WAIT_FOR_TURN -> autoPlayTurn(engine, roomId, expectedPlayer);
+                    default -> { /* the wait resolved itself */ }
                 }
-
-                AutoPlayStrategy.Decision decision = AutoPlayStrategy.decide(
-                        engine.getPlayerHand(expectedPlayer), engine.getDiscardPile(), engine.getYanivThreshold());
-
-                if (decision.type() == AutoPlayStrategy.ActionType.CALL_YANIV) {
-                    engine.callYaniv(expectedPlayer);
-                } else {
-                    engine.processDiscard(expectedPlayer, decision.discardCards());
-                    Card drawnCard = null;
-                    if ("DISCARD_PILE".equals(decision.drawSource())) {
-                        drawnCard = engine.getDiscardPile().getDrawableCard(decision.drawnCardId()).orElse(null);
-                        if (drawnCard == null) {
-                            throw new IllegalStateException("Auto-play picked undrawable card: " + decision.drawnCardId());
-                        }
-                    }
-                    engine.processDraw(expectedPlayer, decision.drawSource(), drawnCard);
-
-                    // Handle bonus discard if triggered - auto-play chooses to keep the card (not discard)
-                    if (engine.getCurrentState() == YanivGameEngine.GameState.BONUS_DISCARD) {
-                        engine.processBonusDiscard(expectedPlayer, false);
-                    }
-                }
-
-                // This absence has now had its grace; later turns in it go quickly.
-                gracedAbsences.put(graceKey(roomId, expectedPlayer), absentSince.get());
-                System.out.println("Auto-played turn for player " + expectedPlayer + " in room " + roomId);
-                finishMutation(engine, roomId, expectedPlayer);
             }
         } catch (Exception e) {
-            System.err.println("Error auto-playing turn in room " + roomId + ": " + e.getMessage());
+            System.err.println("Error running turn deadline in room " + roomId + ": " + e.getMessage());
         }
+    }
+
+    /**
+     * Nobody answered the bonus question, so take the answer that costs them nothing:
+     * keep the drawn card, put the staged discard on the pile, and end the turn.
+     *
+     * Not reported as auto-play -- they discarded and drew for themselves; only the
+     * bonus default was applied.
+     */
+    private void declineUnansweredBonus(YanivGameEngine engine, String roomId, String player) {
+        engine.processBonusDiscard(player, false);
+        // If they are absent, this counted as their grace: later turns go quickly.
+        presence.absentSince(roomId, player)
+                .ifPresent(since -> gracedAbsences.put(graceKey(roomId, player), since));
+        System.out.println("Declined an unanswered bonus discard for player " + player + " in room " + roomId);
+        finishMutation(engine, roomId);
+    }
+
+    /**
+     * Play the current turn on behalf of a player who is absent. Only ever reached for a
+     * player Presence says has no session watching this game.
+     */
+    private void autoPlayTurn(YanivGameEngine engine, String roomId, String expectedPlayer) {
+        Optional<Instant> absentSince = presence.absentSince(roomId, expectedPlayer);
+        if (absentSince.isEmpty()) {
+            return; // player came back before the timer fired
+        }
+
+        AutoPlayStrategy.Decision decision = AutoPlayStrategy.decide(
+                engine.getPlayerHand(expectedPlayer), engine.getDiscardPile(), engine.getYanivThreshold());
+
+        if (decision.type() == AutoPlayStrategy.ActionType.CALL_YANIV) {
+            engine.callYaniv(expectedPlayer);
+        } else {
+            engine.processDiscard(expectedPlayer, decision.discardCards());
+            Card drawnCard = null;
+            if ("DISCARD_PILE".equals(decision.drawSource())) {
+                drawnCard = engine.getDiscardPile().getDrawableCard(decision.drawnCardId()).orElse(null);
+                if (drawnCard == null) {
+                    throw new IllegalStateException("Auto-play picked undrawable card: " + decision.drawnCardId());
+                }
+            }
+            engine.processDraw(expectedPlayer, decision.drawSource(), drawnCard);
+
+            // Handle bonus discard if triggered - auto-play chooses to keep the card (not discard)
+            if (engine.getCurrentState() == YanivGameEngine.GameState.BONUS_DISCARD) {
+                engine.processBonusDiscard(expectedPlayer, false);
+            }
+        }
+
+        // This absence has now had its grace; later turns in it go quickly.
+        gracedAbsences.put(graceKey(roomId, expectedPlayer), absentSince.get());
+        System.out.println("Auto-played turn for player " + expectedPlayer + " in room " + roomId);
+        finishMutation(engine, roomId, expectedPlayer);
     }
 
 

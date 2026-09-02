@@ -292,8 +292,12 @@ public class YanivGameEngine {
             Hand hand = playerHands.get(playerId);
             // Remove the bonus card from hand (it was added during draw)
             hand.removeCard(pendingBonusCard);
-            // Add to discard pile as a single card on top
-            discardPile.addCombination(List.of(pendingBonusCard), DiscardCombination.Type.SINGLE, pendingDiscardHandSize);
+            // The turn's own discard goes down first, so the bonus card ends up on top.
+            // Only the top combination is drawable, so pushing them the other way round
+            // takes the bonus card out of play the moment it is discarded.
+            int handSizeAtDiscard = pendingDiscardHandSize;
+            pushPendingDiscardToPile();
+            discardPile.addCombination(List.of(pendingBonusCard), DiscardCombination.Type.SINGLE, handSizeAtDiscard);
         }
         // If not discarding, the card stays in hand
 
@@ -317,17 +321,27 @@ public class YanivGameEngine {
     }
 
     /**
+     * Move the cards staged by this turn's discard onto the pile. They are staged rather
+     * than pushed at discard time so the player cannot draw back the card they just
+     * threw. Does nothing once they are already down, so it is safe to call twice.
+     */
+    private void pushPendingDiscardToPile() {
+        if (pendingDiscard.isEmpty()) {
+            return;
+        }
+        String combinationType = CardCombinationValidator.getCombinationType(pendingDiscard, pendingDiscardHandSize);
+        discardPile.addCombination(pendingDiscard,
+                DiscardCombination.Type.valueOf(combinationType), pendingDiscardHandSize);
+        pendingDiscard.clear();
+        pendingDiscardHandSize = 0;
+    }
+
+    /**
      * Finalize the turn: add pending discard to discard pile and advance to next player.
      */
     private void finalizeTurn() {
         // Add pending discard to discard pile AFTER drawing
-        if (!pendingDiscard.isEmpty()) {
-            String combinationType = CardCombinationValidator.getCombinationType(pendingDiscard, pendingDiscardHandSize);
-            DiscardCombination.Type type = DiscardCombination.Type.valueOf(combinationType);
-            discardPile.addCombination(pendingDiscard, type, pendingDiscardHandSize);
-            pendingDiscard.clear();
-            pendingDiscardHandSize = 0;
-        }
+        pushPendingDiscardToPile();
 
         // Clear bonus discard tracking
         pendingBonusCard = null;

@@ -9,7 +9,9 @@ import org.springframework.security.core.Authentication;
 import shop.abwork.yanif.entity.Game;
 import shop.abwork.yanif.entity.GamePlayer;
 import shop.abwork.yanif.entity.User;
+import shop.abwork.yanif.game.GameSnapshot;
 import shop.abwork.yanif.game.YanivGameEngine;
+import shop.abwork.yanif.game.model.Card;
 import shop.abwork.yanif.presence.Presence;
 import shop.abwork.yanif.service.GameService;
 import shop.abwork.yanif.service.PresenceService;
@@ -103,7 +105,7 @@ class GameStateControllerTurnTimerTest {
         controller = new GameStateController(gameService, presenceService, userService,
                 messagingTemplate, presence, 1 /* turn timer seconds */, true /* auto-play */,
                 1 /* yaniv contest window */, 7 /* yaniv threshold */,
-                2 /* absence grace seconds */);
+                2 /* absence grace seconds */, 1 /* bonus discard timeout seconds */);
         controller.watchForAbsenceChanges();
         // The real composition: Presence is the only writer of the Redis projection.
         new shop.abwork.yanif.presence.PresenceRedisProjection(presence, presenceService).follow();
@@ -294,6 +296,132 @@ class GameStateControllerTurnTimerTest {
                 .map(c -> c.get("id").toString()).sorted().toList();
         assertEquals(expectedHandIds, restoredHandIds,
                 "restored hand must be identical to pre-restart hand (no re-deal)");
+    }
+
+    // ==========================================
+    // A parked bonus decision must not stall the room
+    // ==========================================
+
+    private static final String TEN_OF_HEARTS = "TEN_of_HEARTS";
+    private static final String TEN_OF_SPADES = "TEN_of_SPADES";
+
+    /** Ids are opaque to the engine, so name them after the card and read the test. */
+    private static GameSnapshot.CardDto card(Card.Suit suit, Card.Rank rank) {
+        return new GameSnapshot.CardDto(rank + "_of_" + suit, suit.name(), rank.name());
+    }
+
+    private static List<GameSnapshot.CardDto> allCards() {
+        List<GameSnapshot.CardDto> all = new java.util.ArrayList<>();
+        for (Card.Suit suit : Card.Suit.values()) {
+            for (Card.Rank rank : Card.Rank.values()) {
+                all.add(card(suit, rank));
+            }
+        }
+        return all;
+    }
+
+    /**
+     * A deal where the player to act holds the ten of hearts and the next deck card is
+     * the ten of spades: discard that ten alone, draw from the deck, and the engine parks
+     * in BONUS_DISCARD every time. The real deal reaches this state about once in fourteen
+     * single-card deck draws, which is no way to test it.
+     */
+    private String dealThatParksOnTheBonus(String toAct) {
+        GameSnapshot snapshot = GameSnapshot.fromJson(snapshotStore.get(ROOM));
+
+        List<GameSnapshot.CardDto> handToAct = List.of(
+                card(Card.Suit.HEARTS, Card.Rank.TEN),
+                card(Card.Suit.CLUBS, Card.Rank.TWO),
+                card(Card.Suit.CLUBS, Card.Rank.FIVE),
+                card(Card.Suit.CLUBS, Card.Rank.EIGHT),
+                card(Card.Suit.CLUBS, Card.Rank.QUEEN));
+        List<GameSnapshot.CardDto> handWaiting = List.of(
+                card(Card.Suit.DIAMONDS, Card.Rank.THREE),
+                card(Card.Suit.DIAMONDS, Card.Rank.FOUR),
+                card(Card.Suit.DIAMONDS, Card.Rank.SIX),
+                card(Card.Suit.DIAMONDS, Card.Rank.NINE),
+                card(Card.Suit.DIAMONDS, Card.Rank.KING));
+        GameSnapshot.CardDto onPile = card(Card.Suit.HEARTS, Card.Rank.ACE);
+        GameSnapshot.CardDto bonus = card(Card.Suit.SPADES, Card.Rank.TEN);
+
+        java.util.Set<String> dealt = new java.util.HashSet<>();
+        handToAct.forEach(c -> dealt.add(c.id));
+        handWaiting.forEach(c -> dealt.add(c.id));
+        dealt.add(onPile.id);
+        dealt.add(bonus.id);
+
+        List<GameSnapshot.CardDto> deck = new java.util.ArrayList<>();
+        deck.add(bonus); // index 0 is the next card drawn
+        allCards().stream().filter(c -> !dealt.contains(c.id)).forEach(deck::add);
+
+        GameSnapshot.DiscardCombinationDto pile = new GameSnapshot.DiscardCombinationDto();
+        pile.cards = List.of(onPile);
+        pile.type = "SINGLE";
+        pile.handSizeAtDiscard = 5;
+
+        snapshot.playerHands = new HashMap<>(Map.of(
+                toAct, handToAct,
+                otherPlayer(toAct), handWaiting));
+        snapshot.deckRemaining = deck;
+        snapshot.discardCombinations = List.of(pile);
+        snapshot.pendingDiscard = List.of();
+        snapshot.pendingDiscardHandSize = 0;
+        snapshot.lastDiscardedRank = null;
+        snapshot.pendingBonusCard = null;
+        snapshot.currentState = YanivGameEngine.GameState.WAIT_FOR_TURN.name();
+        snapshot.currentPlayerIndex = snapshot.playerIds.indexOf(toAct);
+        return snapshot.toJson();
+    }
+
+    @Test
+    void aBonusDecisionNobodyAnswersIsDeclinedInsteadOfStallingTheRoom() throws Exception {
+        controller.startGame(ROOM, auth(HOST));
+        snapshotStore.put(ROOM, dealThatParksOnTheBonus(HOST));
+        clearEngines();
+
+        controller.handleGameAction(ROOM, discardFirstCardAction(HOST, TEN_OF_HEARTS), auth(HOST));
+
+        YanivGameEngine parked = engineFromSnapshot();
+        assertEquals(YanivGameEngine.GameState.BONUS_DISCARD, parked.getCurrentState(),
+                "precondition: this deal parks on the bonus decision");
+        assertEquals(HOST, parked.getCurrentPlayer());
+        assertTrue(presence.absentSince(ROOM, HOST).isEmpty(),
+                "precondition: HOST is connected - the absent case is already covered");
+
+        assertTrue(waitFor(() -> engineFromSnapshot().getCurrentState()
+                        != YanivGameEngine.GameState.BONUS_DISCARD, 4000),
+                "a bonus decision the client never answers must not hold the room forever");
+
+        YanivGameEngine after = engineFromSnapshot();
+        assertEquals(OTHER, after.getCurrentPlayer(), "the turn must finish");
+        assertTrue(after.getDiscardPile().getAllDiscardedCards().stream()
+                        .anyMatch(c -> TEN_OF_HEARTS.equals(c.getId())),
+                "the ten they discarded was staged, not piled - it must reach the pile");
+        assertTrue(after.getPlayerHand(HOST).getCards().stream()
+                        .anyMatch(c -> TEN_OF_SPADES.equals(c.getId())),
+                "declining keeps the drawn card; the server must not discard it for them");
+    }
+
+    @Test
+    void theBonusDeadlineStillRunsWithAutoPlaySwitchedOff() throws Exception {
+        controller = new GameStateController(gameService, presenceService, userService,
+                messagingTemplate, presence, 1 /* turn timer seconds */, false /* auto-play OFF */,
+                1 /* yaniv contest window */, 7 /* yaniv threshold */,
+                2 /* absence grace seconds */, 1 /* bonus discard timeout seconds */);
+        controller.watchForAbsenceChanges();
+
+        controller.startGame(ROOM, auth(HOST));
+        snapshotStore.put(ROOM, dealThatParksOnTheBonus(HOST));
+        clearEngines();
+        controller.handleGameAction(ROOM, discardFirstCardAction(HOST, TEN_OF_HEARTS), auth(HOST));
+
+        assertEquals(YanivGameEngine.GameState.BONUS_DISCARD, engineFromSnapshot().getCurrentState(),
+                "precondition: this deal parks on the bonus decision");
+
+        assertTrue(waitFor(() -> engineFromSnapshot().getCurrentState()
+                        != YanivGameEngine.GameState.BONUS_DISCARD, 4000),
+                "the bonus deadline keeps the room alive; it is not a move played for anyone, "
+                        + "so turning auto-play off must not bring the stall back");
     }
 
     @Test
