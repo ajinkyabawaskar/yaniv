@@ -403,6 +403,32 @@ class GameStateControllerTurnTimerTest {
     }
 
     @Test
+    void theBonusCardIsSentOnlyToThePlayerDeciding() throws Exception {
+        controller.startGame(ROOM, auth(HOST));
+        snapshotStore.put(ROOM, dealThatParksOnTheBonus(HOST));
+        clearEngines();
+
+        int beforeForOther = messagesFor(OTHER).size();
+        controller.handleGameAction(ROOM, discardFirstCardAction(HOST, TEN_OF_HEARTS), auth(HOST));
+
+        GameStateController.GameStateMessage mine = messagesFor(HOST).stream()
+                .filter(m -> m.bonusDiscardActive).findFirst().orElse(null);
+        assertNotNull(mine, "the player deciding must be told what they drew");
+        assertEquals(TEN_OF_SPADES, mine.pendingBonusCard.get("id"));
+
+        List<GameStateController.GameStateMessage> theirs =
+                messagesFor(OTHER).subList(beforeForOther, messagesFor(OTHER).size());
+        assertFalse(theirs.isEmpty(), "precondition: the others were pushed the new state");
+        for (GameStateController.GameStateMessage m : theirs) {
+            assertFalse(m.bonusDiscardActive,
+                    "a decision only one player can make must not raise a prompt on anyone else's screen");
+            assertNull(m.pendingBonusCard,
+                    "if they keep it, that card stays in their hand - telling the table what it is "
+                            + "hands everyone a card they should not know");
+        }
+    }
+
+    @Test
     void theBonusDeadlineStillRunsWithAutoPlaySwitchedOff() throws Exception {
         controller = new GameStateController(gameService, presenceService, userService,
                 messagingTemplate, presence, 1 /* turn timer seconds */, false /* auto-play OFF */,

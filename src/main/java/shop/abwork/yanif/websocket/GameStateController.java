@@ -858,8 +858,10 @@ public class GameStateController {
             message.autoPlayedPlayerId = autoPlayedPlayerId;
         }
 
-        // Bonus discard state
-        if (engine.isBonusDiscardActive()) {
+        // Bonus discard state, for the one player who can answer it. Sending it to the
+        // table would raise a prompt nobody else can dismiss, and worse: if they keep the
+        // card it stays in their hand, so naming it hands everyone a card they cannot see.
+        if (engine.isBonusDiscardActive() && userId.equals(engine.getCurrentPlayer())) {
             message.bonusDiscardActive = true;
             Card bonusCard = engine.getPendingBonusCard();
             if (bonusCard != null) {

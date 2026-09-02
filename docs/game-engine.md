@@ -469,6 +469,12 @@ takes a room. Subscribing to it is also how the server learns which game a sessi
 
 - `hand` — the recipient's own cards only (`:688-701`)
 - `opponentCounts` — every *other* player's hand **size**, never card identities (`:731-740`)
+- `bonusDiscardActive` / `pendingBonusCard` — **only the player being asked** (`:861`)
+
+That third one is a card-identity leak as much as a UI concern. The bonus card is in the deciding
+player's hand while they think about it, and if they keep it, it *stays* there — so naming it to the
+table hands everyone a card they are not entitled to see. It also raised the prompt on every screen,
+where nobody but the current player could dismiss it.
 
 On `ROUND_OVER`/`GAME_OVER`, `allPlayerHands` is revealed to everyone (`:757-774`). The deck's
 remaining order is never sent — only `deckCount`.
@@ -685,6 +691,8 @@ The card-conservation, scoring and authorisation defects that used to fill this 
 | An accepted bonus card was buried under the discard it matched | pushed last, so it is the drawable top | `BonusDiscardTest.acceptedBonusCardIsTheTopOfThePile` |
 | A player on their last card could bonus-discard down to an empty hand | dealt a replacement, recycling the deck if needed | `BonusDiscardTest.bonusDiscardingTheLastCardDealsAReplacement`, `.theReplacementCanComeFromARecycledDeck` |
 | The client never read `bonusDiscardActive` / `pendingBonusCard` | written to the store on every push | `GameStateMessageContractTest` |
+| The bonus card was broadcast to the whole table, leaking a card they may keep | sent only to the player deciding | `GameStateControllerTurnTimerTest.theBonusCardIsSentOnlyToThePlayerDeciding` |
+| The bonus prompt had no CSS at all, so it broke the table layout when it finally rendered | styled as a centred modal in `TableCanvas.css` | — |
 | `handleNextRound` never restored from a snapshot | restores like every other handler | — |
 | Reconnect during a storage outage NPE'd | returns without touching the room | — |
 | Unauthenticated STOMP CONNECT passed through | rejected | — |
