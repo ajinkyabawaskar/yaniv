@@ -441,6 +441,13 @@ client gets the *previous* turn's countdown.
 All of it happens in `buildGameStateForPlayers` (`:644-803`), and every push goes to a **user
 destination**, never a shared topic. Only two fields differ per recipient:
 
+**The destination is room-scoped**: `/user/queue/room/{roomId}/game-state`, built by
+`gameStateDestination(roomId)`. A user destination reaches every session a player has open, so a
+single shared one let a message for one game overwrite a tab watching another — the client stores
+the payload's `gameId` but never checks it. Errors go the same way, which is why `sendErrorToUser`
+takes a room. Subscribing to it is also how the server learns which game a session is watching; see
+`docs/adr/0001` and the **room attachment** entry in `CONTEXT.md`.
+
 - `hand` — the recipient's own cards only (`:688-701`)
 - `opponentCounts` — every *other* player's hand **size**, never card identities (`:731-740`)
 

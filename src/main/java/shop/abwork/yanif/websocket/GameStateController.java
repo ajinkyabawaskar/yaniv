@@ -233,7 +233,7 @@ public class GameStateController {
             // Proactively send game state to reconnecting player
             // This avoids race condition where frontend requests state before subscribing
             GameStateMessage stateMessage = buildGameStateForPlayers(engine, roomId, userId);
-            messagingTemplate.convertAndSendToUser(userId, "/queue/game-state", stateMessage);
+            messagingTemplate.convertAndSendToUser(userId, gameStateDestination(roomId), stateMessage);
 
             System.out.println("Player " + userId + " reconnected to active game in room " + roomId + "; game state sent proactively");
         } else {
@@ -242,7 +242,7 @@ public class GameStateController {
 
             // Send current game state to the newly connected player
             GameStateMessage stateMessage = buildGameStateForPlayers(engine, roomId, userId);
-            messagingTemplate.convertAndSendToUser(userId, "/queue/game-state", stateMessage);
+            messagingTemplate.convertAndSendToUser(userId, gameStateDestination(roomId), stateMessage);
         }
 
         // Roster changed: drop any auto-play timer armed for the returning player
@@ -267,7 +267,7 @@ public class GameStateController {
 
             // Validate action
             if (!userId.equals(action.playerId)) {
-                sendErrorToUser(userId, "Cannot perform actions for another player");
+                sendErrorToUser(roomId, userId, "Cannot perform actions for another player");
                 return;
             }
 
@@ -282,7 +282,7 @@ public class GameStateController {
                     YanivGameEngine engine = gameEngines.get(roomId);
                     if (engine != null) {
                         GameStateMessage stateMessage = buildGameStateForPlayers(engine, roomId, userId);
-                        messagingTemplate.convertAndSendToUser(userId, "/queue/game-state", stateMessage);
+                        messagingTemplate.convertAndSendToUser(userId, gameStateDestination(roomId), stateMessage);
                     }
                     return;
                 }
@@ -297,14 +297,14 @@ public class GameStateController {
                 if (shouldAbortToLobby(roomId)) {
                     abortStaleGame(roomId);
                 }
-                sendErrorToUser(userId, "Game not found");
+                sendErrorToUser(roomId, userId, "Game not found");
                 return;
             }
 
             synchronized (engine) {
                 // Check if it's this player's turn
                 if (!userId.equals(engine.getCurrentPlayer()) && !"CALL_YANIV".equals(action.actionType)) {
-                    sendErrorToUser(userId, "Not your turn");
+                    sendErrorToUser(roomId, userId, "Not your turn");
                     return;
                 }
 
@@ -313,7 +313,7 @@ public class GameStateController {
                     case "DISCARD_AND_DRAW" -> {
                         Hand playerHand = engine.getPlayerHand(userId);
                         if (playerHand == null) {
-                            sendErrorToUser(userId, "Player hand not found");
+                            sendErrorToUser(roomId, userId, "Player hand not found");
                             return;
                         }
 
@@ -323,7 +323,7 @@ public class GameStateController {
                                 .toList();
 
                         if (discardedCards.size() != action.discardedCardIds.size()) {
-                            sendErrorToUser(userId, "Some discarded cards not found in hand");
+                            sendErrorToUser(roomId, userId, "Some discarded cards not found in hand");
                             return;
                         }
 
@@ -335,11 +335,11 @@ public class GameStateController {
                         } else if ("DISCARD_PILE".equalsIgnoreCase(action.drawSource)) {
                             drawnCard = engine.getDiscardPile().getDrawableCard(action.drawnCardId).orElse(null);
                             if (drawnCard == null) {
-                                sendErrorToUser(userId, "Card not drawable from discard pile: " + action.drawnCardId);
+                                sendErrorToUser(roomId, userId, "Card not drawable from discard pile: " + action.drawnCardId);
                                 return;
                             }
                         } else {
-                            sendErrorToUser(userId, "Invalid draw source: " + action.drawSource);
+                            sendErrorToUser(roomId, userId, "Invalid draw source: " + action.drawSource);
                             return;
                         }
 
@@ -347,7 +347,7 @@ public class GameStateController {
                     }
                     case "BONUS_DISCARD" -> {
                         if (!engine.isBonusDiscardActive()) {
-                            sendErrorToUser(userId, "No bonus discard available");
+                            sendErrorToUser(roomId, userId, "No bonus discard available");
                             return;
                         }
                         boolean shouldDiscard = action.bonusDiscard != null && action.bonusDiscard;
@@ -357,7 +357,7 @@ public class GameStateController {
                         engine.callYaniv(userId);
                     }
                     default -> {
-                        sendErrorToUser(userId, "Unknown action type: " + action.actionType);
+                        sendErrorToUser(roomId, userId, "Unknown action type: " + action.actionType);
                         return;
                     }
                 }
@@ -370,7 +370,7 @@ public class GameStateController {
         } catch (Exception e) {
             System.err.println("Error processing game action: " + e.getMessage());
             e.printStackTrace();
-            sendErrorToUser(auth.getName(), e.getMessage());
+            sendErrorToUser(roomId, auth.getName(), e.getMessage());
         }
     }
 
@@ -393,7 +393,7 @@ public class GameStateController {
                 if (shouldAbortToLobby(roomId)) {
                     abortStaleGame(roomId);
                 }
-                sendErrorToUser(userId, "Game not found");
+                sendErrorToUser(roomId, userId, "Game not found");
                 return;
             }
 
@@ -405,7 +405,7 @@ public class GameStateController {
             }
 
         } catch (Exception e) {
-            sendErrorToUser(auth.getName(), e.getMessage());
+            sendErrorToUser(roomId, auth.getName(), e.getMessage());
         }
     }
 
@@ -428,7 +428,7 @@ public class GameStateController {
                 if (shouldAbortToLobby(roomId)) {
                     abortStaleGame(roomId);
                 }
-                sendErrorToUser(userId, "Game not found");
+                sendErrorToUser(roomId, userId, "Game not found");
                 return;
             }
 
@@ -447,7 +447,7 @@ public class GameStateController {
             System.out.println("Yaniv contested by " + userId + " in room " + roomId);
 
         } catch (Exception e) {
-            sendErrorToUser(auth.getName(), e.getMessage());
+            sendErrorToUser(roomId, auth.getName(), e.getMessage());
         }
     }
 
@@ -467,7 +467,7 @@ public class GameStateController {
             if (engine == null) {
                 Game game = gameService.getGameById(roomId);
                 if (game == null) {
-                    sendErrorToUser(userId, "Game not found");
+                    sendErrorToUser(roomId, userId, "Game not found");
                     return;
                 }
                 // Live state lost (e.g. pre-snapshot restart): back to lobby
@@ -506,20 +506,20 @@ public class GameStateController {
                 lobbyState.drawableDiscardCards = new ArrayList<>();
                 lobbyState.topDiscardCards = new ArrayList<>();
 
-                messagingTemplate.convertAndSendToUser(userId, "/queue/game-state", lobbyState);
+                messagingTemplate.convertAndSendToUser(userId, gameStateDestination(roomId), lobbyState);
                 return;
             }
 
             GameStateMessage stateMessage = buildGameStateForPlayers(engine, roomId, userId);
             messagingTemplate.convertAndSendToUser(
                     userId,
-                    "/queue/game-state",
+                    gameStateDestination(roomId),
                     stateMessage
             );
         } catch (Exception e) {
             System.err.println("Error getting game state: " + e.getMessage());
             e.printStackTrace();
-            sendErrorToUser(auth.getName(), e.getMessage());
+            sendErrorToUser(roomId, auth.getName(), e.getMessage());
         }
     }
 
@@ -534,7 +534,7 @@ public class GameStateController {
 
             Game game = gameService.getGameById(roomId);
             if (game == null) {
-                sendErrorToUser(userId, "Game not found");
+                sendErrorToUser(roomId, userId, "Game not found");
                 return;
             }
 
@@ -547,7 +547,7 @@ public class GameStateController {
             if (engine != null && !engine.isGameOver()) {
                 messagingTemplate.convertAndSendToUser(
                         userId,
-                        "/queue/game-state",
+                        gameStateDestination(roomId),
                         buildGameStateForPlayers(engine, roomId, userId)
                 );
                 return;
@@ -559,7 +559,7 @@ public class GameStateController {
         } catch (Exception e) {
             System.err.println("Error handling player join: " + e.getMessage());
             e.printStackTrace();
-            sendErrorToUser(auth.getName(), e.getMessage());
+            sendErrorToUser(roomId, auth.getName(), e.getMessage());
         }
     }
 
@@ -614,7 +614,7 @@ public class GameStateController {
             String playerUserId = player.getId().getUserId();
             messagingTemplate.convertAndSendToUser(
                     playerUserId,
-                    "/queue/game-state",
+                    gameStateDestination(roomId),
                     lobbyState
             );
         }
@@ -632,30 +632,30 @@ public class GameStateController {
             var game = gameService.getGameById(roomId);
 
             if (game == null) {
-                sendErrorToUser(userId, "Game not found");
+                sendErrorToUser(roomId, userId, "Game not found");
                 return;
             }
 
             if (!game.getHostUserId().equals(userId)) {
-                sendErrorToUser(userId, "Only host can start game");
+                sendErrorToUser(roomId, userId, "Only host can start game");
                 return;
             }
 
             if (game.getStatus() == Game.GameStatus.IN_PROGRESS) {
                 // A game is already running (possibly restored after a restart)
-                sendErrorToUser(userId, "Game already in progress");
+                sendErrorToUser(roomId, userId, "Game already in progress");
                 return;
             }
 
             if (game.getStatus() == Game.GameStatus.FINISHED) {
                 // Re-running would deal a fresh game onto a finished row, corrupting history
-                sendErrorToUser(userId, "Game has already finished");
+                sendErrorToUser(roomId, userId, "Game has already finished");
                 return;
             }
 
             var players = gameService.getGamePlayers(roomId);
             if (players.size() < 2) {
-                sendErrorToUser(userId, "Need at least 2 players to start");
+                sendErrorToUser(roomId, userId, "Need at least 2 players to start");
                 return;
             }
 
@@ -681,7 +681,7 @@ public class GameStateController {
         } catch (Exception e) {
             System.err.println("Error starting game: " + e.getMessage());
             e.printStackTrace();
-            sendErrorToUser(auth.getName(), e.getMessage());
+            sendErrorToUser(roomId, auth.getName(), e.getMessage());
         }
     }
 
@@ -897,17 +897,17 @@ public class GameStateController {
             // ROUND_OVER bricks the Next Round button.
             YanivGameEngine engine = getOrRestoreEngine(roomId);
             if (engine == null) {
-                sendErrorToUser(userId, "Game not found");
+                sendErrorToUser(roomId, userId, "Game not found");
                 return;
             }
 
             if (!engine.getAllPlayerIds().contains(userId)) {
-                sendErrorToUser(userId, "You are not a player in this game");
+                sendErrorToUser(roomId, userId, "You are not a player in this game");
                 return;
             }
 
             if (!engine.isRoundOver()) {
-                sendErrorToUser(userId, "Round is not over yet");
+                sendErrorToUser(roomId, userId, "Round is not over yet");
                 return;
             }
 
@@ -919,7 +919,7 @@ public class GameStateController {
         } catch (Exception e) {
             System.err.println("Error starting next round: " + e.getMessage());
             e.printStackTrace();
-            sendErrorToUser(auth.getName(), e.getMessage());
+            sendErrorToUser(roomId, auth.getName(), e.getMessage());
         }
     }
 
@@ -939,7 +939,7 @@ public class GameStateController {
                     autoPlayedPlayerId, view);
             messagingTemplate.convertAndSendToUser(
                     playerId,
-                    "/queue/game-state",
+                    gameStateDestination(roomId),
                     stateMessage
             );
         }
@@ -948,12 +948,21 @@ public class GameStateController {
     /**
      * Send error message to a specific user.
      */
-    private void sendErrorToUser(String userId, String error) {
+    /**
+     * Game state is addressed per room, not per user: a user destination is delivered to
+     * every session that player has open, so a message for one game would otherwise land
+     * in a tab watching another. See docs/adr/0001.
+     */
+    private static String gameStateDestination(String roomId) {
+        return "/queue/room/" + roomId + "/game-state";
+    }
+
+    private void sendErrorToUser(String roomId, String userId, String error) {
         GameStateMessage message = new GameStateMessage();
         message.error = error;
         messagingTemplate.convertAndSendToUser(
                 userId,
-                "/queue/game-state",
+                gameStateDestination(roomId),
                 message
         );
     }
@@ -1524,7 +1533,7 @@ public class GameStateController {
                 message.playerDisconnectedStatus = disconnected;
                 messagingTemplate.convertAndSendToUser(
                     playerId,
-                    "/queue/game-state",
+                    gameStateDestination(roomId),
                     message
                 );
             }

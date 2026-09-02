@@ -185,7 +185,7 @@ class GameLifecycleScenariosTest {
     private List<GameStateController.GameStateMessage> messagesFor(String userId) {
         ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
         verify(messagingTemplate, atLeast(0))
-                .convertAndSendToUser(eq(userId), eq("/queue/game-state"), captor.capture());
+                .convertAndSendToUser(eq(userId), eq("/queue/room/" + ROOM + "/game-state"), captor.capture());
         return captor.getAllValues().stream()
                 .filter(v -> v instanceof GameStateController.GameStateMessage)
                 .map(v -> (GameStateController.GameStateMessage) v)

@@ -157,8 +157,12 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
   useEffect(() => {
     gameState.setGame({ gameId, roomCode });
 
+    // Room-scoped: a user destination reaches every tab this player has open, so a
+    // shared one lets another game's state overwrite this view. Subscribing here is
+    // also how the server learns this session is watching this game, and the
+    // unsubscribe below is how it learns we left. See docs/adr/0001.
     const subscription = isConnected
-      ? subscribe('/user/queue/game-state', (message) => {
+      ? subscribe('/user/queue/room/' + gameId + '/game-state', (message) => {
           const gameData = JSON.parse(message.body);
           console.log('Received game state:', gameData);
 
