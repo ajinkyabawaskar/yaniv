@@ -173,16 +173,6 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
             return;
           }
 
-          // Handle player disconnected/reconnected events
-          if (gameData.playerDisconnected) {
-            if (gameData.playerDisconnectedStatus) {
-              gameState.addDisconnectedPlayer(gameData.playerDisconnected);
-            } else {
-              gameState.removeDisconnectedPlayer(gameData.playerDisconnected);
-            }
-            return; // Don't process the rest - this message only has disconnected info
-          }
-
           const isRoundOverState = gameData.currentState === 'ROUND_OVER' || gameData.currentState === 'GAME_OVER';
           const isGameOverState = gameData.currentState === 'GAME_OVER';
           setShowRoundOver(isRoundOverState);
@@ -341,10 +331,11 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
         cardCount: p.userId === currentUserId
           ? gameState.playerHand?.length || 5
           : (gameState.opponentCounts?.[p.userId] !== undefined ? gameState.opponentCounts[p.userId] : 5),
-        isDisconnected: gameState.disconnectedPlayers?.has(p.userId) || false,
+        // Carried on every state push, so a reload or a late join sees the truth.
+        isDisconnected: p.status === 'DISCONNECTED_IN_GAME',
         isCurrentPlayer: p.userId === currentUserId,
       }));
-  }, [gameState.players, gameState.scores, gameState.currentTurnPlayerId, gameState.eliminatedPlayers, gameState.opponentCounts, gameState.disconnectedPlayers, currentUserId, gameState.playerHand]);
+  }, [gameState.players, gameState.scores, gameState.currentTurnPlayerId, gameState.eliminatedPlayers, gameState.opponentCounts, currentUserId, gameState.playerHand]);
 
   if (loading) {
     return (

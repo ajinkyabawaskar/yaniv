@@ -39,7 +39,9 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     public void configureMessageBroker(MessageBrokerRegistry config) {
         // Enable a simple message broker that routes messages with these prefixes
         config.enableSimpleBroker("/queue", "/topic")
-              .setHeartbeatValue(new long[] {25000, 25000})
+              // 10s, not 25s: this is detection latency, and it stacks on top of the
+              // absence grace before a table waits on a player who has gone.
+              .setHeartbeatValue(new long[] {10000, 10000})
               .setTaskScheduler(heartbeatScheduler());
 
         // Configure application destination prefix for client-to-server messages

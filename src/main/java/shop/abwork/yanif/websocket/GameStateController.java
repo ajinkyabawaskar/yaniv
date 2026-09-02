@@ -4,6 +4,7 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import shop.abwork.yanif.entity.Game;
 import shop.abwork.yanif.presence.Presence;
+import shop.abwork.yanif.presence.PresenceStatus;
 import shop.abwork.yanif.entity.GamePlayer;
 import shop.abwork.yanif.entity.User;
 import shop.abwork.yanif.game.AutoPlayStrategy;
@@ -188,7 +189,6 @@ public class GameStateController {
         }
 
         // Broadcast disconnected status to other players
-        broadcastPlayerDisconnected(roomId, userId, true);
 
         System.out.println("Player " + userId + " disconnected from active game in room " + roomId);
     }
@@ -247,8 +247,6 @@ public class GameStateController {
             // Update presence back to IN_GAME
             presenceService.setUserInGame(userId);
 
-            // Broadcast reconnected status to other players
-            broadcastPlayerDisconnected(roomId, userId, false);
 
             // Proactively send game state to reconnecting player
             // This avoids race condition where frontend requests state before subscribing
@@ -517,7 +515,7 @@ public class GameStateController {
                         info.userId = playerUserId;
                         info.displayName = u.getDisplayName();
                         info.isHost = game.getHostUserId().equals(playerUserId);
-                        info.status = "ONLINE";
+                        info.status = presence.status(playerUserId).name();
                         playerInfos.add(info);
                     });
                 }
@@ -598,7 +596,7 @@ public class GameStateController {
                 info.userId = playerUserId;
                 info.displayName = u.getDisplayName();
                 info.isHost = game.getHostUserId().equals(playerUserId);
-                info.status = "ONLINE";
+                info.status = presence.status(playerUserId).name();
                 playerInfos.add(info);
             });
         }
@@ -741,7 +739,11 @@ public class GameStateController {
             info.userId = playerUserId;
             info.displayName = user.getDisplayName();
             info.isHost = game != null && game.getHostUserId().equals(playerUserId);
-            info.status = "ONLINE";
+            // Real, per-game: is this player watching THIS game right now. Was a
+            // hardcoded literal that no client could learn anything from.
+            info.status = presence.absentSince(roomId, playerUserId).isPresent()
+                    ? PresenceStatus.DISCONNECTED_IN_GAME.name()
+                    : PresenceStatus.IN_GAME.name();
             playerInfos.add(info);
         }
         return new RoomView(game, players, playerNames, playerInfos);
@@ -1563,26 +1565,6 @@ public class GameStateController {
         }
     }
 
-    /**
-     * Broadcast player disconnected/reconnected status to other players in the room.
-     */
-    private void broadcastPlayerDisconnected(String roomId, String userId, boolean disconnected) {
-        var players = gameService.getGamePlayers(roomId);
-        for (var player : players) {
-            String playerId = player.getId().getUserId();
-            if (!playerId.equals(userId)) {
-                GameStateMessage message = new GameStateMessage();
-                message.gameId = roomId;
-                message.playerDisconnected = userId;
-                message.playerDisconnectedStatus = disconnected;
-                messagingTemplate.convertAndSendToUser(
-                    playerId,
-                    gameStateDestination(roomId),
-                    message
-                );
-            }
-        }
-    }
 
     /**
      * Request DTOs
@@ -1655,8 +1637,6 @@ public class GameStateController {
         public Map<String, List<Map<String, Object>>> allPlayerHands;
 
         // Player reconnection status
-        public String playerDisconnected;
-        public boolean playerDisconnectedStatus;
 
         // Turn timer / auto-play
         public int turnTimerSeconds;          // Total allowed seconds per turn

@@ -1309,6 +1309,38 @@ class GameLifecycleScenariosTest {
     }
 
     @Test
+    void H4_theRosterCarriesAbsenceOnEveryPush() {
+        startStartedGame();
+        String current = liveEngine().getCurrentPlayer();
+        String other = current.equals(HOST) ? OTHER : HOST;
+
+        // Everyone is watching to begin with.
+        presence.sessionOpened("s-" + other, other);
+        presence.attachedToRoom("s-" + other, ROOM);
+        controller.getGameState(ROOM, auth(other));
+        assertEquals("IN_GAME", rosterStatusOf(other, current),
+                "precondition: the roster shows a watching player as in the game");
+
+        makeAbsentFromRoom(current);
+        controller.getGameState(ROOM, auth(other));
+
+        assertEquals("DISCONNECTED_IN_GAME", rosterStatusOf(other, current),
+                "absence rides on every state push, so a reloading client sees it too");
+    }
+
+    /** The status the roster in {@code recipient}'s latest message gives for {@code subject}. */
+    private String rosterStatusOf(String recipient, String subject) {
+        List<GameStateController.GameStateMessage> msgs = messagesFor(recipient);
+        for (int i = msgs.size() - 1; i >= 0; i--) {
+            if (msgs.get(i).players == null) continue;
+            for (GameStateController.PlayerInfo info : msgs.get(i).players) {
+                if (subject.equals(info.userId)) return info.status;
+            }
+        }
+        return null;
+    }
+
+    @Test
     void G5_roomWithAPendingTimer_isNotEvicted() throws Exception {
         startStartedGame();
         YanivGameEngine engine = liveEngine();

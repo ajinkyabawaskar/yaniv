@@ -452,9 +452,10 @@ takes a room. Subscribing to it is also how the server learns which game a sessi
 On `ROUND_OVER`/`GAME_OVER`, `allPlayerHands` is revealed to everyone (`:757-774`). The deck's
 remaining order is never sent — only `deckCount`.
 
-> `PlayerInfo.status` is hardcoded `"ONLINE"` in every builder (`:454`, `:535`, `:680`); the roster
-> never reflects real presence. Clients learn about disconnects only from the separate
-> `broadcastPlayerDisconnected` message (`:1273-1289`).
+**`PlayerInfo.status` is real.** For a game it reports absence from *that* game
+(`IN_GAME` / `DISCONNECTED_IN_GAME`); for a lobby it reports overall reachability. Because it rides
+on every state push, a client that reloads or joins late sees the truth — the old delta message it
+replaced could only be caught by clients that were listening at the moment it was sent.
 
 **Cost: three queries per mutation, whatever the player count.** `loadRoomView` fetches the game
 row, the player rows and every display name (one batched `getUsersByIds`) once per broadcast, and
@@ -629,10 +630,6 @@ exercising the bug; those are fixed too, and the suite is stable across repeated
 
 ## Still open
 
-- **Presence status is not real.** `PlayerInfo.status` is hardcoded `"ONLINE"` in every builder
-  (`:454`, `:535`, `:680`), so the pushed roster never reflects who is actually connected. Clients
-  learn about disconnects only from the separate `broadcastPlayerDisconnected` message. This is the
-  reason auto-play is held off, and it blocks the connected-player turn timer.
 - **The invite feature has no test coverage.** Its handlers were unreachable until now, so nothing
   has ever exercised send / respond / cancel end to end.
 - **`AutoPlayStrategy.evaluate` does not model the real move.** A deck draw is scored as
