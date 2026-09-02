@@ -162,4 +162,32 @@ class PresenceTest {
 
         assertTrue(announced.isEmpty(), "she is still watching, so the game's view of her is unchanged");
     }
+
+    @Test
+    @DisplayName("A change in a player's reachability is announced")
+    void presenceChangesAreAnnounced() {
+        List<String> announced = new ArrayList<>();
+        presence.onPresenceChanged(announced::add);
+
+        presence.sessionOpened("session-a", "alice");   // OFFLINE -> ONLINE
+        presence.attachedToRoom("session-a", "room-1"); // ONLINE  -> IN_GAME
+        presence.sessionClosed("session-a");            // IN_GAME -> DISCONNECTED_IN_GAME
+
+        assertEquals(List.of("alice", "alice", "alice"), announced,
+                "each step changes how reachable she is");
+    }
+
+    @Test
+    @DisplayName("A second tab opening changes nothing, so nothing is announced")
+    void noPresenceAnnouncementWhenStatusIsUnchanged() {
+        presence.sessionOpened("session-a", "alice");
+        presence.attachedToRoom("session-a", "room-1");
+
+        List<String> announced = new ArrayList<>();
+        presence.onPresenceChanged(announced::add);
+        presence.sessionOpened("session-b", "alice");
+        presence.attachedToRoom("session-b", "room-1");
+
+        assertTrue(announced.isEmpty(), "she was already in this game; nothing changed");
+    }
 }

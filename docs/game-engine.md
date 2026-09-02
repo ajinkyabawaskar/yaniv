@@ -560,6 +560,16 @@ A mid-game drop closes one session. `PresenceSessionListener` tells `Presence`, 
 **absence** only if that was the player's *last* session watching this game — a second tab keeps
 them present. The absence announcement re-arms the turn timer if it is their turn.
 
+`PresenceRedisProjection` is the **only** writer of the Redis presence key. It follows
+`Presence.onPresenceChanged` and mirrors the current status; a failure is logged and changes
+nothing, because memory is the truth and Redis knows nothing the process does not know better.
+Previously two `@EventListener`s wrote that key on the same event with no `@Order` between them, so
+what a disconnect meant depended on bean discovery order.
+
+Leaving during `ROUND_OVER` now records an absence like any other — the player is still in the game.
+It used to report plain offline, which meant a table where everyone had gone could never
+self-advance.
+
 `GameStateController.handleSessionDisconnect` no longer keeps a record of its own; it sets the Redis
 presence status and notifies the other players. It cannot decide absence, because a handler keyed by
 user cannot tell a closed spare tab from a player who left.

@@ -105,6 +105,8 @@ class GameStateControllerTurnTimerTest {
                 1 /* yaniv contest window */, 7 /* yaniv threshold */,
                 2 /* absence grace seconds */);
         controller.watchForAbsenceChanges();
+        // The real composition: Presence is the only writer of the Redis projection.
+        new shop.abwork.yanif.presence.PresenceRedisProjection(presence, presenceService).follow();
     }
 
     @AfterEach

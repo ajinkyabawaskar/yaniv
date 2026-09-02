@@ -121,7 +121,9 @@ class GameLifecycleScenariosTest {
                 messagingTemplate, presence, 1 /* turn timer seconds */, true /* auto-play */,
                 1 /* yaniv contest window */, 7 /* yaniv threshold */,
                 2 /* absence grace seconds */);
-        controller.watchForAbsenceChanges(); // @PostConstruct does not run on a direct construction
+        controller.watchForAbsenceChanges();
+        // The real composition: Presence is the only writer of the Redis projection.
+        new shop.abwork.yanif.presence.PresenceRedisProjection(presence, presenceService).follow(); // @PostConstruct does not run on a direct construction
     }
 
     @AfterEach
@@ -384,7 +386,6 @@ class GameLifecycleScenariosTest {
         String current = engineFromSnapshot().getCurrentPlayer();
 
         makeAbsentFromRoom(current);
-        makeAbsentFromRoom(current);
         controller.handleSessionDisconnect(disconnectEvent(current));
 
         verify(presenceService).setUserDisconnectedInGame(current);
@@ -400,6 +401,7 @@ class GameLifecycleScenariosTest {
         String current = engineFromSnapshot().getCurrentPlayer();
         String opponent = current.equals(HOST) ? OTHER : HOST;
 
+        makeAbsentFromRoom(opponent);
         controller.handleSessionDisconnect(disconnectEvent(opponent));
 
         verify(presenceService).setUserDisconnectedInGame(opponent);
@@ -430,8 +432,13 @@ class GameLifecycleScenariosTest {
         reachRoundOverViaContest();
         int round = engineFromSnapshot().getRoundNumber();
 
+        makeAbsentFromRoom(HOST);
         controller.handleSessionDisconnect(disconnectEvent(HOST));
-        verify(presenceService, atLeastOnce()).setUserOffline(HOST);
+
+        // Behaviour change: leaving during ROUND_OVER now records an absence like any
+        // other, because they are still in the game. It used to report plain offline,
+        // which meant an all-gone table could never self-advance.
+        verify(presenceService, atLeastOnce()).setUserDisconnectedInGame(HOST);
 
         try { Thread.sleep(1500); } catch (InterruptedException ignored) { }
         assertTrue(engineFromSnapshot().isRoundOver());
@@ -446,6 +453,9 @@ class GameLifecycleScenariosTest {
         setEngineField(engine, "currentState", YanivGameEngine.GameState.GAME_OVER);
         setEngineField(engine, "winnerId", HOST);
 
+        // Connected, but not watching a game: leaving is plain offline, not an absence.
+        presence.sessionOpened("s-host", HOST);
+        presence.sessionClosed("s-host");
         controller.handleSessionDisconnect(disconnectEvent(HOST));
 
         verify(presenceService).setUserOffline(HOST);

@@ -9,6 +9,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 
 /**
  * Who is reachable, and who is watching which game.
@@ -44,6 +45,9 @@ public class Presence {
      */
     private final List<BiConsumer<String, String>> absenceListeners = new CopyOnWriteArrayList<>();
 
+    /** Told when a player's overall reachability changes, so a projection can follow it. */
+    private final List<Consumer<String>> presenceListeners = new CopyOnWriteArrayList<>();
+
     public Presence(Clock clock) {
         this.clock = clock;
     }
@@ -53,23 +57,46 @@ public class Presence {
         absenceListeners.add(listener);
     }
 
+    /** Register interest in a player's overall reachability changing. */
+    public void onPresenceChanged(Consumer<String> listener) {
+        presenceListeners.add(listener);
+    }
+
     public void sessionOpened(String sessionId, String playerId) {
-        playerBySession.put(sessionId, playerId);
+        announcingChange(playerId, () -> playerBySession.put(sessionId, playerId));
+    }
+
+    /** Run a mutation, and tell the listeners only if it changed this player's status. */
+    private void announcingChange(String playerId, Runnable mutation) {
+        PresenceStatus before = status(playerId);
+        mutation.run();
+        if (before != status(playerId)) {
+            presenceListeners.forEach(listener -> listener.accept(playerId));
+        }
     }
 
     public void sessionClosed(String sessionId) {
-        detach(sessionId);
-        playerBySession.remove(sessionId);
+        String playerId = playerBySession.get(sessionId);
+        if (playerId == null) {
+            return;
+        }
+        announcingChange(playerId, () -> {
+            detach(sessionId);
+            playerBySession.remove(sessionId);
+        });
     }
 
     public void attachedToRoom(String sessionId, String roomId) {
-        detach(sessionId);
         String playerId = playerBySession.get(sessionId);
-        roomBySession.put(sessionId, roomId);
-        sessionsByRoom.computeIfAbsent(roomId, k -> ConcurrentHashMap.newKeySet()).add(sessionId);
-        if (playerId != null) {
-            settleAbsence(roomId, playerId);
+        if (playerId == null) {
+            return;
         }
+        announcingChange(playerId, () -> {
+            detach(sessionId);
+            roomBySession.put(sessionId, roomId);
+            sessionsByRoom.computeIfAbsent(roomId, k -> ConcurrentHashMap.newKeySet()).add(sessionId);
+            settleAbsence(roomId, playerId);
+        });
     }
 
     /**

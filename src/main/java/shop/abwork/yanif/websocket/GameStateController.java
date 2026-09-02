@@ -165,14 +165,12 @@ public class GameStateController {
         YanivGameEngine engine = gameEngines.get(roomId);
         if (engine == null) {
             // Not in an active game, just update presence
-            presenceService.setUserOffline(userId);
             return;
         }
 
         // Check if game is still in progress (not in lobby, not game over)
         if (engine.isGameOver() || engine.isRoundOver()) {
             // Game is between rounds or over, just update presence
-            presenceService.setUserOffline(userId);
             return;
         }
 
@@ -180,7 +178,6 @@ public class GameStateController {
         // a set keyed by user cannot tell a closed spare tab from a player who left.
 
         // Update presence to DISCONNECTED_IN_GAME status (extended TTL)
-        presenceService.setUserDisconnectedInGame(userId);
 
         // If it is already this player's turn, arm their auto-play timer now
         if (engine.getCurrentState() == YanivGameEngine.GameState.WAIT_FOR_TURN
@@ -225,7 +222,6 @@ public class GameStateController {
         if (engine == null && shouldAbortToLobby(roomId)) {
             // No restorable game and storage confirms it: return the room to the lobby
             abortStaleGame(roomId);
-            presenceService.setUserOnline(userId);
             broadcastLobbyState(roomId);
             return;
         }
@@ -233,7 +229,6 @@ public class GameStateController {
         if (engine == null) {
             // Unresolvable but not provably stale (typically a storage outage). Leave the
             // room alone; every path below dereferences the engine.
-            presenceService.setUserOnline(userId);
             System.err.println("Could not resolve engine for room " + roomId
                     + " on reconnect of " + userId + "; leaving room untouched");
             return;
@@ -245,7 +240,6 @@ public class GameStateController {
 
         if (wasDisconnected) {
             // Update presence back to IN_GAME
-            presenceService.setUserInGame(userId);
 
 
             // Proactively send game state to reconnecting player
@@ -256,7 +250,6 @@ public class GameStateController {
             System.out.println("Player " + userId + " reconnected to active game in room " + roomId + "; game state sent proactively");
         } else {
             // Normal join or new connection to existing game
-            presenceService.setUserInGame(userId);
 
             // Send current game state to the newly connected player
             GameStateMessage stateMessage = buildGameStateForPlayers(engine, roomId, userId);
@@ -690,7 +683,6 @@ public class GameStateController {
             engineLastTouched.put(roomId, System.currentTimeMillis());
 
             for (String playerId : playerIds) {
-                presenceService.setUserInGame(playerId);
             }
 
             // Persist initial snapshot, schedule first turn timer, broadcast
@@ -1635,8 +1627,6 @@ public class GameStateController {
 
         // All player hands revealed on ROUND_OVER
         public Map<String, List<Map<String, Object>>> allPlayerHands;
-
-        // Player reconnection status
 
         // Turn timer / auto-play
         public int turnTimerSeconds;          // Total allowed seconds per turn
