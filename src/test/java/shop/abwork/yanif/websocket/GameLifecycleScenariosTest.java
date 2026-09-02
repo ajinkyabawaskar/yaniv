@@ -1366,6 +1366,46 @@ class GameLifecycleScenariosTest {
     }
 
     @Test
+    void H6_othersAreToldWhenSomeoneLeavesWithoutAnyoneActing() {
+        startStartedGame();
+        String current = liveEngine().getCurrentPlayer();
+        String other = current.equals(HOST) ? OTHER : HOST;
+
+        presence.sessionOpened("s-" + other, other);
+        presence.attachedToRoom("s-" + other, ROOM);
+        presence.sessionOpened("s-" + current, current);
+        presence.attachedToRoom("s-" + current, ROOM);
+        controller.getGameState(ROOM, auth(other));
+        int before = messagesFor(other).size();
+
+        // Nobody plays a card. The only thing that happens is that someone leaves.
+        presence.sessionClosed("s-" + current);
+
+        assertTrue(messagesFor(other).size() > before,
+                "the others must be told, not left waiting for the next game action");
+        assertEquals("DISCONNECTED_IN_GAME", rosterStatusOf(other, current),
+                "and what they are told must show the absence");
+    }
+
+    @Test
+    void H7_othersAreToldWhenSomeoneComesBack() {
+        startStartedGame();
+        String current = liveEngine().getCurrentPlayer();
+        String other = current.equals(HOST) ? OTHER : HOST;
+
+        presence.sessionOpened("s-" + other, other);
+        presence.attachedToRoom("s-" + other, ROOM);
+        makeAbsentFromRoom(current);
+        controller.getGameState(ROOM, auth(other));
+        assertEquals("DISCONNECTED_IN_GAME", rosterStatusOf(other, current), "precondition: away");
+
+        returnToRoom(current);
+
+        assertEquals("IN_GAME", rosterStatusOf(other, current),
+                "the badge must clear for everyone else too, without anyone acting");
+    }
+
+    @Test
     void G5_roomWithAPendingTimer_isNotEvicted() throws Exception {
         startStartedGame();
         YanivGameEngine engine = liveEngine();

@@ -1145,10 +1145,15 @@ public class GameStateController {
     void watchForAbsenceChanges() {
         presence.onAbsenceChanged((roomId, playerId) -> {
             YanivGameEngine engine = gameEngines.get(roomId);
-            if (engine != null) {
-                synchronized (engine) {
-                    scheduleTurnTimerIfNeeded(engine, roomId);
-                }
+            if (engine == null) {
+                return;
+            }
+            synchronized (engine) {
+                scheduleTurnTimerIfNeeded(engine, roomId);
+                // Somebody arriving or leaving changes what every other player should see.
+                // The roster carries it, but only a push delivers it -- otherwise the table
+                // learns about it whenever the next card happens to be played.
+                broadcastGameState(engine, roomId);
             }
         });
     }

@@ -482,8 +482,13 @@ The clock starts when their turn arrives, not when they left: a player who drops
 else's turn has not burned any grace.
 
 Nothing polls for this. `Presence` announces a change in who is watching a game, and the orchestrator
-re-evaluates the timer for that room (`watchForAbsenceChanges`). Without that, Presence would know a
-player had gone and nothing would act on it.
+re-evaluates the timer **and broadcasts** (`watchForAbsenceChanges`). Both halves matter: without the
+first, Presence would know a player had gone and nothing would act on it; without the second, the
+other players would not find out until the next card happened to be played.
+
+That second half is the one assumption worth naming: `broadcastGameState` used to have a single
+caller, inside `finishMutation`, which encoded "state only changes when the game mutates". That
+stopped being true the moment presence started riding on the state message.
 
 **All of it depends on the client noticing it disconnected.** `onWebSocketClose` is what flips
 `isConnected`; `onDisconnect` alone fires only on a *graceful* STOMP disconnect, so a socket that
