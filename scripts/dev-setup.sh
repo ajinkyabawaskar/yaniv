@@ -347,14 +347,14 @@ else
   fi
 fi
 
+# Only the spring.data.redis.* prefix is live. Boot deprecated spring.redis.*
+# at error level in 3.0 and no longer binds it, so the legacy keys in the
+# tracked application.properties are inert; don't propagate them here.
 write_env "spring.data.redis.host" "localhost"
 write_env "spring.data.redis.port" "$REDIS_PORT"
-write_env "spring.redis.host" "localhost"
-write_env "spring.redis.port" "$REDIS_PORT"
 
 if [[ -n "$REDIS_PW" ]]; then
   write_env "spring.data.redis.password" "$REDIS_PW"
-  write_env "spring.redis.password" "$REDIS_PW"
 elif grep -qE '^spring\.(data\.)?redis\.password=' "$ENV_FILE" 2>/dev/null; then
   STALE_TMP="$(mktemp)"
   grep -vE '^spring\.(data\.)?redis\.password=' "$ENV_FILE" > "$STALE_TMP"
