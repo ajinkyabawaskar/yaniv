@@ -168,27 +168,66 @@ class BonusDiscardTest {
     private RiggedDeal dealWhereTheNextDeckCardMatchesAHandCard() {
         GameSnapshot snapshot = GameSnapshot.fromJson(engine.toSnapshot());
         String player = engine.getCurrentPlayer();
+        GameSnapshot.CardDto[] pair = findHandCardWithASiblingInTheDeck(snapshot, player);
 
-        GameSnapshot.CardDto toDiscard = null;
-        GameSnapshot.CardDto bonus = null;
+        snapshot.deckRemaining.remove(pair[1]);
+        snapshot.deckRemaining.add(0, pair[1]); // index 0 is the next card drawn
+        return new RiggedDeal(YanivGameEngine.fromSnapshot(snapshot.toJson()), player,
+                GameSnapshot.toCard(pair[0]), GameSnapshot.toCard(pair[1]));
+    }
+
+    /**
+     * The same stacked deck, but the player is down to that one card. Reachable in a real
+     * game: a hand only ever shrinks, and a lone King is 10 points - over the threshold,
+     * so they cannot call Yaniv and have to keep playing it.
+     */
+    private RiggedDeal dealWithOneCardLeftAndItsMatchOnTheDeck() {
+        GameSnapshot snapshot = GameSnapshot.fromJson(engine.toSnapshot());
+        String player = engine.getCurrentPlayer();
+        GameSnapshot.CardDto[] pair = findHandCardWithASiblingInTheDeck(snapshot, player);
+
+        // The cards they no longer hold go to the bottom of the deck, so all 52 are still
+        // somewhere - a snapshot that loses cards would fail CardConservationTest's premise.
+        List<GameSnapshot.CardDto> setAside = new java.util.ArrayList<>(snapshot.playerHands.get(player));
+        setAside.remove(pair[0]);
+
+        snapshot.deckRemaining.remove(pair[1]);
+        snapshot.deckRemaining.add(0, pair[1]);
+        snapshot.deckRemaining.addAll(setAside);
+        snapshot.playerHands.put(player, List.of(pair[0]));
+
+        return new RiggedDeal(YanivGameEngine.fromSnapshot(snapshot.toJson()), player,
+                GameSnapshot.toCard(pair[0]), GameSnapshot.toCard(pair[1]));
+    }
+
+    /** {hand card, its same-rank different-suit sibling still in the deck}. */
+    private GameSnapshot.CardDto[] findHandCardWithASiblingInTheDeck(GameSnapshot snapshot, String player) {
         for (GameSnapshot.CardDto inHand : snapshot.playerHands.get(player)) {
             for (GameSnapshot.CardDto inDeck : snapshot.deckRemaining) {
                 if (inDeck.rank.equals(inHand.rank) && !inDeck.suit.equals(inHand.suit)) {
-                    toDiscard = inHand;
-                    bonus = inDeck;
-                    break;
+                    return new GameSnapshot.CardDto[]{inHand, inDeck};
                 }
             }
-            if (bonus != null) break;
         }
-        if (bonus == null) {
-            throw new AssertionError("no rank in the hand has a sibling left in the deck");
-        }
+        throw new AssertionError("no rank in the hand has a sibling left in the deck");
+    }
 
-        snapshot.deckRemaining.remove(bonus);
-        snapshot.deckRemaining.add(0, bonus); // index 0 is the next card drawn
-        return new RiggedDeal(YanivGameEngine.fromSnapshot(snapshot.toJson()), player,
-                GameSnapshot.toCard(toDiscard), GameSnapshot.toCard(bonus));
+    @Test
+    @DisplayName("The bonus is not offered when taking it would leave the hand empty")
+    void theBonusIsNotOfferedWhenItWouldEmptyTheHand() {
+        RiggedDeal deal = dealWithOneCardLeftAndItsMatchOnTheDeck();
+        YanivGameEngine rigged = deal.engine();
+        assertEquals(1, rigged.getPlayerHand(deal.player()).size(), "precondition: down to one card");
+
+        rigged.processDiscard(deal.player(), List.of(deal.toDiscard()));
+        rigged.processDraw(deal.player(), "DECK", null);
+
+        assertFalse(rigged.isBonusDiscardActive(),
+                "a player cannot end a turn holding nothing - never ask a question whose yes is illegal");
+        assertEquals(1, rigged.getPlayerHand(deal.player()).size(),
+                "they keep the card they drew");
+        assertNotEquals(deal.player(), rigged.getCurrentPlayer(),
+                "with no decision to make, the turn just ends");
     }
 
     @Test

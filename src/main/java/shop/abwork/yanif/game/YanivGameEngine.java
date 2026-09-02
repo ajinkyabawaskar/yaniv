@@ -247,10 +247,15 @@ public class YanivGameEngine {
             hand.addCard(topCard);
 
             // Check for bonus discard: drawn from deck, single card discarded,
-            // and drawn card matches rank but different suit
+            // drawn card matches rank but different suit, and the player would still
+            // hold something afterwards. A player down to their last card discards it,
+            // draws its twin, and accepting would leave them with an empty hand: nothing
+            // to play on their next turn, and a score of zero nobody can beat. Never ask
+            // a question whose yes is illegal, so the turn just ends instead.
             if (lastDiscardedRank != null
                     && topCard.getRank() == lastDiscardedRank
-                    && !topCard.getSuit().equals(getSuitOfDiscardedCard())) {
+                    && !topCard.getSuit().equals(getSuitOfDiscardedCard())
+                    && hand.size() > 1) {
                 this.pendingBonusCard = topCard;
                 currentState = GameState.BONUS_DISCARD;
                 return; // Wait for player's bonus discard decision

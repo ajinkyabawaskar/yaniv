@@ -145,12 +145,17 @@ they left the hand.
 (`:256`); `DiscardPile` has no removal API. The taken card just becomes unreachable once a newer
 combination lands on top. It still appears in `getAllDiscardedCards()`.
 
-### Hand size only ever shrinks
+### Hand size only ever shrinks, and never past one
 
 A turn removes N ≥ 1 cards and adds exactly 1, so a hand never exceeds the 5 dealt. With a bonus
 discard it can shrink twice in one turn. Maximum combination length is therefore 5 — which is why
 the Ace-high heuristic in `DiscardCombination.sortSequenceCards` can never misfire in practice
 (it would need a 12-card combination).
+
+**The floor is one card, not zero.** Every other path reaches it for free: discarding the whole hand
+still draws one card back, so a five-card mixed run leaves you with one. The bonus discard was the
+only route to an empty hand, because it is the only second removal in a turn — see condition 4 of
+its trigger.
 
 ## What may be discarded
 
@@ -213,10 +218,16 @@ is always 5 cards, with its two ends drawable.
 
 A non-standard house rule built into the engine.
 
-**Trigger** — all three must hold (`processDraw:242-250`):
+**Trigger** — all four must hold (`processDraw:249-263`):
 1. the discard this turn was **exactly one card**;
 2. the draw source was **DECK** (a discard-pile draw never reaches the check);
-3. the drawn card has the **same rank but a different suit** as the discarded card.
+3. the drawn card has the **same rank but a different suit** as the discarded card;
+4. the hand holds **more than one card** after the draw — otherwise accepting would empty it.
+
+Condition 4 is the one that is easy to miss. A player down to their last card discards it, draws its
+twin, and accepting would leave them holding nothing: no legal discard on their next turn, and a
+hand score of zero that no Asaf can beat. The engine does not offer the choice at all rather than
+offer one whose "yes" is illegal, so the turn simply ends.
 
 The engine parks in `BONUS_DISCARD` and waits for `processBonusDiscard(playerId, shouldDiscard)`
 (`:282-311`). Accepting removes the card and pushes it as its **own SINGLE combination**; the player
@@ -670,6 +681,7 @@ The card-conservation, scoring and authorisation defects that used to fill this 
 | Disconnect during `BONUS_DISCARD` stalled the room | covered by the turn timer | — |
 | A *connected* player parked in `BONUS_DISCARD` stalled the room for good | every bonus decision has a deadline | `GameStateControllerTurnTimerTest.aBonusDecisionNobodyAnswersIsDeclinedInsteadOfStallingTheRoom` |
 | An accepted bonus card was buried under the discard it matched | pushed last, so it is the drawable top | `BonusDiscardTest.acceptedBonusCardIsTheTopOfThePile` |
+| A player on their last card could bonus-discard down to an empty hand | not offered when it would empty the hand | `BonusDiscardTest.theBonusIsNotOfferedWhenItWouldEmptyTheHand` |
 | The client never read `bonusDiscardActive` / `pendingBonusCard` | written to the store on every push | `GameStateMessageContractTest` |
 | `handleNextRound` never restored from a snapshot | restores like every other handler | — |
 | Reconnect during a storage outage NPE'd | returns without touching the room | — |
