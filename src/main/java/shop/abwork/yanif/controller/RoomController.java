@@ -18,6 +18,11 @@ import java.util.*;
 @CrossOrigin(origins = "*", maxAge = 3600)
 public class RoomController {
 
+    /** A table must seat at least two players. */
+    private static final int MIN_PLAYERS_LIMIT = 2;
+    /** 6 x 5 dealt cards + 1 turned up leaves a workable deck; more exhausts 52 fast. */
+    private static final int MAX_PLAYERS_LIMIT = 6;
+
     private static final Random RANDOM = new Random();
     private static final List<String> ROOM_CODE_WORDS = List.of(
             "ace", "act", "add", "age", "ago", "aid", "aim", "air", "all", "and",
@@ -91,6 +96,17 @@ public class RoomController {
             // Validate user exists
             userService.getUserById(hostUserId)
                     .orElseThrow(() -> new RuntimeException("User not found"));
+
+            // Reject an out-of-range table size: above MAX_PLAYERS_LIMIT the deal
+            // exceeds the 52-card deck and the round throws mid-deal.
+            if (request.maxPlayers != null
+                    && (request.maxPlayers < MIN_PLAYERS_LIMIT || request.maxPlayers > MAX_PLAYERS_LIMIT)) {
+                return ResponseEntity.badRequest().body(Map.of("error",
+                        "maxPlayers must be between " + MIN_PLAYERS_LIMIT + " and " + MAX_PLAYERS_LIMIT));
+            }
+            if (request.targetScore != null && request.targetScore < 1) {
+                return ResponseEntity.badRequest().body(Map.of("error", "targetScore must be at least 1"));
+            }
 
             // Generate unique room code
             String roomCode = generateUniqueRoomCode();

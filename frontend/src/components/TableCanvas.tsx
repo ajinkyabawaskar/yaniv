@@ -3,12 +3,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { soundEngine } from '../utils/soundEngine';
 import { hapticLightTick, hapticFirmSnap, hapticDoubleError } from '../utils/haptics';
 import './TableCanvas.css';
+import { Card, isValidCombination, calculateHandScore, getRankValueLow } from '../utils/yanivRules';
 
-export interface Card {
-  id: string;
-  rank: string;
-  suit: string;
-}
+export type { Card } from '../utils/yanivRules';
 
 export interface OpponentInfo {
   userId: string;
@@ -106,103 +103,9 @@ export const getSuitColor = (suit: string) => {
   }
 };
 
-export const getRankValueLow = (rank: string): number => {
-  const values: Record<string, number> = {
-    ACE: 1, TWO: 2, THREE: 3, FOUR: 4, FIVE: 5,
-    SIX: 6, SEVEN: 7, EIGHT: 8, NINE: 9, TEN: 10,
-    JACK: 11, QUEEN: 12, KING: 13,
-  };
-  return values[rank] || 0;
-};
-
-export const getRankValueHigh = (rank: string): number => {
-  const values: Record<string, number> = {
-    TWO: 2, THREE: 3, FOUR: 4, FIVE: 5,
-    SIX: 6, SEVEN: 7, EIGHT: 8, NINE: 9, TEN: 10,
-    JACK: 11, QUEEN: 12, KING: 13, ACE: 14,
-  };
-  return values[rank] || 0;
-};
-
-export const calculateHandScore = (hand: Card[]) => {
-  const rankValues: Record<string, number> = {
-    ACE: 1,
-    TWO: 2,
-    THREE: 3,
-    FOUR: 4,
-    FIVE: 5,
-    SIX: 6,
-    SEVEN: 7,
-    EIGHT: 8,
-    NINE: 9,
-    TEN: 10,
-    JACK: 10,
-    QUEEN: 10,
-    KING: 10,
-  };
-  return hand.reduce((sum, card) => sum + (rankValues[card.rank] !== undefined ? rankValues[card.rank] : 0), 0);
-};
-
-export const isValidCombination = (cards: Card[], handSize?: number): { valid: boolean; reason?: string } => {
-  if (!cards || cards.length === 0) return { valid: false, reason: 'No cards selected' };
-  if (cards.length === 1) return { valid: true };
-
-  const ranks = cards.map((c) => c.rank);
-
-  // Check for set (same rank, 2-4 cards)
-  if (new Set(ranks).size === 1) {
-    if (cards.length > 4) {
-      return { valid: false, reason: 'Sets cannot have more than 4 cards' };
-    }
-    return { valid: true };
-  }
-
-  // Check for sequence (same suit, consecutive ranks)
-  if (cards.length >= 2) {
-    const suits = new Set(cards.map((c) => c.suit));
-    const isMixedSuit = suits.size > 1;
-
-    if (isMixedSuit && (handSize === undefined || cards.length !== handSize)) {
-      return {
-        valid: false,
-        reason: 'Mixed-suit sequences are only valid if they discard your ENTIRE hand',
-      };
-    }
-
-    const hasKing = cards.some((c) => c.rank === 'KING');
-    const hasAce = cards.some((c) => c.rank === 'ACE');
-    const hasTwo = cards.some((c) => c.rank === 'TWO');
-    if (hasKing && hasAce && hasTwo) {
-      return { valid: false, reason: 'Corner-wrapping sequences (K-A-2) are strictly illegal' };
-    }
-
-    const ranksLow = cards.map((c) => getRankValueLow(c.rank)).filter((v) => v > 0);
-    const validLow = ranksLow.length === cards.length && isValidSequenceRanks(ranksLow);
-
-    const ranksHigh = cards.map((c) => getRankValueHigh(c.rank)).filter((v) => v > 0);
-    const validHigh = ranksHigh.length === cards.length && isValidSequenceRanks(ranksHigh);
-
-    if (validLow || validHigh) {
-      return { valid: true };
-    }
-  }
-
-  return {
-    valid: false,
-    reason: 'Invalid combination. Must be: single card, set (same rank, 2–4), or same-suit sequence (2+ consecutive).',
-  };
-};
-
-const isValidSequenceRanks = (ranks: number[]): boolean => {
-  if (ranks.length === 0) return false;
-  const sorted = [...ranks].sort((a, b) => a - b);
-  for (let i = 0; i < sorted.length - 1; i++) {
-    if (sorted[i + 1] - sorted[i] !== 1) {
-      return false;
-    }
-  }
-  return true;
-};
+// Discard rules live in utils/yanivRules so they can be unit tested without React,
+// and so the shared contract test can run the same cases the server runs.
+export { getRankValueLow, getRankValueHigh, calculateHandScore, isValidCombination } from '../utils/yanivRules';
 
 export default function TableCanvas({
   hand,

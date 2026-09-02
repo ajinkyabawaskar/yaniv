@@ -23,6 +23,7 @@ public class YanivGameEngine {
     private List<String> playerIds;
     private Map<String, Hand> playerHands;
     private Map<String, Integer> playerScores;
+    /** Insertion-ordered: placement is derived from elimination order. */
     private Set<String> eliminatedPlayers;
     private Deck deck;
     private DiscardPile discardPile;
@@ -72,7 +73,7 @@ public class YanivGameEngine {
             this.playerHands.put(entry.getKey(), new Hand(GameSnapshot.toCards(entry.getValue())));
         }
         this.playerScores = new HashMap<>(snapshot.playerScores);
-        this.eliminatedPlayers = new HashSet<>(snapshot.eliminatedPlayers);
+        this.eliminatedPlayers = new LinkedHashSet<>(snapshot.eliminatedPlayers);
         this.deck = new Deck(GameSnapshot.toCards(snapshot.deckRemaining));
         this.discardPile = new DiscardPile();
         if (snapshot.discardCombinations != null) {
@@ -107,7 +108,7 @@ public class YanivGameEngine {
         snapshot.playerIds = new ArrayList<>(playerIds);
         snapshot.playerHands = GameSnapshot.ofHands(playerHands);
         snapshot.playerScores = new HashMap<>(playerScores);
-        snapshot.eliminatedPlayers = new HashSet<>(eliminatedPlayers);
+        snapshot.eliminatedPlayers = new LinkedHashSet<>(eliminatedPlayers);
         snapshot.deckRemaining = GameSnapshot.ofCards(deck.getRemainingCards());
         snapshot.discardCombinations = new ArrayList<>();
         // Rebuild combinations from the pile via its public API
@@ -153,7 +154,7 @@ public class YanivGameEngine {
     private void initializeGame() {
         this.playerHands = new HashMap<>();
         this.playerScores = new HashMap<>();
-        this.eliminatedPlayers = new HashSet<>();
+        this.eliminatedPlayers = new LinkedHashSet<>();
         this.roundNumber = 1;
         this.currentPlayerIndex = 0;
         this.deck = new Deck();
@@ -184,6 +185,12 @@ public class YanivGameEngine {
     public void processDiscard(String playerId, List<Card> discardedCards) {
         if (!getCurrentPlayer().equals(playerId)) {
             throw new IllegalArgumentException("Not this player's turn");
+        }
+
+        // A second discard would overwrite pendingDiscard, stranding cards that
+        // have already left the hand but not yet reached the pile.
+        if (currentState != GameState.WAIT_FOR_TURN) {
+            throw new IllegalStateException("Cannot discard in current state: " + currentState);
         }
 
         Hand hand = playerHands.get(playerId);
@@ -249,11 +256,16 @@ public class YanivGameEngine {
                 return; // Wait for player's bonus discard decision
             }
         } else if ("DISCARD_PILE".equalsIgnoreCase(drawSource)) {
-            if (drawnCard == null || !discardPile.isDrawable(drawnCard.getId())) {
-                throw new IllegalArgumentException(
-                        "Card not drawable from discard pile: " + (drawnCard != null ? drawnCard.getId() : "null"));
+            if (drawnCard == null) {
+                throw new IllegalArgumentException("Card not drawable from discard pile: null");
             }
-            hand.addCard(drawnCard);
+            // Resolve from the pile rather than trusting the caller's object: Card
+            // equality is the id alone, so a passed-in card could carry a real id with
+            // a different rank or suit.
+            Card fromPile = discardPile.getDrawableCard(drawnCard.getId())
+                    .orElseThrow(() -> new IllegalArgumentException(
+                            "Card not drawable from discard pile: " + drawnCard.getId()));
+            hand.addCard(fromPile);
         } else {
             throw new IllegalArgumentException("Invalid draw source: " + drawSource);
         }
@@ -335,6 +347,13 @@ public class YanivGameEngine {
             throw new IllegalArgumentException("Not this player's turn");
         }
 
+        // Without this a player could discard first (excluding those cards from the
+        // scored hand while they never reach the pile), or re-send the call to reset
+        // the contest window indefinitely.
+        if (currentState != GameState.WAIT_FOR_TURN) {
+            throw new IllegalStateException("Cannot call Yaniv in current state: " + currentState);
+        }
+
         Hand hand = playerHands.get(playerId);
         int handScore = hand.calculateScore();
 
@@ -355,6 +374,9 @@ public class YanivGameEngine {
     public void contestYaniv(String playerId) {
         if (currentState != GameState.YANIV_CALLED) {
             throw new IllegalStateException("Cannot contest: no active Yaniv call");
+        }
+        if (!playerIds.contains(playerId)) {
+            throw new IllegalArgumentException("Only players in this game can contest");
         }
         if (playerId.equals(callerId)) {
             throw new IllegalArgumentException("The Yaniv caller cannot contest their own call");
@@ -456,14 +478,17 @@ public class YanivGameEngine {
         String minOpponentId = null;
         int minOpponentScore = Integer.MAX_VALUE;
 
-        for (Map.Entry<String, Integer> entry : handScores.entrySet()) {
-            String playerId = entry.getKey();
-            if (!playerId.equals(callerId)) {
-                int score = entry.getValue();
-                if (score < minOpponentScore) {
-                    minOpponentScore = score;
-                    minOpponentId = playerId;
-                }
+        // Iterate playerIds, not the map: HashMap order is arbitrary, so two opponents
+        // tied for the lowest score would otherwise be separated by hash order. Seat
+        // order makes the winner of a tie deterministic.
+        for (String playerId : playerIds) {
+            if (playerId.equals(callerId) || !handScores.containsKey(playerId)) {
+                continue;
+            }
+            int score = handScores.get(playerId);
+            if (score < minOpponentScore) {
+                minOpponentScore = score;
+                minOpponentId = playerId;
             }
         }
 
@@ -501,6 +526,13 @@ public class YanivGameEngine {
             }
         }
 
+        // The current player's discard has left their hand but has not reached the
+        // pile yet. Without this it would be regenerated into the deck and then
+        // pushed onto the pile by finalizeTurn, existing in two places at once.
+        for (Card card : pendingDiscard) {
+            heldCardIds.add(card.getId());
+        }
+
         Card.Suit[] suits = {Card.Suit.HEARTS, Card.Suit.DIAMONDS, Card.Suit.CLUBS, Card.Suit.SPADES};
         Card.Rank[] ranks = {Card.Rank.ACE, Card.Rank.TWO, Card.Rank.THREE, Card.Rank.FOUR,
                 Card.Rank.FIVE, Card.Rank.SIX, Card.Rank.SEVEN, Card.Rank.EIGHT,
@@ -534,8 +566,13 @@ public class YanivGameEngine {
      */
     private void advanceToNextPlayer() {
         currentPlayerIndex = (currentPlayerIndex + 1) % playerIds.size();
-        while (eliminatedPlayers.contains(getCurrentPlayer())) {
+        // Bounded: one full lap means every player is eliminated, which should have
+        // ended the game already. Spinning forever here would hang the request thread.
+        for (int i = 0; i < playerIds.size() && eliminatedPlayers.contains(getCurrentPlayer()); i++) {
             currentPlayerIndex = (currentPlayerIndex + 1) % playerIds.size();
+        }
+        if (eliminatedPlayers.contains(getCurrentPlayer())) {
+            throw new IllegalStateException("No active players left to take a turn");
         }
         currentState = GameState.WAIT_FOR_TURN;
     }
@@ -593,9 +630,16 @@ public class YanivGameEngine {
     }
 
     /**
-     * Apply halving rule: if score is a multiple of 50, halve the total score.
+     * Halve a score that this round moved ONTO an exact multiple of 50.
+     *
+     * The round must actually have changed the score: a player parked on a multiple
+     * of 50 who then scores 0 keeps their total. Halving on every round end instead
+     * would keep re-halving an unchanged score (100 -> 50 -> 25).
      */
-    private void applyHalvingRule(String playerId) {
+    private void applyHalvingRule(String playerId, int roundScore) {
+        if (roundScore == 0) {
+            return;
+        }
         int score = playerScores.getOrDefault(playerId, 0);
         if (score > 0 && score % 50 == 0) {
             playerScores.put(playerId, score / 2);
@@ -607,31 +651,94 @@ public class YanivGameEngine {
      * Determine winner if only one player left.
      */
     private void checkEliminations() {
-        for (String playerId : playerIds) {
-            if (!eliminatedPlayers.contains(playerId)) {
-                applyHalvingRule(playerId);
+        // Who was still playing before this round's eliminations are applied. If they
+        // all cross the target at once, the winner is decided among exactly these.
+        List<String> activeBefore = playerIds.stream()
+                .filter(p -> !eliminatedPlayers.contains(p))
+                .toList();
 
-                if (playerScores.get(playerId) >= targetScore) {
-                    eliminatedPlayers.add(playerId);
-                }
+        for (String playerId : activeBefore) {
+            applyHalvingRule(playerId, roundScores.getOrDefault(playerId, 0));
+
+            if (playerScores.get(playerId) >= targetScore) {
+                eliminatedPlayers.add(playerId);
+                // Hand back their cards. An eliminated player is never dealt to again, so
+                // an uncleared hand would sit there forever: shown to clients as a phantom
+                // card count, and counted as neither held nor in the deck when the deck is
+                // rebuilt, so those ids end up in two places at once.
+                playerHands.put(playerId, new Hand());
             }
         }
 
-        // Check if only one player left
-        long activePlayers = playerIds.stream()
+        List<String> stillActive = playerIds.stream()
                 .filter(p -> !eliminatedPlayers.contains(p))
-                .count();
+                .toList();
 
-        if (activePlayers <= 1) {
-            winnerId = playerIds.stream()
-                    .filter(p -> !eliminatedPlayers.contains(p))
-                    .findFirst()
-                    .orElse(null);
-            currentState = GameState.GAME_OVER;
-        } else {
+        if (stillActive.size() > 1) {
             // Set state to ROUND_OVER for UI to show results
             currentState = GameState.ROUND_OVER;
+            return;
         }
+
+        if (stillActive.size() == 1) {
+            winnerId = stillActive.get(0);
+        } else {
+            // Everyone crossed the target in the same round: the lowest running score
+            // among them wins. An exact tie is a genuine draw, and winnerId stays null.
+            winnerId = lowestScorerOrNullOnTie(activeBefore);
+        }
+        currentState = GameState.GAME_OVER;
+    }
+
+    /**
+     * The single lowest-scoring player among the candidates, or null when two or more
+     * share the lowest score.
+     */
+    private String lowestScorerOrNullOnTie(List<String> candidates) {
+        String best = null;
+        int bestScore = Integer.MAX_VALUE;
+        boolean tied = false;
+        for (String playerId : candidates) {
+            int score = playerScores.getOrDefault(playerId, 0);
+            if (score < bestScore) {
+                bestScore = score;
+                best = playerId;
+                tied = false;
+            } else if (score == bestScore) {
+                tied = true;
+            }
+        }
+        return tied ? null : best;
+    }
+
+    /**
+     * Finishing order, best first: the winner, then players in reverse elimination
+     * order (last knocked out places highest). Used to persist placement.
+     *
+     * @return empty when the game ended without a winner — a draw has no placements
+     */
+    public List<String> getFinishingOrder() {
+        // No winner means a draw. Reversed elimination order would otherwise put the
+        // last player knocked out at index 0 and hand them first place.
+        if (winnerId == null) {
+            return List.of();
+        }
+
+        List<String> order = new ArrayList<>();
+        order.add(winnerId);
+        List<String> eliminated = new ArrayList<>(eliminatedPlayers);
+        Collections.reverse(eliminated);
+        for (String playerId : eliminated) {
+            if (!playerId.equals(winnerId)) {
+                order.add(playerId);
+            }
+        }
+        for (String playerId : playerIds) {
+            if (!order.contains(playerId)) {
+                order.add(playerId);
+            }
+        }
+        return order;
     }
 
     /**
@@ -671,10 +778,14 @@ public class YanivGameEngine {
         Card initialDiscard = deck.drawCard();
         discardPile.addCombination(List.of(initialDiscard), DiscardCombination.Type.SINGLE, -1);
 
-        // Find next active player to start the round
+        // Find next active player to start the round (bounded: a full lap means
+        // nobody is left, which checkEliminations should already have caught)
         currentPlayerIndex = (currentPlayerIndex + 1) % playerIds.size();
-        while (eliminatedPlayers.contains(getCurrentPlayer())) {
+        for (int i = 0; i < playerIds.size() && eliminatedPlayers.contains(getCurrentPlayer()); i++) {
             currentPlayerIndex = (currentPlayerIndex + 1) % playerIds.size();
+        }
+        if (eliminatedPlayers.contains(getCurrentPlayer())) {
+            throw new IllegalStateException("No active players left to start a round");
         }
 
         currentState = GameState.WAIT_FOR_TURN;

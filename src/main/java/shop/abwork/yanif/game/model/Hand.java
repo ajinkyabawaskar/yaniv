@@ -54,7 +54,7 @@ public class Hand {
 
     /**
      * Calculate the total score (sum of card values).
-     * Jokers count as 0, face cards (J, Q, K) count as 10.
+     * Ace counts as 1, face cards (J, Q, K) count as 10. There are no Jokers.
      */
     public int calculateScore() {
         return cards.stream()

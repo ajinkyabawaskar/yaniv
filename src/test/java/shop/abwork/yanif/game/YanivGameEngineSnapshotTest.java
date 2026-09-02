@@ -140,6 +140,10 @@ class YanivGameEngineSnapshotTest {
     /**
      * Play one deterministic turn for the given player: discard their highest-value card,
      * draw from deck. Mirrors what AutoPlayStrategy does in its simplest form.
+     *
+     * A deck draw matching the discarded rank parks the engine in BONUS_DISCARD without
+     * finalising the turn, so decline it (as AutoPlayStrategy does) to guarantee the turn
+     * completes regardless of how the deck shuffled.
      */
     private void playWorstCardTurn(YanivGameEngine engine, String playerId) {
         if (!engine.getCurrentPlayer().equals(playerId)) {
@@ -154,5 +158,8 @@ class YanivGameEngineSnapshotTest {
                 .orElseThrow();
         engine.processDiscard(playerId, List.of(worst));
         engine.processDraw(playerId, "DECK", null);
+        if (engine.isBonusDiscardActive()) {
+            engine.processBonusDiscard(playerId, false);
+        }
     }
 }

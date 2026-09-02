@@ -100,18 +100,43 @@ public class YanivRulesTest {
     }
 
     @Test
-    @DisplayName("Special Rule: Mixed-Suit Sequence ONLY valid if clearing entire hand")
-    void testMixedSuitHandClearSequence() {
+    @DisplayName("Special Rule: Mixed-Suit Sequence ONLY valid at exactly 5 cards")
+    void testMixedSuitSequenceRequiresFiveCards() {
+        Card threeS = new Card("3S", Card.Suit.SPADES, Card.Rank.THREE);
         Card fourH = new Card("4H", Card.Suit.HEARTS, Card.Rank.FOUR);
         Card fiveS = new Card("5S", Card.Suit.SPADES, Card.Rank.FIVE);
         Card sixD = new Card("6D", Card.Suit.DIAMONDS, Card.Rank.SIX);
-        List<Card> mixedRun = List.of(fourH, fiveS, sixD);
+        Card sevenH = new Card("7H", Card.Suit.HEARTS, Card.Rank.SEVEN);
 
-        // Valid if handSize == 3 (clearing entire hand)
-        assertTrue(CardCombinationValidator.isValidCombination(mixedRun, 3));
+        List<Card> fiveCardMixedRun = List.of(threeS, fourH, fiveS, sixD, sevenH);
+        assertTrue(CardCombinationValidator.isValidCombination(fiveCardMixedRun, 5),
+                "A 5-card mixed-suit run is the only legal mixed-suit sequence");
 
-        // Strictly ILLEGAL if handSize == 5 (cards remain in hand)
-        assertFalse(CardCombinationValidator.isValidCombination(mixedRun, 5));
+        // Shorter mixed-suit runs are illegal even when they would empty the hand.
+        List<Card> threeCardMixedRun = List.of(fourH, fiveS, sixD);
+        assertFalse(CardCombinationValidator.isValidCombination(threeCardMixedRun, 3),
+                "A 3-card mixed-suit run is illegal even though it clears the hand");
+        assertFalse(CardCombinationValidator.isValidCombination(threeCardMixedRun, 5),
+                "A 3-card mixed-suit run is illegal with cards remaining");
+
+        List<Card> fourCardMixedRun = List.of(fourH, fiveS, sixD, sevenH);
+        assertFalse(CardCombinationValidator.isValidCombination(fourCardMixedRun, 4),
+                "A 4-card mixed-suit run is illegal even though it clears the hand");
+    }
+
+    @Test
+    @DisplayName("Same-suit sequences stay legal at any length, hand-clearing or not")
+    void testPureSequenceUnaffectedByMixedSuitRule() {
+        Card threeH = new Card("3H", Card.Suit.HEARTS, Card.Rank.THREE);
+        Card fourH = new Card("4H", Card.Suit.HEARTS, Card.Rank.FOUR);
+        Card fiveH = new Card("5H", Card.Suit.HEARTS, Card.Rank.FIVE);
+
+        assertTrue(CardCombinationValidator.isValidCombination(List.of(threeH, fourH), 5),
+                "A 2-card same-suit run is legal with cards remaining");
+        assertTrue(CardCombinationValidator.isValidCombination(List.of(threeH, fourH, fiveH), 5),
+                "A 3-card same-suit run is legal with cards remaining");
+        assertTrue(CardCombinationValidator.isValidCombination(List.of(threeH, fourH, fiveH), 3),
+                "A 3-card same-suit run is legal when it clears the hand");
     }
 
     // ==========================================
@@ -164,17 +189,24 @@ public class YanivRulesTest {
     }
 
     @Test
-    @DisplayName("Pickup Test Case 7, 8: [4♥, 5♠, 6♦] (Mixed Hand Clear) -> Pick ends [4♥], [6♦] VALID, middle [5♠] INVALID")
+    @DisplayName("Pickup Test Case 7, 8: [3♠, 4♥, 5♠, 6♦, 7♥] (Mixed Hand Clear) -> Pick ends [3♠], [7♥] VALID, middles INVALID")
     void testPickupTestCase7_8_MixedSequenceEndsOnly() {
+        // A mixed-suit sequence is only legal at a full hand, so the pile can only
+        // ever hold a 5-card one.
+        Card threeS = new Card("3S", Card.Suit.SPADES, Card.Rank.THREE);
         Card fourH = new Card("4H", Card.Suit.HEARTS, Card.Rank.FOUR);
         Card fiveS = new Card("5S", Card.Suit.SPADES, Card.Rank.FIVE);
         Card sixD = new Card("6D", Card.Suit.DIAMONDS, Card.Rank.SIX);
+        Card sevenH = new Card("7H", Card.Suit.HEARTS, Card.Rank.SEVEN);
 
-        discardPile.addCombination(List.of(fourH, fiveS, sixD), DiscardCombination.Type.MIXED_SEQUENCE, 3);
+        discardPile.addCombination(List.of(threeS, fourH, fiveS, sixD, sevenH),
+                DiscardCombination.Type.MIXED_SEQUENCE, 5);
 
-        assertTrue(discardPile.isDrawable("4H"), "First card 4H of mixed sequence should be drawable");
-        assertTrue(discardPile.isDrawable("6D"), "Last card 6D of mixed sequence should be drawable");
+        assertTrue(discardPile.isDrawable("3S"), "First card 3S of mixed sequence should be drawable");
+        assertTrue(discardPile.isDrawable("7H"), "Last card 7H of mixed sequence should be drawable");
+        assertFalse(discardPile.isDrawable("4H"), "Middle card 4H of mixed sequence must NOT be drawable");
         assertFalse(discardPile.isDrawable("5S"), "Middle card 5S of mixed sequence must NOT be drawable");
+        assertFalse(discardPile.isDrawable("6D"), "Middle card 6D of mixed sequence must NOT be drawable");
         assertEquals(2, discardPile.getDrawableCards().size());
     }
 }

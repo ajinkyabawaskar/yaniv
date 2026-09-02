@@ -148,8 +148,9 @@ public final class AutoPlayStrategy {
             candidates.addAll(sequenceWindows(suitCards));
         }
 
-        // Mixed-suit full-hand sequence (only legal when it empties the hand)
-        if (cards.size() >= 3 && CardCombinationValidator.isValidSequence(cards, handSize)) {
+        // Mixed-suit sequence (only legal at exactly a full hand's worth of cards)
+        if (cards.size() == CardCombinationValidator.FULL_HAND_SIZE
+                && CardCombinationValidator.isValidSequence(cards, handSize)) {
             candidates.add(new ArrayList<>(cards));
         }
 

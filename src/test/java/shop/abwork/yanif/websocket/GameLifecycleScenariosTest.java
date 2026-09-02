@@ -16,6 +16,7 @@ import org.springframework.web.socket.messaging.SessionDisconnectEvent;
 import shop.abwork.yanif.entity.Game;
 import shop.abwork.yanif.entity.GamePlayer;
 import shop.abwork.yanif.entity.User;
+import shop.abwork.yanif.game.GameSnapshot;
 import shop.abwork.yanif.game.YanivGameEngine;
 import shop.abwork.yanif.game.model.Hand;
 import shop.abwork.yanif.service.GameService;
@@ -23,6 +24,7 @@ import shop.abwork.yanif.service.PresenceService;
 import shop.abwork.yanif.service.UserService;
 
 import java.lang.reflect.Field;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -88,6 +90,18 @@ class GameLifecycleScenariosTest {
 
         when(userService.getUserById(HOST)).thenReturn(Optional.of(new User("f1", "Host", "AAAAAA")));
         when(userService.getUserById(OTHER)).thenReturn(Optional.of(new User("f2", "Other", "BBBBBB")));
+
+        // The broadcast resolves every player's name in one batch call.
+        User hostUser = new User("f1", "Host", "AAAAAA");
+        User otherUser = new User("f2", "Other", "BBBBBB");
+        when(userService.getUsersByIds(any())).thenAnswer(inv -> {
+            Map<String, User> byId = new HashMap<>();
+            for (Object id : (Iterable<?>) inv.getArgument(0)) {
+                if (HOST.equals(id)) byId.put(HOST, hostUser);
+                if (OTHER.equals(id)) byId.put(OTHER, otherUser);
+            }
+            return byId;
+        });
 
         when(gameService.getActiveGames()).thenReturn(List.of(roomGame));
 
@@ -459,7 +473,7 @@ class GameLifecycleScenariosTest {
                 && snapshotStore.get(ROOM) == null, 20_000);
         assertTrue(finished, "auto-play chain should drive the all-disconnected game to GAME_OVER");
 
-        verify(gameService).finishGame(eq(ROOM), anyString());
+        verify(gameService).completeGame(eq(ROOM), anyString(), anyList(), anyMap());
 
         // E10: post-cleanup actions fail cleanly without resurrecting anything
         controller.handleGameAction(ROOM, discardAction(HOST, List.of("card_1")), auth(HOST));
@@ -661,6 +675,12 @@ class GameLifecycleScenariosTest {
         String cardId = engineFromSnapshot().getPlayerHand(current).getCards().get(0).getId();
         controller.handleGameAction(ROOM, discardAction(current, List.of(cardId)), auth(current));
 
+        // A deck draw matching the discarded rank parks the turn in BONUS_DISCARD.
+        // Settle it so the turn always completes, whatever the deck shuffled.
+        if (engineFromSnapshot().getCurrentState() == YanivGameEngine.GameState.BONUS_DISCARD) {
+            controller.handleGameAction(ROOM, bonusDiscardAction(current, false), auth(current));
+        }
+
         try { Thread.sleep(1800); } catch (InterruptedException ignored) { }
         assertTrue(messagesFor(current).stream().noneMatch(m -> current.equals(m.autoPlayedPlayerId)));
         assertNotEquals(current, engineFromSnapshot().getCurrentPlayer(), "exactly the human move applied");
@@ -823,6 +843,240 @@ class GameLifecycleScenariosTest {
     private Boolean isYanivCalledSafe() {
         YanivGameEngine e = engineFromSnapshot();
         return e != null ? e.isYanivCalled() : null;
+    }
+
+    @Test
+    void E5_finalRound_isPersisted_whenGameEnds() {
+        startStartedGame();
+
+        // Craft a deterministic finish: HOST holds 1 point, OTHER holds 10, target 5.
+        // HOST calls Yaniv and is not beaten, so OTHER takes 10, crosses the target and
+        // is eliminated -- leaving one active player, so the round goes straight to
+        // GAME_OVER without ever passing through ROUND_OVER.
+        GameSnapshot snap = GameSnapshot.fromJson(liveEngine().toSnapshot());
+        Map<String, List<GameSnapshot.CardDto>> hands = new HashMap<>();
+        hands.put(HOST, List.of(new GameSnapshot.CardDto("card_1", "HEARTS", "ACE")));
+        hands.put(OTHER, List.of(new GameSnapshot.CardDto("card_13", "HEARTS", "KING")));
+        snap.playerHands = hands;
+        snap.playerScores = new HashMap<>(Map.of(HOST, 0, OTHER, 0));
+        snap.targetScore = 5;
+        snap.currentPlayerIndex = snap.playerIds.indexOf(HOST);
+        snap.currentState = YanivGameEngine.GameState.WAIT_FOR_TURN.name();
+
+        YanivGameEngine crafted = YanivGameEngine.fromSnapshot(snap.toJson());
+        enginesMap().put(ROOM, crafted);
+
+        controller.callYaniv(ROOM, new GameStateController.YanivCallMessage(), auth(HOST));
+        controller.contestYaniv(ROOM, new GameStateController.ContestYanivMessage(), auth(OTHER));
+
+        assertTrue(crafted.isGameOver(), "precondition: this round ends the game");
+        assertFalse(crafted.isRoundOver(), "precondition: it never passes through ROUND_OVER");
+
+        verify(gameService, times(1)).saveRoundHistory(eq(ROOM), eq(1), anyString(),
+                anyBoolean(), nullable(String.class), anyString());
+    }
+
+    @Test
+    void E5b_finalStandings_persistedWithPlacement() {
+        startStartedGame();
+
+        GameSnapshot snap = GameSnapshot.fromJson(liveEngine().toSnapshot());
+        Map<String, List<GameSnapshot.CardDto>> hands = new HashMap<>();
+        hands.put(HOST, List.of(new GameSnapshot.CardDto("card_1", "HEARTS", "ACE")));
+        hands.put(OTHER, List.of(new GameSnapshot.CardDto("card_13", "HEARTS", "KING")));
+        snap.playerHands = hands;
+        snap.playerScores = new HashMap<>(Map.of(HOST, 0, OTHER, 0));
+        snap.targetScore = 5;
+        snap.currentPlayerIndex = snap.playerIds.indexOf(HOST);
+        snap.currentState = YanivGameEngine.GameState.WAIT_FOR_TURN.name();
+        enginesMap().put(ROOM, YanivGameEngine.fromSnapshot(snap.toJson()));
+
+        controller.callYaniv(ROOM, new GameStateController.YanivCallMessage(), auth(HOST));
+        controller.contestYaniv(ROOM, new GameStateController.ContestYanivMessage(), auth(OTHER));
+
+        // HOST survives, OTHER is knocked out: winner first, then reverse elimination.
+        // Finish + standings are one transactional unit, so a partial failure cannot
+        // leave a FINISHED row with no standings.
+        verify(gameService, times(1)).completeGame(eq(ROOM), eq(HOST), eq(List.of(HOST, OTHER)), anyMap());
+    }
+
+    @Test
+    void F4_nextRound_byNonMember_rejected() throws Exception {
+        reachRoundOverViaContest();
+        int roundBefore = engineFromSnapshot().getRoundNumber();
+
+        controller.handleNextRound(ROOM, auth("outsider"));
+
+        assertEquals(roundBefore, engineFromSnapshot().getRoundNumber(),
+                "a non-member must not be able to advance someone else's round");
+    }
+
+    @Test
+    void F5_startOnFinishedGame_rejected() {
+        roomGame.setStatus(Game.GameStatus.FINISHED);
+
+        controller.startGame(ROOM, auth(HOST));
+
+        assertNull(enginesMap().get(ROOM), "a finished game must not be re-dealt");
+        assertEquals(Game.GameStatus.FINISHED, roomGame.getStatus(), "status must stay FINISHED");
+    }
+
+    @Test
+    void F6_unknownActionType_errorsWithoutPersistingOrBroadcasting() {
+        startStartedGame();
+        String current = engineFromSnapshot().getCurrentPlayer();
+        String snapshotBefore = snapshotStore.get(ROOM);
+
+        GameStateController.GameActionMessage bogus = new GameStateController.GameActionMessage();
+        bogus.actionType = "NOT_A_REAL_ACTION";
+        bogus.playerId = current;
+        controller.handleGameAction(ROOM, bogus, auth(current));
+
+        assertEquals(snapshotBefore, snapshotStore.get(ROOM),
+                "an unknown action must not persist a new snapshot");
+        assertTrue(messagesFor(current).stream().anyMatch(m -> m.error != null),
+                "an unknown action must report an error rather than silently succeed");
+    }
+
+    @Test
+    void F7_broadcast_usesAConstantNumberOfQueries() {
+        startStartedGame();
+        String current = engineFromSnapshot().getCurrentPlayer();
+
+        clearInvocations(gameService, userService);
+
+        String cardId = engineFromSnapshot().getPlayerHand(current).getCards().get(0).getId();
+        controller.handleGameAction(ROOM, discardAction(current, List.of(cardId)), auth(current));
+        if (engineFromSnapshot().getCurrentState() == YanivGameEngine.GameState.BONUS_DISCARD) {
+            clearInvocations(gameService, userService);
+            controller.handleGameAction(ROOM, bonusDiscardAction(current, false), auth(current));
+        }
+
+        // One mutation broadcasts to every player, but the per-room lookups happen once,
+        // not once per recipient. Previously this was O(N^2) in round-trips.
+        verify(gameService, times(1)).getGamePlayers(ROOM);
+        verify(gameService, times(1)).getGameById(ROOM);
+        verify(userService, times(1)).getUsersByIds(any());
+        verify(userService, never()).getUserById(anyString());
+    }
+
+    @Test
+    void F8_eliminatedPlayerHoldsNoCards() {
+        startStartedGame();
+
+        GameSnapshot snap = GameSnapshot.fromJson(liveEngine().toSnapshot());
+        Map<String, List<GameSnapshot.CardDto>> hands = new HashMap<>();
+        hands.put(HOST, List.of(new GameSnapshot.CardDto("card_1", "HEARTS", "ACE")));
+        hands.put(OTHER, List.of(new GameSnapshot.CardDto("card_13", "HEARTS", "KING")));
+        snap.playerHands = hands;
+        snap.playerScores = new HashMap<>(Map.of(HOST, 0, OTHER, 0));
+        snap.targetScore = 5;
+        snap.currentPlayerIndex = snap.playerIds.indexOf(HOST);
+        snap.currentState = YanivGameEngine.GameState.WAIT_FOR_TURN.name();
+        YanivGameEngine crafted = YanivGameEngine.fromSnapshot(snap.toJson());
+        enginesMap().put(ROOM, crafted);
+
+        controller.callYaniv(ROOM, new GameStateController.YanivCallMessage(), auth(HOST));
+        controller.contestYaniv(ROOM, new GameStateController.ContestYanivMessage(), auth(OTHER));
+
+        assertTrue(crafted.getEliminatedPlayers().contains(OTHER), "precondition: OTHER is out");
+        assertEquals(0, crafted.getPlayerHand(OTHER).size(),
+                "an eliminated player must not keep phantom cards");
+
+        GameStateController.GameStateMessage last = messagesFor(HOST).get(messagesFor(HOST).size() - 1);
+        assertEquals(0, last.opponentCounts.get(OTHER),
+                "the UI must not be told an eliminated player still holds cards");
+    }
+
+    // ------------------------------------------------- G. idle engine eviction
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Long> lastTouchedMap() {
+        try {
+            Field f = GameStateController.class.getDeclaredField("engineLastTouched");
+            f.setAccessible(true);
+            return (Map<String, Long>) f.get(controller);
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** Pretend nobody has touched this room for the given number of minutes. */
+    private void ageEngine(String roomId, long minutes) {
+        lastTouchedMap().put(roomId, System.currentTimeMillis() - minutes * 60_000L);
+    }
+
+    @Test
+    void G1_idleEngine_isEvictedFromMemory() {
+        startStartedGame();
+        assertNotNull(liveEngine(), "precondition: engine is live");
+
+        ageEngine(ROOM, 120);
+        controller.evictIdleEngines();
+
+        assertNull(enginesMap().get(ROOM), "an idle engine must be dropped from memory");
+        assertNull(lastTouchedMap().get(ROOM), "its timestamp must go with it");
+    }
+
+    @Test
+    void G2_recentlyTouchedEngine_isKept() {
+        startStartedGame();
+
+        controller.evictIdleEngines();
+
+        assertNotNull(enginesMap().get(ROOM), "a game in active use must never be evicted");
+    }
+
+    @Test
+    void G3_evictedEngine_isRestoredFromSnapshotOnNextTouch() {
+        startStartedGame();
+        int roundBefore = liveEngine().getRoundNumber();
+        String currentBefore = liveEngine().getCurrentPlayer();
+
+        ageEngine(ROOM, 120);
+        controller.evictIdleEngines();
+        assertNull(enginesMap().get(ROOM), "precondition: evicted");
+
+        // Any player touching the room brings it back from the Redis snapshot.
+        controller.getGameState(ROOM, auth(HOST));
+
+        YanivGameEngine restored = enginesMap().get(ROOM);
+        assertNotNull(restored, "eviction must be recoverable: the snapshot is the source of truth");
+        assertEquals(roundBefore, restored.getRoundNumber(), "restored game must be the same game");
+        assertEquals(currentBefore, restored.getCurrentPlayer(), "turn must survive eviction");
+    }
+
+    @Test
+    void G4_evictionClearsPerRoomBookkeeping() {
+        startStartedGame();
+        // Drop a player whose turn it is NOT, so no auto-play timer is armed and the
+        // room is genuinely idle (G5 covers the pending-timer case).
+        String current = engineFromSnapshot().getCurrentPlayer();
+        String waiting = current.equals(HOST) ? OTHER : HOST;
+        controller.handleSessionDisconnect(disconnectEvent(waiting));
+        assertTrue(disconnectedMap().containsKey(ROOM), "precondition: room has disconnect state");
+
+        ageEngine(ROOM, 120);
+        controller.evictIdleEngines();
+
+        assertFalse(disconnectedMap().containsKey(ROOM),
+                "per-room bookkeeping must not outlive the engine it belongs to");
+    }
+
+    @Test
+    void G5_roomWithAPendingTimer_isNotEvicted() throws Exception {
+        startStartedGame();
+        YanivGameEngine engine = liveEngine();
+        setEngineField(engine, "yanivThreshold", 200);
+        String caller = engine.getCurrentPlayer();
+        controller.callYaniv(ROOM, new GameStateController.YanivCallMessage(), auth(caller));
+
+        // A contest timer is now armed for this room.
+        ageEngine(ROOM, 120);
+        controller.evictIdleEngines();
+
+        assertNotNull(enginesMap().get(ROOM),
+                "a room with work still scheduled against it must not be evicted");
     }
 
     @Test

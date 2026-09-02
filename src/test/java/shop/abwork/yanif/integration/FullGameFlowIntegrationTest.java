@@ -381,16 +381,20 @@ class FullGameFlowIntegrationTest {
         assertFalse(discardPile3.isDrawable("4H")); // Middle - NOT drawable
         assertEquals(2, discardPile3.getDrawableCards().size());
 
-        // Test 4: Mixed sequence (hand clear) - only ends drawable
+        // Test 4: Mixed sequence (hand clear, always 5 cards) - only ends drawable
         DiscardPile discardPile4 = new DiscardPile();
+        Card threeSpades = new Card("3S", Card.Suit.SPADES, Card.Rank.THREE);
         Card fourHearts2 = new Card("4H2", Card.Suit.HEARTS, Card.Rank.FOUR);
         Card fiveSpades = new Card("5S", Card.Suit.SPADES, Card.Rank.FIVE);
         Card sixDiamonds = new Card("6D", Card.Suit.DIAMONDS, Card.Rank.SIX);
-        discardPile4.addCombination(List.of(fourHearts2, fiveSpades, sixDiamonds),
-                                    DiscardCombination.Type.MIXED_SEQUENCE, 3);
-        assertTrue(discardPile4.isDrawable("4H2"));
-        assertTrue(discardPile4.isDrawable("6D"));
+        Card sevenHearts2 = new Card("7H2", Card.Suit.HEARTS, Card.Rank.SEVEN);
+        discardPile4.addCombination(List.of(threeSpades, fourHearts2, fiveSpades, sixDiamonds, sevenHearts2),
+                                    DiscardCombination.Type.MIXED_SEQUENCE, 5);
+        assertTrue(discardPile4.isDrawable("3S"));
+        assertTrue(discardPile4.isDrawable("7H2"));
+        assertFalse(discardPile4.isDrawable("4H2"));
         assertFalse(discardPile4.isDrawable("5S"));
+        assertFalse(discardPile4.isDrawable("6D"));
         assertEquals(2, discardPile4.getDrawableCards().size());
     }
 

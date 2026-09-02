@@ -16,6 +16,7 @@ Yanif is an online multiplayer Yaniv card game: a Spring Boot backend serving bo
 ./mvnw test -Dtest=YanivRulesTest#methodName  # single test method
 mvn clean package                        # build JAR (target/)
 ./mvnw spring-boot:run                   # run backend on :8080
+./scripts/install-hooks.sh               # once per clone: enable the engine-doc pre-commit check
 ```
 
 Backend tests use H2 in-memory via the `test` profile (`src/test/resources/application-test.yml`) and exercise `GameService` directly (not WebSocket controllers), so they need no external services.
@@ -57,9 +58,9 @@ Auth: JWT (jjwt) via `JwtAuthenticationFilter`. The HTTP endpoint `/ws/**` is pe
 
 `GameStateController` holds `Map<String, YanivGameEngine>` — active game engines live only in server memory (restarting the server drops games in progress). `YanivGameEngine` (`game/`) is the pure rules engine; `game/model/` has Card/Deck/Hand/DiscardPile and `game/validator/CardCombinationValidator` validates sets/runs before discard. Only outcomes persist to MySQL via JPA entities: `User`, `Game`, `GamePlayer`, `RoundHistory`, `Friendship` (scores/history survive restarts).
 
-Other in-memory machinery inside `GameStateController` worth knowing about: a `ScheduledExecutorService` drives Yaniv contest timers **and per-turn timers for disconnected players** — when a *disconnected* player's turn timer (`game.turn-timer-seconds`) expires, `AutoPlayStrategy` plays the best move on their behalf (connected players are never auto-played; round-over only self-advances when all active players are offline). `finishMutation` is the single post-mutation hook: persist snapshot → bookkeeping → schedule next timer → broadcast. Full engine state is snapshotted to Redis after every mutation (`game:{id}:state` via `GameService.saveGameState`, serialized by `game/GameSnapshot`), so a restarted server restores games instead of re-dealing; snapshots are only trusted while MySQL says `IN_PROGRESS`, and storage outages never abort a room to LOBBY. Action IDs are deduplicated per player, and disconnect/reconnect handling keeps disconnected players "in" an active game (`SessionDisconnectEvent`/`SessionConnectedEvent` listeners) until the game ends.
+Other in-memory machinery inside `GameStateController` worth knowing about: a `ScheduledExecutorService` drives Yaniv contest timers **and per-turn timers for disconnected players** — when a *disconnected* player's turn comes up, `AutoPlayStrategy` plays the best move on their behalf after a hard-coded 800ms (**not** `game.turn-timer-seconds`, which is only a display field and the round-over advance delay). Connected players are never auto-played, and round-over only self-advances when all active players are offline. Note `game.auto-play-enabled` ships as `false`, so none of this runs in production — see `docs/game-engine.md`. `finishMutation` is the single post-mutation hook: persist snapshot → bookkeeping → schedule next timer → broadcast. Full engine state is snapshotted to Redis after every mutation (`game:{id}:state` via `GameService.saveGameState`, serialized by `game/GameSnapshot`), so a restarted server restores games instead of re-dealing; snapshots are only trusted while MySQL says `IN_PROGRESS`, and storage outages never abort a room to LOBBY. Action IDs are deduplicated per player, and disconnect/reconnect handling keeps disconnected players "in" an active game (`SessionDisconnectEvent`/`SessionConnectedEvent` listeners) until the game ends.
 
-- **Redis** is used only for presence: `PresenceService` stores TTL'd statuses (`ONLINE`, `OFFLINE`, `IN_GAME`, `DISCONNECTED_IN_GAME`) keyed by userId, refreshed by client heartbeats (`PresenceController`).
+- **Redis** holds the game snapshots described above plus presence: `PresenceService` stores TTL'd statuses (`ONLINE`, `OFFLINE`, `IN_GAME`, `DISCONNECTED_IN_GAME`) keyed by userId, refreshed by client heartbeats (`PresenceController`).
 
 ### Frontend structure
 
@@ -67,10 +68,53 @@ React 18 + CRA + TypeScript. State is Zustand stores (`stores/authStore.ts`, `st
 
 When adding a game feature, the path is typically: engine method in `YanivGameEngine` → message handler in `GameStateController` → state push to `/user/queue/game-state` → handler in `GameView.tsx` writing to `gameStore`.
 
+## Keeping the engine docs in sync
+
+`docs/game-engine.md` is the authoritative spec for the rules engine, and `CONTEXT.md` is the
+domain glossary. Both are hand-maintained, so they only stay true if changes carry them along.
+
+**When you change any of these, update `docs/game-engine.md` in the same commit:**
+
+- anything under `src/main/java/shop/abwork/yanif/game/`
+- `websocket/GameStateController.java`
+- a `game.*` key in `application.properties`
+
+Update the affected section, not the whole file, and keep the `file:line` citations pointing at the
+code you changed. If the change introduces or fixes something in the **Known defects** section, edit
+that entry too. New domain vocabulary goes in `CONTEXT.md`.
+
+**The discard rules are implemented twice** — `CardCombinationValidator.java` (authoritative) and
+`frontend/src/utils/yanivRules.ts` (so the UI can grey out illegal selections without a round trip).
+`shared/rules-contract.json` is a single case table both are tested against
+(`RulesContractTest.java` and `yanivRules.contract.test.ts`). **Change a rule and you must change
+both implementations and add a case to the contract file** — otherwise one of the two tests fails.
+
+`scripts/hooks/pre-commit` enforces the doc rule: a commit touching engine files without touching
+`docs/game-engine.md` is rejected. Run `./scripts/install-hooks.sh` once per clone to enable it.
+For a change that genuinely cannot affect documented behaviour — a rename, a comment, a pure
+refactor — bypass it with `git commit --no-verify`.
+
 ## Reference docs
 
+- `CONTEXT.md` — **the domain glossary; read this first**
+- `docs/game-engine.md` — **the authoritative rules, scoring and lifecycle spec**
+- `shared/rules-contract.json` — shared rule cases pinning the Java and TypeScript validators together
 - `docs/prd.md` — product requirements
 - `docs/yaniv-rules.md` — game rules (scoring, asaf penalties, valid combinations)
 - `docs/ui-ux-spec.md` — UI spec
 - `docs/automated-tests.md` — full testing guide
 - `docs/mysql.setup.md`, `docs/redis-setup.md`, `docs/build-deploy.md` — infrastructure
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues on `ajinkyabawaskar/yaniv`, driven by the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical triage roles, each label string equal to its role name. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.

@@ -1,0 +1,171 @@
+{
+  "_comment": [
+    "Shared contract between the two implementations of the Yaniv discard rules:",
+    "  server  - src/main/java/shop/abwork/yanif/game/validator/CardCombinationValidator.java",
+    "  client  - frontend/src/utils/yanivRules.ts",
+    "The client copy exists so the UI can grey out illegal selections without a round",
+    "trip. It is not authoritative, but if the two drift the UI either offers moves the",
+    "server rejects or blocks legal ones.",
+    "",
+    "Both are tested against this file:",
+    "  RulesContractTest.java              (./mvnw test -Dtest=RulesContractTest)",
+    "  yanivRules.contract.test.ts         (cd frontend && npm test)",
+    "",
+    "Add a case here when you change a rule. Ranks: ACE TWO..TEN JACK QUEEN KING.",
+    "Suits: HEARTS DIAMONDS CLUBS SPADES."
+  ],
+
+  "combinations": [
+    {
+      "name": "a single card is always legal",
+      "handSize": 5,
+      "cards": [["c1", "FIVE", "HEARTS"]],
+      "valid": true
+    },
+    {
+      "name": "an empty selection is not a discard",
+      "handSize": 5,
+      "cards": [],
+      "valid": false
+    },
+    {
+      "name": "a pair of the same rank is a set",
+      "handSize": 5,
+      "cards": [["c1", "EIGHT", "HEARTS"], ["c2", "EIGHT", "SPADES"]],
+      "valid": true
+    },
+    {
+      "name": "three of a kind is a set",
+      "handSize": 5,
+      "cards": [["c1", "EIGHT", "HEARTS"], ["c2", "EIGHT", "SPADES"], ["c3", "EIGHT", "CLUBS"]],
+      "valid": true
+    },
+    {
+      "name": "four of a kind is a set",
+      "handSize": 5,
+      "cards": [["c1", "EIGHT", "HEARTS"], ["c2", "EIGHT", "SPADES"], ["c3", "EIGHT", "CLUBS"], ["c4", "EIGHT", "DIAMONDS"]],
+      "valid": true
+    },
+    {
+      "name": "mixed ranks are not a set",
+      "handSize": 5,
+      "cards": [["c1", "EIGHT", "HEARTS"], ["c2", "NINE", "SPADES"]],
+      "valid": false
+    },
+    {
+      "name": "the same card listed twice is not a pair",
+      "handSize": 5,
+      "cards": [["c1", "FIVE", "HEARTS"], ["c1", "FIVE", "HEARTS"]],
+      "valid": false
+    },
+    {
+      "name": "a two-card same-suit run is legal",
+      "handSize": 5,
+      "cards": [["c1", "THREE", "HEARTS"], ["c2", "FOUR", "HEARTS"]],
+      "valid": true
+    },
+    {
+      "name": "a three-card same-suit run is legal with cards remaining",
+      "handSize": 5,
+      "cards": [["c1", "THREE", "HEARTS"], ["c2", "FOUR", "HEARTS"], ["c3", "FIVE", "HEARTS"]],
+      "valid": true
+    },
+    {
+      "name": "a same-suit run is legal when it clears the hand",
+      "handSize": 3,
+      "cards": [["c1", "THREE", "HEARTS"], ["c2", "FOUR", "HEARTS"], ["c3", "FIVE", "HEARTS"]],
+      "valid": true
+    },
+    {
+      "name": "a run may be passed unsorted",
+      "handSize": 5,
+      "cards": [["c1", "FIVE", "HEARTS"], ["c2", "THREE", "HEARTS"], ["c3", "FOUR", "HEARTS"]],
+      "valid": true
+    },
+    {
+      "name": "non-consecutive same-suit cards are not a run",
+      "handSize": 5,
+      "cards": [["c1", "THREE", "HEARTS"], ["c2", "FIVE", "HEARTS"]],
+      "valid": false
+    },
+    {
+      "name": "Ace is low: A-2-3 is a run",
+      "handSize": 5,
+      "cards": [["c1", "ACE", "DIAMONDS"], ["c2", "TWO", "DIAMONDS"], ["c3", "THREE", "DIAMONDS"]],
+      "valid": true
+    },
+    {
+      "name": "Ace is high: Q-K-A is a run",
+      "handSize": 5,
+      "cards": [["c1", "QUEEN", "SPADES"], ["c2", "KING", "SPADES"], ["c3", "ACE", "SPADES"]],
+      "valid": true
+    },
+    {
+      "name": "K-A-2 corner wrapping is illegal",
+      "handSize": 5,
+      "cards": [["c1", "KING", "CLUBS"], ["c2", "ACE", "CLUBS"], ["c3", "TWO", "CLUBS"]],
+      "valid": false
+    },
+    {
+      "name": "a run cannot repeat a rank",
+      "handSize": 5,
+      "cards": [["c1", "FOUR", "HEARTS"], ["c2", "FOUR", "SPADES"], ["c3", "FIVE", "HEARTS"]],
+      "valid": false
+    },
+    {
+      "name": "J-Q-K is a run despite all three scoring 10",
+      "handSize": 5,
+      "cards": [["c1", "JACK", "CLUBS"], ["c2", "QUEEN", "CLUBS"], ["c3", "KING", "CLUBS"]],
+      "valid": true
+    },
+    {
+      "name": "a five-card mixed-suit run is legal",
+      "handSize": 5,
+      "cards": [["c1", "THREE", "SPADES"], ["c2", "FOUR", "HEARTS"], ["c3", "FIVE", "SPADES"], ["c4", "SIX", "DIAMONDS"], ["c5", "SEVEN", "HEARTS"]],
+      "valid": true
+    },
+    {
+      "name": "a three-card mixed-suit run is illegal even when it clears the hand",
+      "handSize": 3,
+      "cards": [["c1", "FOUR", "HEARTS"], ["c2", "FIVE", "SPADES"], ["c3", "SIX", "DIAMONDS"]],
+      "valid": false
+    },
+    {
+      "name": "a three-card mixed-suit run is illegal with cards remaining",
+      "handSize": 5,
+      "cards": [["c1", "FOUR", "HEARTS"], ["c2", "FIVE", "SPADES"], ["c3", "SIX", "DIAMONDS"]],
+      "valid": false
+    },
+    {
+      "name": "a four-card mixed-suit run is illegal even when it clears the hand",
+      "handSize": 4,
+      "cards": [["c1", "FOUR", "HEARTS"], ["c2", "FIVE", "SPADES"], ["c3", "SIX", "DIAMONDS"], ["c4", "SEVEN", "HEARTS"]],
+      "valid": false
+    },
+    {
+      "name": "a two-card mixed-suit run is illegal",
+      "handSize": 2,
+      "cards": [["c1", "FOUR", "HEARTS"], ["c2", "FIVE", "SPADES"]],
+      "valid": false
+    }
+  ],
+
+  "handScores": [
+    { "name": "Ace counts 1", "cards": [["c1", "ACE", "HEARTS"]], "score": 1 },
+    { "name": "pip cards count face value", "cards": [["c1", "SEVEN", "CLUBS"]], "score": 7 },
+    { "name": "Jack counts 10", "cards": [["c1", "JACK", "SPADES"]], "score": 10 },
+    { "name": "Queen counts 10", "cards": [["c1", "QUEEN", "SPADES"]], "score": 10 },
+    { "name": "King counts 10", "cards": [["c1", "KING", "SPADES"]], "score": 10 },
+    { "name": "an empty hand scores 0", "cards": [], "score": 0 },
+    {
+      "name": "a full hand sums its cards",
+      "cards": [["c1", "ACE", "HEARTS"], ["c2", "FIVE", "CLUBS"], ["c3", "KING", "SPADES"], ["c4", "QUEEN", "DIAMONDS"], ["c5", "NINE", "HEARTS"]],
+      "score": 35
+    },
+    {
+      "name": "a Yaniv-legal hand of exactly 7",
+      "cards": [["c1", "ACE", "HEARTS"], ["c2", "TWO", "CLUBS"], ["c3", "FOUR", "SPADES"]],
+      "score": 7
+    }
+  ]
+}

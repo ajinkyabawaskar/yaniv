@@ -1,6 +1,9 @@
 package shop.abwork.yanif.websocket;
 
+import jakarta.annotation.PreDestroy;
 import shop.abwork.yanif.entity.Game;
+import shop.abwork.yanif.entity.GamePlayer;
+import shop.abwork.yanif.entity.User;
 import shop.abwork.yanif.game.AutoPlayStrategy;
 import shop.abwork.yanif.game.YanivGameEngine;
 import shop.abwork.yanif.game.model.Card;
@@ -40,7 +43,22 @@ public class GameStateController {
 
     // In-memory game engines (authoritative while the server runs; snapshots
     // are persisted to Redis after every mutation so restarts can restore)
-    private final Map<String, YanivGameEngine> gameEngines = new HashMap<>();
+    private final Map<String, YanivGameEngine> gameEngines = new ConcurrentHashMap<>();
+
+    /**
+     * When each room's engine was last touched by a player. Drives idle eviction:
+     * the Redis snapshot is the source of truth, so an engine nobody is using is
+     * just a cache entry and can be dropped and rebuilt on the next touch.
+     */
+    private final Map<String, Long> engineLastTouched = new ConcurrentHashMap<>();
+
+    /**
+     * Rooms untouched for this long are dropped from memory. The Redis snapshot outlives
+     * them, so eviction costs at most one restore. Not final: field-injected by Spring,
+     * while direct construction in tests keeps the default.
+     */
+    @Value("${game.engine-idle-eviction-minutes:60}")
+    private long engineIdleEvictionMinutes = 60;
 
     // Scheduled executor for Yaniv contest timers and turn timers
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2);
@@ -72,7 +90,7 @@ public class GameStateController {
                               UserService userService,
                               SimpMessagingTemplate messagingTemplate,
                               @Value("${game.turn-timer-seconds:45}") int turnTimerSeconds,
-                              @Value("${game.auto-play-enabled:true}") boolean autoPlayEnabled,
+                              @Value("${game.auto-play-enabled:false}") boolean autoPlayEnabled,
                               @Value("${game.yaniv-contest-timer-seconds:15}") int yanivContestTimerSeconds,
                               @Value("${game.yaniv-threshold:7}") int yanivThreshold) {
         this.gameService = gameService;
@@ -83,6 +101,10 @@ public class GameStateController {
         this.autoPlayEnabled = autoPlayEnabled;
         this.yanivContestTimerSeconds = yanivContestTimerSeconds;
         this.yanivThreshold = yanivThreshold;
+
+        // Reclaim memory from abandoned rooms. Interval is coarse on purpose: this is
+        // housekeeping, and every eviction is recoverable from the snapshot.
+        scheduler.scheduleAtFixedRate(this::evictIdleEngines, 10, 10, TimeUnit.MINUTES);
     }
 
     /**
@@ -171,6 +193,15 @@ public class GameStateController {
             abortStaleGame(roomId);
             presenceService.setUserOnline(userId);
             broadcastLobbyState(roomId);
+            return;
+        }
+
+        if (engine == null) {
+            // Unresolvable but not provably stale (typically a storage outage). Leave the
+            // room alone; every path below dereferences the engine.
+            presenceService.setUserOnline(userId);
+            System.err.println("Could not resolve engine for room " + roomId
+                    + " on reconnect of " + userId + "; leaving room untouched");
             return;
         }
 
@@ -313,6 +344,10 @@ public class GameStateController {
                     }
                     case "CALL_YANIV" -> {
                         engine.callYaniv(userId);
+                    }
+                    default -> {
+                        sendErrorToUser(userId, "Unknown action type: " + action.actionType);
+                        return;
                     }
                 }
 
@@ -601,6 +636,12 @@ public class GameStateController {
                 return;
             }
 
+            if (game.getStatus() == Game.GameStatus.FINISHED) {
+                // Re-running would deal a fresh game onto a finished row, corrupting history
+                sendErrorToUser(userId, "Game has already finished");
+                return;
+            }
+
             var players = gameService.getGamePlayers(roomId);
             if (players.size() < 2) {
                 sendErrorToUser(userId, "Need at least 2 players to start");
@@ -617,6 +658,7 @@ public class GameStateController {
                     game.getTargetScore() != null ? game.getTargetScore() : 100);
             engine.setYanivContestTimerSeconds(yanivContestTimerSeconds);
             gameEngines.put(roomId, engine);
+            engineLastTouched.put(roomId, System.currentTimeMillis());
 
             for (String playerId : playerIds) {
                 presenceService.setUserInGame(playerId);
@@ -637,15 +679,57 @@ public class GameStateController {
      * During YANIV_CALLED: include caller info and timer data.
      * During ROUND_OVER: include all player hands revealed.
      */
+    /**
+     * The per-room data every recipient's message shares: the game row, its players and
+     * their display names. Loaded once per broadcast rather than once per recipient,
+     * which is what keeps a broadcast at a constant query count instead of O(N^2).
+     */
+    private record RoomView(Game game,
+                            List<GamePlayer> players,
+                            Map<String, String> playerNames,
+                            List<PlayerInfo> playerInfos) {
+    }
+
+    /** Three queries, however many players are at the table. */
+    private RoomView loadRoomView(String roomId) {
+        Game game = gameService.getGameById(roomId);
+        List<GamePlayer> players = gameService.getGamePlayers(roomId);
+
+        List<String> userIds = players.stream().map(gp -> gp.getId().getUserId()).toList();
+        Map<String, User> users = userService.getUsersByIds(userIds);
+
+        Map<String, String> playerNames = new HashMap<>();
+        List<PlayerInfo> playerInfos = new ArrayList<>();
+        for (String playerUserId : userIds) {
+            User user = users.get(playerUserId);
+            if (user == null) {
+                continue;
+            }
+            playerNames.put(playerUserId, user.getDisplayName());
+            PlayerInfo info = new PlayerInfo();
+            info.userId = playerUserId;
+            info.displayName = user.getDisplayName();
+            info.isHost = game != null && game.getHostUserId().equals(playerUserId);
+            info.status = "ONLINE";
+            playerInfos.add(info);
+        }
+        return new RoomView(game, players, playerNames, playerInfos);
+    }
+
     private GameStateMessage buildGameStateForPlayers(YanivGameEngine engine, String roomId, String userId) {
         return buildGameStateForPlayers(engine, roomId, userId, null);
     }
 
     private GameStateMessage buildGameStateForPlayers(YanivGameEngine engine, String roomId, String userId,
                                                       String autoPlayedPlayerId) {
+        return buildGameStateForPlayers(engine, roomId, userId, autoPlayedPlayerId, loadRoomView(roomId));
+    }
+
+    private GameStateMessage buildGameStateForPlayers(YanivGameEngine engine, String roomId, String userId,
+                                                      String autoPlayedPlayerId, RoomView view) {
         GameStateMessage message = new GameStateMessage();
         message.gameId = roomId;
-        var game = gameService.getGameById(roomId);
+        var game = view.game();
         message.roomCode = game != null ? game.getRoomCode() : "";
         message.maxPlayers = game != null ? game.getMaxPlayers() : 6;
         message.targetScore = game != null ? game.getTargetScore() : 100;
@@ -665,24 +749,11 @@ public class GameStateController {
                 })
                 .orElse(null);
 
-        // Add player names and player list
-        var players = gameService.getGamePlayers(roomId);
-        Map<String, String> playerNames = new HashMap<>();
-        List<PlayerInfo> playerInfos = new ArrayList<>();
-        for (var player : players) {
-            String playerUserId = player.getId().getUserId();
-            userService.getUserById(playerUserId).ifPresent(u -> {
-                playerNames.put(playerUserId, u.getDisplayName());
-                PlayerInfo info = new PlayerInfo();
-                info.userId = playerUserId;
-                info.displayName = u.getDisplayName();
-                info.isHost = game != null && game.getHostUserId().equals(playerUserId);
-                info.status = "ONLINE";
-                playerInfos.add(info);
-            });
-        }
+        // Names and roster come prepared: built once per broadcast, shared by everyone
+        var players = view.players();
+        Map<String, String> playerNames = view.playerNames();
         message.playerNames = playerNames;
-        message.players = playerInfos;
+        message.players = view.playerInfos();
 
         // Add current player's hand
         Hand hand = engine.getPlayerHand(userId);
@@ -811,9 +882,16 @@ public class GameStateController {
         try {
             String userId = auth.getName();
 
-            YanivGameEngine engine = gameEngines.get(roomId);
+            // Restore from snapshot like every other handler, or a restart during
+            // ROUND_OVER bricks the Next Round button.
+            YanivGameEngine engine = getOrRestoreEngine(roomId);
             if (engine == null) {
                 sendErrorToUser(userId, "Game not found");
+                return;
+            }
+
+            if (!engine.getAllPlayerIds().contains(userId)) {
+                sendErrorToUser(userId, "You are not a player in this game");
                 return;
             }
 
@@ -843,10 +921,11 @@ public class GameStateController {
     }
 
     private void broadcastGameState(YanivGameEngine engine, String roomId, String autoPlayedPlayerId) {
-        var players = gameService.getGamePlayers(roomId);
-        for (var player : players) {
+        RoomView view = loadRoomView(roomId);
+        for (var player : view.players()) {
             String playerId = player.getId().getUserId();
-            GameStateMessage stateMessage = buildGameStateForPlayers(engine, roomId, playerId, autoPlayedPlayerId);
+            GameStateMessage stateMessage = buildGameStateForPlayers(engine, roomId, playerId,
+                    autoPlayedPlayerId, view);
             messagingTemplate.convertAndSendToUser(
                     playerId,
                     "/queue/game-state",
@@ -932,9 +1011,63 @@ public class GameStateController {
      * games into a lobby. Transient storage errors return null WITHOUT letting
      * callers abort the room (only a confirmed miss may do that).
      */
+    /**
+     * Drop engines for rooms nobody has touched recently.
+     *
+     * Safe because the engine map is only a cache: full state is snapshotted to Redis
+     * after every mutation, so the next player to touch an evicted room gets it rebuilt
+     * by {@link #getOrRestoreEngine}. Without this a game everyone simply abandons
+     * mid-round — never finished, never aborted — occupies memory for the life of the
+     * process. Rooms with work still scheduled against them are left alone.
+     *
+     * Package-private so tests can drive it without waiting on the scheduler.
+     */
+    void evictIdleEngines() {
+        long cutoff = System.currentTimeMillis() - engineIdleEvictionMinutes * 60_000L;
+
+        for (String roomId : new ArrayList<>(gameEngines.keySet())) {
+            Long lastTouched = engineLastTouched.get(roomId);
+            if (lastTouched != null && lastTouched > cutoff) {
+                continue; // still in use
+            }
+            ScheduledFuture<?> turnTimer = turnTimers.get(roomId);
+            ScheduledFuture<?> yanivTimer = yanivTimers.get(roomId);
+            boolean workPending = (turnTimer != null && !turnTimer.isDone())
+                    || (yanivTimer != null && !yanivTimer.isDone());
+            if (workPending) {
+                continue; // a timer still expects this engine instance
+            }
+
+            YanivGameEngine engine = gameEngines.get(roomId);
+            if (engine == null) {
+                continue;
+            }
+            synchronized (engine) {
+                // Re-check under the lock: a player may have arrived since the scan.
+                Long recheck = engineLastTouched.get(roomId);
+                if (recheck != null && recheck > cutoff) {
+                    continue;
+                }
+                if (gameEngines.remove(roomId, engine)) {
+                    engineLastTouched.remove(roomId);
+                    disconnectedInGame.remove(roomId);
+                    System.out.println("Evicted idle engine for room " + roomId
+                            + "; it will be restored from its snapshot on next use");
+                }
+            }
+        }
+    }
+
+    /** Stop the scheduler so its threads do not outlive the application. */
+    @PreDestroy
+    void shutdownScheduler() {
+        scheduler.shutdownNow();
+    }
+
     private YanivGameEngine getOrRestoreEngine(String roomId) {
         YanivGameEngine engine = gameEngines.get(roomId);
         if (engine != null) {
+            engineLastTouched.put(roomId, System.currentTimeMillis());
             return engine;
         }
 
@@ -967,7 +1100,14 @@ public class GameStateController {
         }
 
         if (restored != null) {
-            gameEngines.put(roomId, restored);
+            // Publish atomically: two requests can miss the map and restore concurrently.
+            // Handlers synchronize on the engine instance, so if they each kept their own
+            // copy their mutations would not be serialised against each other.
+            YanivGameEngine published = gameEngines.putIfAbsent(roomId, restored);
+            engineLastTouched.put(roomId, System.currentTimeMillis());
+            if (published != null) {
+                return published; // another thread won the race; everyone shares its instance
+            }
             scheduleTurnTimerIfNeeded(restored, roomId);
             System.out.println("Restored game engine for room " + roomId + " from snapshot");
             return restored;
@@ -1013,6 +1153,9 @@ public class GameStateController {
                 } catch (Exception e) {
                     System.err.println("Could not delete stale snapshot for room " + roomId + ": " + e.getMessage());
                 }
+                gameEngines.remove(roomId);
+                disconnectedInGame.remove(roomId);
+                engineLastTouched.remove(roomId);
                 System.err.println("Game state lost for room " + roomId + "; returned to lobby");
             }
         } catch (Exception e) {
@@ -1038,7 +1181,10 @@ public class GameStateController {
             System.err.println("Failed to persist game snapshot for room " + roomId + ": " + e.getMessage());
         }
 
-        if (engine.isRoundOver()) {
+        // The round that ends the game transitions straight to GAME_OVER, never
+        // ROUND_OVER, so it must be persisted here too or round_histories is
+        // permanently missing the deciding round of every game.
+        if (engine.isRoundOver() || engine.isGameOver()) {
             persistRoundHistory(engine, roomId);
         }
 
@@ -1048,17 +1194,29 @@ public class GameStateController {
                 f.cancel(false);
                 return null;
             });
+            boolean resultPersisted = false;
             try {
-                gameService.finishGame(roomId, engine.getWinnerId());
+                gameService.completeGame(roomId, engine.getWinnerId(),
+                        engine.getFinishingOrder(), engine.getPlayerScores());
+                resultPersisted = true;
             } catch (Exception e) {
-                System.err.println("Failed to mark game finished for room " + roomId + ": " + e.getMessage());
+                System.err.println("Failed to record final result for room " + roomId + ": " + e.getMessage());
             }
-            try {
-                gameService.deleteGameState(roomId);
-            } catch (Exception e) {
-                System.err.println("Failed to delete game snapshot for room " + roomId + ": " + e.getMessage());
+
+            if (resultPersisted) {
+                try {
+                    gameService.deleteGameState(roomId);
+                } catch (Exception e) {
+                    System.err.println("Failed to delete game snapshot for room " + roomId + ": " + e.getMessage());
+                }
+            } else {
+                // Keep the snapshot: the row is still IN_PROGRESS, so the next touch
+                // restores this finished game and retries persisting the result.
+                System.err.println("Keeping snapshot for room " + roomId + " so the result can be recovered");
             }
             gameEngines.remove(roomId);
+            disconnectedInGame.remove(roomId);
+            engineLastTouched.remove(roomId);
         } else if (engine.isYanivCalled()) {
             // Contest window: someone must be able to resolve it even if the
             // caller was auto-played and every human is idle
@@ -1186,8 +1344,12 @@ public class GameStateController {
         }
         turnDeadlines.remove(roomId);
 
-        if (!autoPlayEnabled || engine.isGameOver() || engine.isRoundOver()
-                || engine.getCurrentState() != YanivGameEngine.GameState.WAIT_FOR_TURN) {
+        // BONUS_DISCARD is included: a player who drops while the engine waits for
+        // their bonus decision would otherwise stall the room permanently.
+        YanivGameEngine.GameState state = engine.getCurrentState();
+        boolean awaitingPlayer = state == YanivGameEngine.GameState.WAIT_FOR_TURN
+                || state == YanivGameEngine.GameState.BONUS_DISCARD;
+        if (!autoPlayEnabled || engine.isGameOver() || engine.isRoundOver() || !awaitingPlayer) {
             return;
         }
 
@@ -1231,10 +1393,19 @@ public class GameStateController {
                 if (disconnected == null || !disconnected.contains(expectedPlayer)) {
                     return; // player came back before the timer fired
                 }
+                YanivGameEngine.GameState state = engine.getCurrentState();
                 if (gameEngines.get(roomId) != engine
-                        || engine.getCurrentState() != YanivGameEngine.GameState.WAIT_FOR_TURN
-                        || !expectedPlayer.equals(engine.getCurrentPlayer())) {
+                        || !expectedPlayer.equals(engine.getCurrentPlayer())
+                        || (state != YanivGameEngine.GameState.WAIT_FOR_TURN
+                            && state != YanivGameEngine.GameState.BONUS_DISCARD)) {
                     return; // human acted first, or game moved on
+                }
+
+                if (state == YanivGameEngine.GameState.BONUS_DISCARD) {
+                    // They dropped mid-decision: decline and let the turn finish.
+                    engine.processBonusDiscard(expectedPlayer, false);
+                    finishMutation(engine, roomId, expectedPlayer);
+                    return;
                 }
 
                 AutoPlayStrategy.Decision decision = AutoPlayStrategy.decide(

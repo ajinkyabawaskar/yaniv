@@ -108,8 +108,12 @@ class BonusDiscardTest {
         assertNotNull(engine.getLastDiscardedRank());
         assertEquals(card1.getRank(), engine.getLastDiscardedRank());
 
-        // Advance turn to reset
+        // Advance turn to reset. The draw may itself trigger a bonus discard, which
+        // parks the turn; decline it so PLAYER2 reliably gets the turn.
         engine.processDraw(PLAYER1, "DECK", null);
+        if (engine.isBonusDiscardActive()) {
+            engine.processBonusDiscard(PLAYER1, false);
+        }
 
         // Multi-card discard - doesn't track rank (need a valid pair)
         hand = engine.getPlayerHand(PLAYER2);
