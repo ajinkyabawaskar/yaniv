@@ -560,6 +560,10 @@ A mid-game drop closes one session. `PresenceSessionListener` tells `Presence`, 
 **absence** only if that was the player's *last* session watching this game — a second tab keeps
 them present. The absence announcement re-arms the turn timer if it is their turn.
 
+Changes to one player are serialised inside `Presence`, so two of their sessions opening or closing
+at once cannot both read the same "before" and conclude nothing happened. A dropped absence
+announcement would mean a turn is never re-armed.
+
 `PresenceRedisProjection` is the **only** writer of the Redis presence key. It follows
 `Presence.onPresenceChanged` and mirrors the current status; a failure is logged and changes
 nothing, because memory is the truth and Redis knows nothing the process does not know better.

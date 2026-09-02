@@ -218,4 +218,48 @@ class PresenceTest {
         assertEquals(List.of("alice"), announced, "DISCONNECTED_IN_GAME -> OFFLINE is a change");
         assertEquals(PresenceStatus.OFFLINE, presence.status("alice"));
     }
+
+    @Test
+    @DisplayName("Concurrent sessions for one player settle to the right status")
+    void concurrentSessionsSettleConsistently() throws Exception {
+        List<String> absenceAnnouncements = java.util.Collections.synchronizedList(new ArrayList<>());
+        List<String> presenceAnnouncements = java.util.Collections.synchronizedList(new ArrayList<>());
+        presence.onAbsenceChanged((roomId, playerId) -> absenceAnnouncements.add(roomId + "/" + playerId));
+        presence.onPresenceChanged(presenceAnnouncements::add);
+
+        int sessions = 64;
+        var opened = java.util.concurrent.Executors.newFixedThreadPool(8);
+        try {
+            List<java.util.concurrent.Future<?>> futures = new ArrayList<>();
+            for (int i = 0; i < sessions; i++) {
+                String sessionId = "session-" + i;
+                futures.add(opened.submit(() -> {
+                    presence.sessionOpened(sessionId, "alice");
+                    presence.attachedToRoom(sessionId, "room-1");
+                }));
+            }
+            for (var f : futures) f.get();
+
+            assertEquals(PresenceStatus.IN_GAME, presence.status("alice"));
+            assertTrue(presence.absentSince("room-1", "alice").isEmpty());
+
+            futures.clear();
+            for (int i = 0; i < sessions; i++) {
+                String sessionId = "session-" + i;
+                futures.add(opened.submit(() -> presence.sessionClosed(sessionId)));
+            }
+            for (var f : futures) f.get();
+        } finally {
+            opened.shutdownNow();
+        }
+
+        assertEquals(PresenceStatus.DISCONNECTED_IN_GAME, presence.status("alice"),
+                "every tab closed, so she is absent from the game she was in");
+        assertTrue(presence.absentSince("room-1", "alice").isPresent(),
+                "and the absence must be recorded, or her turn is never re-armed");
+        assertTrue(absenceAnnouncements.contains("room-1/alice"),
+                "the absence must be announced, or nothing re-arms her turn");
+        assertTrue(presenceAnnouncements.contains("alice"),
+                "and the projection must be told, or Redis is left claiming she is here");
+    }
 }

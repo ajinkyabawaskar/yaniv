@@ -48,6 +48,13 @@ public class Presence {
     /** Told when a player's overall reachability changes, so a projection can follow it. */
     private final List<Consumer<String>> presenceListeners = new CopyOnWriteArrayList<>();
 
+    private final Object[] playerLocks = new Object[64];
+    {
+        for (int i = 0; i < playerLocks.length; i++) {
+            playerLocks[i] = new Object();
+        }
+    }
+
     public Presence(Clock clock) {
         this.clock = clock;
     }
@@ -66,13 +73,31 @@ public class Presence {
         announcingChange(playerId, () -> playerBySession.put(sessionId, playerId));
     }
 
-    /** Run a mutation, and tell the listeners only if it changed this player's status. */
+    /**
+     * Run a mutation, and tell the listeners only if it changed this player's status.
+     *
+     * Serialised per player. The maps are concurrent, so the state converges either way,
+     * but read-mutate-compare is not atomic: two of a player's sessions changing at once
+     * could both read the same "before" and conclude nothing changed. A dropped absence
+     * announcement means their turn is never re-armed, which is the failure this module
+     * exists to prevent.
+     */
     private void announcingChange(String playerId, Runnable mutation) {
-        PresenceStatus before = status(playerId);
-        mutation.run();
-        if (before != status(playerId)) {
-            presenceListeners.forEach(listener -> listener.accept(playerId));
+        synchronized (lockFor(playerId)) {
+            PresenceStatus before = status(playerId);
+            mutation.run();
+            if (before != status(playerId)) {
+                presenceListeners.forEach(listener -> listener.accept(playerId));
+            }
         }
+    }
+
+    /**
+     * A fixed set of locks, chosen by player. Bounded, so it needs no cleanup; two
+     * unrelated players occasionally sharing one costs nothing but a brief wait.
+     */
+    private Object lockFor(String playerId) {
+        return playerLocks[Math.floorMod(playerId.hashCode(), playerLocks.length)];
     }
 
     public void sessionClosed(String sessionId) {
@@ -124,6 +149,11 @@ public class Presence {
      *
      * Without this an absence outlives the game that recorded it, and the player stays
      * DISCONNECTED_IN_GAME for good.
+     */
+    /**
+     * Not serialised per player: this spans everyone in the room, and it runs when a game
+     * is finished, aborted or evicted. A session event racing it can at worst leave the
+     * projection briefly behind, which the player's next change corrects.
      */
     public void roomClosed(String roomId) {
         // Everyone this room had an opinion about may now be reachable differently.
