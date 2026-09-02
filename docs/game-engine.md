@@ -500,6 +500,10 @@ two waits and they are **not** the same kind of thing:
 | `WAIT_FOR_TURN` | auto-play on **and** the player is absent | `absence-grace-seconds`, then `spent-grace-delay-ms` | `autoPlayTurn` plays the whole turn |
 | `BONUS_DISCARD` | **always** | `bonus-discard-timeout-seconds` | `declineUnansweredBonus` answers "keep" |
 
+Either deadline is sent to the client as `turnEndsAt` + `turnTimerSeconds` (`:849-854`), gated on a
+deadline actually being armed rather than on the state. It used to be sent only in `WAIT_FOR_TURN`,
+which left the bonus deadline invisible: the panel simply vanished mid-thought.
+
 **Only an absent player is ever auto-played.** A player with *any* session attached to the game — a
 second tab, say — is never played for. See **absence** and **room attachment** in `CONTEXT.md`.
 
@@ -753,7 +757,7 @@ else.
 | `game.auto-play-enabled` | `false` (`@Value` default now also `false`) | Gates every turn timer and the round-over self-advance. **Deliberately off** while presence status is unreliable. |
 | `game.absence-grace-seconds` | `45` | How long an absent player's turn is held before the server plays it for them. Once per absence, counted only during their turn. |
 | `game.spent-grace-delay-ms` | `800` | Pace of later turns in the same absence. Low keeps the table moving; too low and a whole game finishes while someone's phone is locked. |
-| `game.bonus-discard-timeout-seconds` | `15` | How long a matching-rank bonus decision is held before the server declines it. Applies to everyone, connected or not, and ignores `auto-play-enabled`: the decision blocks the whole room and declining costs the player nothing. |
+| `game.bonus-discard-timeout-seconds` | `30` | How long a matching-rank bonus decision is held before the server declines it. Applies to everyone, connected or not, and ignores `auto-play-enabled`: the decision blocks the whole room and declining costs the player nothing. A backstop for a client that cannot answer, not a game clock — the panel shows the countdown. |
 | `game.engine-idle-eviction-minutes` | `5` | How long a room may go untouched before its engine is dropped from memory. State survives in the snapshot, so eviction costs at most one restore. |
 
 Per-room, supplied in the `POST /api/v1/rooms` body: `targetScore` (default 100, unvalidated) and

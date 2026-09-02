@@ -146,7 +146,7 @@ public class GameStateController {
                               @Value("${game.yaniv-contest-timer-seconds:15}") int yanivContestTimerSeconds,
                               @Value("${game.yaniv-threshold:7}") int yanivThreshold,
                               @Value("${game.absence-grace-seconds:45}") long absenceGraceSeconds,
-                              @Value("${game.bonus-discard-timeout-seconds:15}") int bonusDiscardTimeoutSeconds) {
+                              @Value("${game.bonus-discard-timeout-seconds:30}") int bonusDiscardTimeoutSeconds) {
         this.gameService = gameService;
         this.presenceService = presenceService;
         this.userService = userService;
@@ -845,13 +845,14 @@ public class GameStateController {
             message.roundScores = engine.getRoundScores();
         }
 
-        // Turn countdown for the active player
-        if (engine.getCurrentState() == YanivGameEngine.GameState.WAIT_FOR_TURN) {
-            Long deadline = turnDeadlines.get(roomId);
-            if (deadline != null) {
-                message.turnTimerSeconds = turnTimerTotals.getOrDefault(roomId, turnTimerSeconds);
-                message.turnEndsAt = deadline;
-            }
+        // Turn countdown. Sent whenever a deadline is actually armed, rather than only in
+        // WAIT_FOR_TURN: a bonus decision has one too, and a deadline the player cannot
+        // see just takes their turn away mid-thought. scheduleTurnTimerIfNeeded clears the
+        // entry on every call, so a non-null deadline here is always the live one.
+        Long deadline = turnDeadlines.get(roomId);
+        if (deadline != null) {
+            message.turnTimerSeconds = turnTimerTotals.getOrDefault(roomId, turnTimerSeconds);
+            message.turnEndsAt = deadline;
         }
 
         if (autoPlayedPlayerId != null) {

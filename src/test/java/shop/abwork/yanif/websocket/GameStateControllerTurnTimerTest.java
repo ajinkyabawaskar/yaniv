@@ -429,6 +429,23 @@ class GameStateControllerTurnTimerTest {
     }
 
     @Test
+    void theBonusDeadlineIsVisibleToThePlayerDeciding() throws Exception {
+        controller.startGame(ROOM, auth(HOST));
+        snapshotStore.put(ROOM, dealThatParksOnTheBonus(HOST));
+        clearEngines();
+
+        controller.handleGameAction(ROOM, discardFirstCardAction(HOST, TEN_OF_HEARTS), auth(HOST));
+
+        GameStateController.GameStateMessage prompt = messagesFor(HOST).stream()
+                .filter(m -> m.bonusDiscardActive).findFirst().orElse(null);
+        assertNotNull(prompt, "precondition: the prompt was pushed");
+        assertTrue(prompt.turnEndsAt > 0,
+                "a deadline the player cannot see takes their turn away mid-thought, "
+                        + "with the panel just vanishing");
+        assertTrue(prompt.turnTimerSeconds > 0, "the arc needs a total to count down from");
+    }
+
+    @Test
     void theBonusDeadlineStillRunsWithAutoPlaySwitchedOff() throws Exception {
         controller = new GameStateController(gameService, presenceService, userService,
                 messagingTemplate, presence, 1 /* turn timer seconds */, false /* auto-play OFF */,

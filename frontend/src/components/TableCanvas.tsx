@@ -827,7 +827,11 @@ export default function TableCanvas({
                 </button>
               </div>
               <div className="bonus-discard-hint">
-                {isPlayerTurn ? 'Either way, your turn ends here.' : 'Waiting for your turn...'}
+                {!isPlayerTurn
+                  ? 'Waiting for your turn...'
+                  : turnEndsAt
+                    ? `${turnTimerSeconds}s to choose — either way, your turn ends here.`
+                    : 'Either way, your turn ends here.'}
               </div>
             </div>
           </div>
