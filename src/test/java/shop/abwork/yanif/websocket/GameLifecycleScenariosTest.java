@@ -1001,6 +1001,17 @@ class GameLifecycleScenariosTest {
         }
     }
 
+    @SuppressWarnings("unchecked")
+    private Set<String> pendingFinalizationSet() {
+        try {
+            Field f = GameStateController.class.getDeclaredField("pendingFinalization");
+            f.setAccessible(true);
+            return (Set<String>) f.get(controller);
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     /** Pretend nobody has touched this room for the given number of minutes. */
     private void ageEngine(String roomId, long minutes) {
         lastTouchedMap().put(roomId, System.currentTimeMillis() - minutes * 60_000L);
@@ -1061,6 +1072,141 @@ class GameLifecycleScenariosTest {
 
         assertFalse(disconnectedMap().containsKey(ROOM),
                 "per-room bookkeeping must not outlive the engine it belongs to");
+    }
+
+    @Test
+    void G6_roomWhoseSnapshotFailed_isNotEvicted() {
+        startStartedGame();
+        String current = engineFromSnapshot().getCurrentPlayer();
+
+        // Redis goes down mid-game: the action still applies, but only in memory.
+        doThrow(new RuntimeException("redis down"))
+                .when(gameService).saveGameState(anyString(), anyString());
+        String cardId = liveEngine().getPlayerHand(current).getCards().get(0).getId();
+        controller.handleGameAction(ROOM, discardAction(current, List.of(cardId)), auth(current));
+        if (liveEngine().getCurrentState() == YanivGameEngine.GameState.BONUS_DISCARD) {
+            controller.handleGameAction(ROOM, bonusDiscardAction(current, false), auth(current));
+        }
+
+        ageEngine(ROOM, 120);
+        controller.evictIdleEngines();
+
+        assertNotNull(enginesMap().get(ROOM),
+                "memory is the only copy of this game; evicting it would lose the round");
+
+        // Once a write lands, the room is evictable again. Read the live engine, not the
+        // snapshot: the snapshot is stale precisely because the write failed. The turn has
+        // moved on, so act as whoever holds it now.
+        doAnswer(inv -> {
+            snapshotStore.put(inv.getArgument(0), inv.getArgument(1));
+            return null;
+        }).when(gameService).saveGameState(anyString(), anyString());
+        String nowCurrent = liveEngine().getCurrentPlayer();
+        controller.handleGameAction(ROOM, discardAction(nowCurrent, List.of(
+                liveEngine().getPlayerHand(nowCurrent).getCards().get(0).getId())), auth(nowCurrent));
+        if (liveEngine() != null
+                && liveEngine().getCurrentState() == YanivGameEngine.GameState.BONUS_DISCARD) {
+            controller.handleGameAction(ROOM, bonusDiscardAction(nowCurrent, false), auth(nowCurrent));
+        }
+        ageEngine(ROOM, 120);
+        controller.evictIdleEngines();
+
+        assertNull(enginesMap().get(ROOM), "a persisted room may be evicted normally");
+    }
+
+    @Test
+    void G7_sweepRetriesTheSnapshotBeforeGivingUpOnMemory() {
+        startStartedGame();
+        String current = engineFromSnapshot().getCurrentPlayer();
+
+        doThrow(new RuntimeException("redis down"))
+                .when(gameService).saveGameState(anyString(), anyString());
+        controller.handleGameAction(ROOM, discardAction(current, List.of(
+                liveEngine().getPlayerHand(current).getCards().get(0).getId())), auth(current));
+        if (liveEngine().getCurrentState() == YanivGameEngine.GameState.BONUS_DISCARD) {
+            controller.handleGameAction(ROOM, bonusDiscardAction(current, false), auth(current));
+        }
+
+        ageEngine(ROOM, 120);
+        controller.evictIdleEngines();
+        assertNotNull(enginesMap().get(ROOM), "precondition: held because storage was down");
+
+        // An abandoned room gets no further actions, so the sweep itself must retry the
+        // write -- otherwise it stays in memory for the life of the process.
+        snapshotStore.clear();
+        doAnswer(inv -> {
+            snapshotStore.put(inv.getArgument(0), inv.getArgument(1));
+            return null;
+        }).when(gameService).saveGameState(anyString(), anyString());
+
+        controller.evictIdleEngines();
+
+        assertNull(enginesMap().get(ROOM), "once storage recovers the sweep should reclaim the room");
+        assertNotNull(snapshotStore.get(ROOM), "and the retry should have written its state first");
+    }
+
+    @Test
+    void G8_finishedGameIsHeldUntilItsResultIsRecorded() {
+        startStartedGame();
+
+        GameSnapshot snap = GameSnapshot.fromJson(liveEngine().toSnapshot());
+        Map<String, List<GameSnapshot.CardDto>> hands = new HashMap<>();
+        hands.put(HOST, List.of(new GameSnapshot.CardDto("card_1", "HEARTS", "ACE")));
+        hands.put(OTHER, List.of(new GameSnapshot.CardDto("card_13", "HEARTS", "KING")));
+        snap.playerHands = hands;
+        snap.playerScores = new HashMap<>(Map.of(HOST, 0, OTHER, 0));
+        snap.targetScore = 5;
+        snap.currentPlayerIndex = snap.playerIds.indexOf(HOST);
+        snap.currentState = YanivGameEngine.GameState.WAIT_FOR_TURN.name();
+        enginesMap().put(ROOM, YanivGameEngine.fromSnapshot(snap.toJson()));
+
+        // The database is down when the game ends.
+        doThrow(new RuntimeException("db down")).when(gameService)
+                .completeGame(anyString(), any(), anyList(), anyMap());
+        controller.callYaniv(ROOM, new GameStateController.YanivCallMessage(), auth(HOST));
+        controller.contestYaniv(ROOM, new GameStateController.ContestYanivMessage(), auth(OTHER));
+
+        assertNotNull(enginesMap().get(ROOM),
+                "a finished game must not be dropped before its result is recorded");
+        assertNotNull(snapshotStore.get(ROOM), "and its snapshot must be kept as the recovery copy");
+
+        // A terminal engine takes no further actions, so only the sweep can retry.
+        ageEngine(ROOM, 120);
+        controller.evictIdleEngines();
+        assertNotNull(enginesMap().get(ROOM), "still unrecorded, so still held");
+
+        doNothing().when(gameService).completeGame(anyString(), any(), anyList(), anyMap());
+        controller.evictIdleEngines();
+
+        assertNull(enginesMap().get(ROOM), "once recorded, the engine is released");
+        verify(gameService, atLeastOnce()).completeGame(eq(ROOM), eq(HOST), eq(List.of(HOST, OTHER)), anyMap());
+    }
+
+    @Test
+    void G9_terminalEngineRestoredAfterRestart_isStillFinalized() {
+        startStartedGame();
+
+        // A finished game whose result never reached the database, restored after a
+        // restart: pendingFinalization is in-memory only, so it is empty here.
+        GameSnapshot snap = GameSnapshot.fromJson(liveEngine().toSnapshot());
+        snap.eliminatedPlayers = new java.util.LinkedHashSet<>(List.of(OTHER));
+        snap.winnerId = HOST;
+        snap.currentState = YanivGameEngine.GameState.GAME_OVER.name();
+        snapshotStore.put(ROOM, snap.toJson());
+        clearEngines();
+        pendingFinalizationSet().clear();
+
+        // A player touches the room, so it is restored from that snapshot exactly as it
+        // would be after a restart.
+        controller.getGameState(ROOM, auth(HOST));
+        assertNotNull(enginesMap().get(ROOM), "precondition: restored from the snapshot");
+        assertTrue(enginesMap().get(ROOM).isGameOver(), "precondition: terminal engine in memory");
+
+        ageEngine(ROOM, 120);
+        controller.evictIdleEngines();
+
+        verify(gameService).completeGame(eq(ROOM), eq(HOST), eq(List.of(HOST, OTHER)), anyMap());
+        assertNull(enginesMap().get(ROOM), "and it is released once recorded");
     }
 
     @Test

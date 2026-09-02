@@ -1,5 +1,6 @@
 package shop.abwork.yanif.websocket;
 
+import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import shop.abwork.yanif.entity.Game;
 import shop.abwork.yanif.entity.GamePlayer;
@@ -57,8 +58,21 @@ public class GameStateController {
      * them, so eviction costs at most one restore. Not final: field-injected by Spring,
      * while direct construction in tests keeps the default.
      */
-    @Value("${game.engine-idle-eviction-minutes:60}")
-    private long engineIdleEvictionMinutes = 60;
+    @Value("${game.engine-idle-eviction-minutes:5}")
+    private long engineIdleEvictionMinutes = 5;
+
+    /**
+     * Rooms whose latest state failed to reach Redis. Evicting one would discard real
+     * progress, because the restore path would fall back to a stale snapshot or none.
+     */
+    private final Set<String> unpersistedRooms = ConcurrentHashMap.newKeySet();
+
+    /**
+     * Finished games whose result has not reached the database. The engine is held until
+     * it does, because nothing else would ever retry: a terminal engine accepts no
+     * further actions, so no later mutation would run the write again.
+     */
+    private final Set<String> pendingFinalization = ConcurrentHashMap.newKeySet();
 
     // Scheduled executor for Yaniv contest timers and turn timers
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2);
@@ -102,9 +116,6 @@ public class GameStateController {
         this.yanivContestTimerSeconds = yanivContestTimerSeconds;
         this.yanivThreshold = yanivThreshold;
 
-        // Reclaim memory from abandoned rooms. Interval is coarse on purpose: this is
-        // housekeeping, and every eviction is recoverable from the snapshot.
-        scheduler.scheduleAtFixedRate(this::evictIdleEngines, 10, 10, TimeUnit.MINUTES);
     }
 
     /**
@@ -1012,6 +1023,57 @@ public class GameStateController {
      * callers abort the room (only a confirmed miss may do that).
      */
     /**
+     * Record a finished game's result and release its in-memory state.
+     *
+     * Kept together so the engine is only dropped once the result is durable. The
+     * snapshot is deleted last: while it survives, the game stays recoverable.
+     *
+     * @return true if the result reached the database
+     */
+    private boolean finalizeFinishedGame(String roomId, YanivGameEngine engine) {
+        try {
+            gameService.completeGame(roomId, engine.getWinnerId(),
+                    engine.getFinishingOrder(), engine.getPlayerScores());
+        } catch (Exception e) {
+            pendingFinalization.add(roomId);
+            System.err.println("Failed to record final result for room " + roomId + ": " + e.getMessage());
+            return false;
+        }
+
+        pendingFinalization.remove(roomId);
+        try {
+            gameService.deleteGameState(roomId);
+        } catch (Exception e) {
+            System.err.println("Failed to delete game snapshot for room " + roomId + ": " + e.getMessage());
+        }
+        gameEngines.remove(roomId);
+        disconnectedInGame.remove(roomId);
+        engineLastTouched.remove(roomId);
+        unpersistedRooms.remove(roomId);
+        return true;
+    }
+
+    /**
+     * Write the engine's state to the snapshot store, remembering whether it landed.
+     *
+     * A failure is not fatal to the action in progress, but it does mean memory is now
+     * the only copy of this game, so the room is marked and held back from eviction.
+     *
+     * @return true if the snapshot is up to date
+     */
+    private boolean persistSnapshot(String roomId, YanivGameEngine engine) {
+        try {
+            gameService.saveGameState(roomId, engine.toSnapshot());
+            unpersistedRooms.remove(roomId);
+            return true;
+        } catch (Exception e) {
+            unpersistedRooms.add(roomId);
+            System.err.println("Failed to persist game snapshot for room " + roomId + ": " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
      * Drop engines for rooms nobody has touched recently.
      *
      * Safe because the engine map is only a cache: full state is snapshotted to Redis
@@ -1037,7 +1099,6 @@ public class GameStateController {
             if (workPending) {
                 continue; // a timer still expects this engine instance
             }
-
             YanivGameEngine engine = gameEngines.get(roomId);
             if (engine == null) {
                 continue;
@@ -1048,14 +1109,45 @@ public class GameStateController {
                 if (recheck != null && recheck > cutoff) {
                     continue;
                 }
+
+                // Checked under the lock: a concurrent mutation may have just failed to
+                // persist. An abandoned room gets no further actions, so these retries are
+                // its only route out of memory.
+                // Any terminal engine, not just one this process failed to finalise: a
+                // restart loses pendingFinalization while a GAME_OVER snapshot survives,
+                // and evicting that room would drop the result for good.
+                if (engine.isGameOver() || pendingFinalization.contains(roomId)) {
+                    finalizeFinishedGame(roomId, engine); // removes the engine on success
+                    continue;
+                }
+                if (unpersistedRooms.contains(roomId) && !persistSnapshot(roomId, engine)) {
+                    continue; // storage still unreachable; memory is the only copy
+                }
+
                 if (gameEngines.remove(roomId, engine)) {
                     engineLastTouched.remove(roomId);
                     disconnectedInGame.remove(roomId);
+                    unpersistedRooms.remove(roomId);
                     System.out.println("Evicted idle engine for room " + roomId
                             + "; it will be restored from its snapshot on next use");
                 }
             }
         }
+    }
+
+    /**
+     * Start the idle-engine sweep once configuration has been injected.
+     *
+     * Deliberately not in the constructor: {@code engineIdleEvictionMinutes} is field
+     * injected, so a constructor-derived interval would use the default rather than the
+     * configured value. Sweeping at half the idle window bounds the extra time a room
+     * can linger to one interval.
+     */
+    @PostConstruct
+    void startIdleEngineSweep() {
+        long intervalSeconds = Math.max(30, engineIdleEvictionMinutes * 30);
+        scheduler.scheduleAtFixedRate(this::evictIdleEngines,
+                intervalSeconds, intervalSeconds, TimeUnit.SECONDS);
     }
 
     /** Stop the scheduler so its threads do not outlive the application. */
@@ -1156,6 +1248,7 @@ public class GameStateController {
                 gameEngines.remove(roomId);
                 disconnectedInGame.remove(roomId);
                 engineLastTouched.remove(roomId);
+                unpersistedRooms.remove(roomId);
                 System.err.println("Game state lost for room " + roomId + "; returned to lobby");
             }
         } catch (Exception e) {
@@ -1174,12 +1267,9 @@ public class GameStateController {
     }
 
     private void finishMutation(YanivGameEngine engine, String roomId, String autoPlayedPlayerId) {
-        // Persist snapshot (best-effort: a Redis outage must not fail the action)
-        try {
-            gameService.saveGameState(roomId, engine.toSnapshot());
-        } catch (Exception e) {
-            System.err.println("Failed to persist game snapshot for room " + roomId + ": " + e.getMessage());
-        }
+        // Persist snapshot (best-effort: a Redis outage must not fail the action, but the
+        // room is then held in memory until a later write succeeds -- see evictIdleEngines)
+        persistSnapshot(roomId, engine);
 
         // The round that ends the game transitions straight to GAME_OVER, never
         // ROUND_OVER, so it must be persisted here too or round_histories is
@@ -1194,29 +1284,11 @@ public class GameStateController {
                 f.cancel(false);
                 return null;
             });
-            boolean resultPersisted = false;
-            try {
-                gameService.completeGame(roomId, engine.getWinnerId(),
-                        engine.getFinishingOrder(), engine.getPlayerScores());
-                resultPersisted = true;
-            } catch (Exception e) {
-                System.err.println("Failed to record final result for room " + roomId + ": " + e.getMessage());
+            if (!finalizeFinishedGame(roomId, engine)) {
+                // The result is not in the database yet. Hold the engine and its snapshot;
+                // the idle sweep retries, because no further action will reach this room.
+                System.err.println("Holding finished game " + roomId + " until its result is recorded");
             }
-
-            if (resultPersisted) {
-                try {
-                    gameService.deleteGameState(roomId);
-                } catch (Exception e) {
-                    System.err.println("Failed to delete game snapshot for room " + roomId + ": " + e.getMessage());
-                }
-            } else {
-                // Keep the snapshot: the row is still IN_PROGRESS, so the next touch
-                // restores this finished game and retries persisting the result.
-                System.err.println("Keeping snapshot for room " + roomId + " so the result can be recovered");
-            }
-            gameEngines.remove(roomId);
-            disconnectedInGame.remove(roomId);
-            engineLastTouched.remove(roomId);
         } else if (engine.isYanivCalled()) {
             // Contest window: someone must be able to resolve it even if the
             // caller was auto-played and every human is idle

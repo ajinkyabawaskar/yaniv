@@ -34,8 +34,8 @@ Line numbers drift; method names don't. If a citation doesn't land, search for t
 > **A shared contract guards this.** `shared/rules-contract.json` holds one case table that both
 > implementations are tested against — `RulesContractTest.java` on the server,
 > `yanivRules.contract.test.ts` on the client. A rule change that updates only one side fails.
-> Add a case there whenever you change a rule. The rank ladder is still duplicated across four
-> files — see [Cards](#cards) — but the behaviour they produce is now pinned.
+> Add a case there whenever you change a rule. The contract also pins the sequence ladder, so the
+> Java and TypeScript copies of it cannot drift apart either.
 
 Changing any of these means updating this document — `scripts/check-engine-docs.sh` enforces it at
 commit time.
@@ -76,10 +76,14 @@ Never use `Card.getValue()` for run adjacency — a Jack, Queen and King all sco
 like a "run" of identical values. `AutoPlayStrategy.seqRankValue` carries a comment warning about
 exactly this (`AutoPlayStrategy.java:197-220`).
 
-> The rank ladder is currently duplicated in **four** places: `CardCombinationValidator`
-> (`:138-177`), `AutoPlayStrategy.seqRankValue` (`:197-220`),
-> `DiscardCombination.getSequenceRankValue` (`:44-61`), and implicitly in `Card.Rank`. A change to
-> one must be made in all of them.
+**Both ladders live on `Card.Rank`.** Each constant carries its scoring `value` plus
+`sequenceLow`/`sequenceHigh`, read through `rank.sequenceValue(aceHigh)`. `CardCombinationValidator`,
+`AutoPlayStrategy` and `DiscardCombination` all call that one method — they used to keep three
+private copies of the ladder between them.
+
+The client has its own copy in `yanivRules.ts`, unavoidably, since it is a different language. The
+two are pinned together by the `sequenceValues` section of `shared/rules-contract.json`, so changing
+one without the other fails a test.
 
 ## Setting up a round
 
@@ -379,11 +383,32 @@ keeps its engine for the process lifetime.
 A restart loses everything in memory: engines, disconnect sets, dedup entries, all timers. Games are
 restored **lazily, on first touch** — there is no warm-up at boot.
 
-**Idle rooms are evicted.** `evictIdleEngines` runs every 10 minutes and drops engines untouched for
-`game.engine-idle-eviction-minutes` (default 60), skipping any room with a timer still pending. This
+**Idle rooms are evicted.** `evictIdleEngines` drops engines untouched for
+`game.engine-idle-eviction-minutes` (default **5**), skipping any room with a timer still pending.
+The sweep runs at half the idle window, so a room lingers at most one interval past the threshold.
+Five minutes is comfortable: a round is short and every player action touches the room, so an
+untouched table is genuinely done. This
 is safe precisely because the engine map is a cache: the snapshot is the source of truth, so the next
 player to touch an evicted room gets it rebuilt by `getOrRestoreEngine`. Without it, a game everyone
 abandons mid-round — never finished, never aborted — would hold memory for the life of the process.
+
+Two consequences worth knowing:
+
+- **A room whose snapshot write failed is never evicted.** `finishMutation` persists best-effort, so
+  a Redis outage leaves memory ahead of the snapshot. Those rooms are tracked in `unpersistedRooms`
+  and held — evicting one would silently roll the game back to a stale snapshot, or lose it
+  entirely. The sweep **retries the write** under the engine lock before giving up on a room:
+  an abandoned game gets no further actions, so that retry is its only route back to being
+  evictable rather than resident forever.
+- **A finished game is kept in memory until its result reaches the database.** `GAME_OVER` releases
+  the engine only once `completeGame` succeeds; the snapshot is deleted last, so the game stays
+  recoverable until then. Nothing else would retry — a terminal engine accepts no further actions —
+  so the sweep re-attempts it via `pendingFinalization`.
+- **Eviction clears the room's `disconnectedInGame` entry**, so a player who was disconnected before
+  eviction is not known to be disconnected after the restore. This is deliberate: it matches what
+  already happens across a server restart (`C9`), and keeping the entry would leak it for rooms that
+  are never finished or aborted. It costs nothing while `game.auto-play-enabled` is false, since
+  nothing acts on that set — but it is worth revisiting alongside presence.
 
 ### When a snapshot is trusted
 
@@ -596,6 +621,9 @@ exercising the bug; those are fixed too, and the suite is stable across repeated
   **adds** it (`:82-97`). It is a heuristic ranking, not a simulation.
 - **`handSize` is now a dead parameter** threaded through three validator signatures, and
   `handSizeAtDiscard` is stored and snapshotted but read by no rule.
+- **The rules still exist in two languages.** Consolidated to one copy per side and pinned by the
+  shared contract, but a single implementation would need either a server-authoritative UI or
+  generating the client rules at build time.
 
 # Documentation contradictions
 
@@ -632,7 +660,7 @@ else.
 | `game.yaniv-contest-timer-seconds` | `15` | Asaf window. Captured at engine construction, so changes don't reach in-flight games. |
 | `game.turn-timer-seconds` | `45` | Display field and the round-over auto-advance delay. **Not the auto-play delay.** |
 | `game.auto-play-enabled` | `false` (`@Value` default now also `false`) | Gates every turn timer and the round-over self-advance. **Deliberately off** while presence status is unreliable. |
-| `game.engine-idle-eviction-minutes` | `60` | How long a room may go untouched before its engine is dropped from memory. State survives in the snapshot. |
+| `game.engine-idle-eviction-minutes` | `5` | How long a room may go untouched before its engine is dropped from memory. State survives in the snapshot, so eviction costs at most one restore. |
 
 Per-room, supplied in the `POST /api/v1/rooms` body: `targetScore` (default 100, unvalidated) and
 `maxPlayers` (default 6, unvalidated upper bound).

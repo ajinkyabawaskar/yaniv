@@ -75,6 +75,27 @@ public class RulesContractTest {
     }
 
     @TestFactory
+    Stream<DynamicTest> sequenceLadderMatchesTheSharedContract() {
+        List<DynamicTest> tests = new ArrayList<>();
+        for (JsonNode testCase : contract().get("sequenceValues")) {
+            Card.Rank rank = Card.Rank.valueOf(testCase.get("rank").asString());
+            int low = testCase.get("low").asInt();
+            int high = testCase.get("high").asInt();
+
+            tests.add(dynamicTest(rank + " sequence position", () -> {
+                assertEquals(low, rank.sequenceValue(false),
+                        "server disagrees with shared/rules-contract.json for " + rank + " (Ace low)");
+                assertEquals(high, rank.sequenceValue(true),
+                        "server disagrees with shared/rules-contract.json for " + rank + " (Ace high)");
+            }));
+        }
+        if (tests.isEmpty()) {
+            throw new IllegalStateException("The contract file defined no sequence-ladder cases");
+        }
+        return tests.stream();
+    }
+
+    @TestFactory
     Stream<DynamicTest> handScoringMatchesTheSharedContract() {
         List<DynamicTest> tests = new ArrayList<>();
         for (JsonNode testCase : contract().get("handScores")) {

@@ -9,7 +9,7 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import { Card, calculateHandScore, isValidCombination } from './yanivRules';
+import { Card, calculateHandScore, getRankValueHigh, getRankValueLow, isValidCombination } from './yanivRules';
 
 type ContractCard = [string, string, string]; // [id, rank, suit]
 
@@ -26,9 +26,16 @@ interface HandScoreCase {
   score: number;
 }
 
+interface SequenceValueCase {
+  rank: string;
+  low: number;
+  high: number;
+}
+
 interface Contract {
   combinations: CombinationCase[];
   handScores: HandScoreCase[];
+  sequenceValues: SequenceValueCase[];
 }
 
 // frontend/src/utils -> repo root
@@ -70,6 +77,19 @@ describe('hand scoring matches the shared contract', () => {
   contract.handScores.forEach((testCase) => {
     it(testCase.name, () => {
       expect(calculateHandScore(toCards(testCase.cards))).toBe(testCase.score);
+    });
+  });
+});
+
+describe('the sequence ladder matches the shared contract', () => {
+  it('the contract defines cases', () => {
+    expect(contract.sequenceValues.length).toBeGreaterThan(0);
+  });
+
+  contract.sequenceValues.forEach((testCase) => {
+    it(`${testCase.rank} sequence position`, () => {
+      expect(getRankValueLow(testCase.rank)).toBe(testCase.low);
+      expect(getRankValueHigh(testCase.rank)).toBe(testCase.high);
     });
   });
 });

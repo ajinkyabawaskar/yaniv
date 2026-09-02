@@ -131,8 +131,8 @@ public class CardCombinationValidator {
         List<Integer> ranksHigh = new ArrayList<>();
 
         for (Card card : cards) {
-            ranksLow.add(getRankValueLow(card.getRank()));
-            ranksHigh.add(getRankValueHigh(card.getRank()));
+            ranksLow.add(card.getRank().sequenceValue(false));
+            ranksHigh.add(card.getRank().sequenceValue(true));
         }
 
         // Check both Ace-low and Ace-high sequences
@@ -157,49 +157,7 @@ public class CardCombinationValidator {
         return true;
     }
 
-    /**
-     * Get numeric value of a rank for sequence validation (Ace-low: A=1).
-     */
-    private static int getRankValueLow(Card.Rank rank) {
-        return switch (rank) {
-            case ACE -> 1;
-            case TWO -> 2;
-            case THREE -> 3;
-            case FOUR -> 4;
-            case FIVE -> 5;
-            case SIX -> 6;
-            case SEVEN -> 7;
-            case EIGHT -> 8;
-            case NINE -> 9;
-            case TEN -> 10;
-            case JACK -> 11;
-            case QUEEN -> 12;
-            case KING -> 13;
-            default -> -1; // Invalid for sequence
-        };
-    }
 
-    /**
-     * Get numeric value of a rank for sequence validation (Ace-high: A=14).
-     */
-    private static int getRankValueHigh(Card.Rank rank) {
-        return switch (rank) {
-            case ACE -> 14;
-            case TWO -> 2;
-            case THREE -> 3;
-            case FOUR -> 4;
-            case FIVE -> 5;
-            case SIX -> 6;
-            case SEVEN -> 7;
-            case EIGHT -> 8;
-            case NINE -> 9;
-            case TEN -> 10;
-            case JACK -> 11;
-            case QUEEN -> 12;
-            case KING -> 13;
-            default -> -1; // Invalid for sequence
-        };
-    }
 
     /**
      * Validate if a combination is valid (single, set, or sequence).
