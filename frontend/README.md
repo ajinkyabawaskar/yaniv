@@ -38,7 +38,8 @@ npm run build
 ## Development
 
 ```bash
-# Start React dev server (runs on http://localhost:3000)
+# Start React dev server. Port 3000 by default; set PORT in frontend/.env
+# (gitignored) to change it, and the e2e config follows automatically.
 npm start
 
 # Backend API must be running on http://localhost:8080
