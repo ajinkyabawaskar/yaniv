@@ -133,6 +133,32 @@
   color: #fca5a5;
 }
 
+/* Shares the navbar button shape, but it is not a destructive action, so it
+   must not inherit the logout button's red hover. */
+.nav-help-btn {
+  border-color: rgba(212, 175, 55, 0.35);
+  white-space: nowrap;
+}
+
+.nav-help-btn:hover {
+  background: rgba(212, 175, 55, 0.15);
+  border-color: rgba(212, 175, 55, 0.55);
+  color: var(--gold-light);
+}
+
+@media (max-width: 600px) {
+  /* The icon carries it on a narrow navbar */
+  .nav-help-btn {
+    font-size: 0;
+    padding: 6px 10px;
+  }
+
+  .nav-help-btn::before {
+    content: '📖';
+    font-size: 14px;
+  }
+}
+
 .version-text {
   font-family: 'DM Mono', monospace;
   font-size: 10px;

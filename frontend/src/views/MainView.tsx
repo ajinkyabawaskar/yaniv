@@ -199,6 +199,13 @@ export default function MainView({ initialRoomCode }: MainViewProps) {
 
         <div className="nav-right">
           <button
+            className="nav-logout-btn nav-help-btn"
+            onClick={() => navigate('/rules')}
+            title="How to play"
+          >
+            📖 How to Play
+          </button>
+          <button
             className="nav-logout-btn"
             onClick={() => {
               const next = !bgMusicEnabled;

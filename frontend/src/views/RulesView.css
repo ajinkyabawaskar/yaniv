@@ -1,0 +1,425 @@
+/* ==========================================================================
+   RulesView.css — How to play
+   Same felt-and-gold register as the table, laid out as a readable document
+   rather than a game surface.
+   ========================================================================== */
+
+.rules-root {
+  /* The app locks page scrolling on purpose — html, body, #root and .app-root are
+     all overflow:hidden so the game table never bounces or rubber-bands. This page
+     must not undo that, so it scrolls itself instead.
+     min-height:0 is the load-bearing line: a flex child defaults to min-height:auto,
+     which refuses to shrink below its content, and the overflow never engages. */
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  background: var(--felt-vignette);
+  color: var(--ink-light);
+}
+
+.rules-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 20px;
+  background: rgba(5, 20, 14, 0.92);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(212, 175, 55, 0.25);
+}
+
+.rules-topbar .brand-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rules-topbar .brand-icon {
+  font-size: 18px;
+  color: var(--gold-primary);
+}
+
+.rules-topbar .brand-name {
+  font-family: 'Cinzel', serif;
+  font-size: 16px;
+  font-weight: 900;
+  letter-spacing: 0.18em;
+  color: var(--gold-light);
+}
+
+/* Balances the back button so the brand stays centred */
+.rules-topbar-spacer {
+  width: 72px;
+}
+
+.rules-back {
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-light);
+  background: transparent;
+  border: 1px solid rgba(212, 175, 55, 0.35);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.rules-back:hover {
+  background: rgba(212, 175, 55, 0.14);
+  color: var(--gold-light);
+}
+
+.rules-page {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 28px 20px 64px;
+  /* The app disables selection everywhere so dragging cards never highlights text.
+     This is a page to read, so give it back. */
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.rules-hero {
+  text-align: center;
+  padding: 20px 0 32px;
+}
+
+.rules-hero h1 {
+  margin: 0 0 12px;
+  font-family: 'Cinzel', serif;
+  font-size: 40px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  background: var(--gold-gradient);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.rules-hero p {
+  margin: 0 auto;
+  max-width: 520px;
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--ink-light);
+}
+
+.rules-section {
+  margin-bottom: 20px;
+  padding: 22px 24px;
+  background: rgba(7, 25, 18, 0.72);
+  border: 1px solid rgba(212, 175, 55, 0.22);
+  border-radius: 16px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+}
+
+.rules-section h2 {
+  margin: 0 0 12px;
+  font-family: 'Cinzel', serif;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: var(--gold-light);
+}
+
+.rules-section h3 {
+  margin: 22px 0 12px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--gold-primary);
+}
+
+.rules-section p {
+  margin: 0 0 12px;
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+.rules-section p:last-child {
+  margin-bottom: 0;
+}
+
+.rules-section strong {
+  color: var(--gold-light);
+}
+
+.rules-note {
+  padding-left: 12px;
+  border-left: 2px solid rgba(212, 175, 55, 0.35);
+  font-size: 14px;
+  color: var(--ink-muted);
+}
+
+.rules-list {
+  margin: 0 0 12px;
+  padding-left: 20px;
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.rules-list li {
+  margin-bottom: 6px;
+}
+
+/* Card rows -------------------------------------------------------------- */
+
+.rule-cards {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.rule-card {
+  width: 46px;
+  height: 65px;
+  object-fit: contain;
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.rule-cards-muted .rule-card {
+  filter: grayscale(0.6) brightness(0.75);
+}
+
+.rule-example {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border-left: 3px solid transparent;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.rule-example.is-legal {
+  border-left-color: #4ade80;
+}
+
+.rule-example.is-illegal {
+  border-left-color: var(--crimson-light);
+}
+
+.rule-example-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 200px;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.rule-verdict {
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.is-legal .rule-verdict {
+  color: #4ade80;
+}
+
+.is-illegal .rule-verdict {
+  color: #fca5a5;
+}
+
+.rules-hand-example {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 12px;
+  font-size: 14px;
+}
+
+/* Card values ------------------------------------------------------------ */
+
+.rules-values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.value-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  font-family: 'DM Mono', monospace;
+  font-size: 12px;
+  color: var(--gold-light);
+}
+
+/* Tables ----------------------------------------------------------------- */
+
+.rules-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.rules-table th,
+.rules-table td {
+  padding: 10px 12px;
+  text-align: left;
+  border-bottom: 1px solid rgba(212, 175, 55, 0.15);
+}
+
+.rules-table th {
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--gold-primary);
+}
+
+.rules-table td.good {
+  color: #4ade80;
+  font-weight: 700;
+}
+
+.rules-table td.bad {
+  color: #fca5a5;
+  font-weight: 700;
+}
+
+.rules-table-compare td:first-child {
+  font-weight: 700;
+  color: var(--ink-light);
+}
+
+.rules-table-compare td:nth-child(2) {
+  color: var(--ink-muted);
+}
+
+.rules-table td.mine {
+  color: var(--gold-light);
+  font-weight: 600;
+}
+
+/* Three columns of prose do not fit a phone; stack them into labelled rows. */
+@media (max-width: 600px) {
+  .rules-table-compare thead {
+    display: none;
+  }
+
+  .rules-table-compare tr {
+    display: block;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(212, 175, 55, 0.15);
+  }
+
+  .rules-table-compare td {
+    display: block;
+    border: none;
+    padding: 2px 0;
+  }
+
+  .rules-table-compare td:nth-child(2)::before {
+    content: 'Often: ';
+    color: var(--gold-primary);
+  }
+
+  .rules-table-compare td:nth-child(3)::before {
+    content: 'Here: ';
+    color: var(--gold-primary);
+  }
+}
+
+/* Accent sections -------------------------------------------------------- */
+
+.rules-highlight {
+  border-color: rgba(212, 175, 55, 0.5);
+  box-shadow: 0 0 30px rgba(212, 175, 55, 0.12), 0 8px 28px rgba(0, 0, 0, 0.35);
+}
+
+.rules-danger {
+  border-color: rgba(239, 68, 68, 0.4);
+  background: rgba(30, 10, 10, 0.6);
+}
+
+.rules-danger h2 {
+  color: #fca5a5;
+}
+
+.rules-danger strong {
+  color: #fecaca;
+}
+
+.rules-bonus {
+  border-color: rgba(212, 175, 55, 0.45);
+  background: linear-gradient(160deg, rgba(30, 62, 48, 0.75) 0%, rgba(7, 25, 18, 0.8) 100%);
+}
+
+/* Footer ----------------------------------------------------------------- */
+
+.rules-footer {
+  display: flex;
+  justify-content: center;
+  padding-top: 12px;
+}
+
+.rules-back-cta {
+  padding: 14px 32px;
+  font-family: 'Cinzel', serif;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--ink-dark);
+  background: var(--gold-gradient);
+  border: 2px solid var(--gold-light);
+  border-radius: 14px;
+  cursor: pointer;
+  box-shadow: 0 0 20px var(--gold-glow), 0 8px 22px rgba(0, 0, 0, 0.5);
+  transition: transform 0.15s ease;
+}
+
+.rules-back-cta:hover {
+  transform: scale(1.04);
+}
+
+.rules-back-cta:active {
+  transform: scale(0.97);
+}
+
+@media (max-width: 600px) {
+  .rules-page {
+    padding: 20px 14px 48px;
+  }
+
+  .rules-hero h1 {
+    font-size: 30px;
+  }
+
+  .rules-section {
+    padding: 18px 16px;
+  }
+
+  .rules-section h2 {
+    font-size: 19px;
+  }
+
+  .rule-card {
+    width: 40px;
+    height: 56px;
+  }
+
+  .rules-topbar-spacer {
+    display: none;
+  }
+}
