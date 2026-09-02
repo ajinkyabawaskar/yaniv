@@ -130,17 +130,6 @@ public class PresenceController {
         }
     }
 
-    /**
-     * Heartbeat message to keep presence alive.
-     * Client sends periodic heartbeats to refresh presence TTL.
-     */
-    @MessageMapping("/presence/heartbeat")
-    public void handleHeartbeat(Authentication auth) {
-        if (auth != null) {
-            String userId = auth.getName();
-            presenceService.refreshOrSetOnline(userId);
-        }
-    }
 
     /**
      * Browser lifecycle fallback when a tab is closed before the STOMP disconnect event arrives.

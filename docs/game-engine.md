@@ -488,17 +488,13 @@ player had gone and nothing would act on it.
 > `game.turn-timer-seconds` is **not** this timer. It is a display field (`:780`) and the ROUND_OVER
 > auto-advance delay. The absence grace is `game.absence-grace-seconds`.
 
-> **Auto-play is disabled in the shipped config, deliberately.** `game.auto-play-enabled=false`
-> (`application.properties:48`), and the `@Value` default now matches. It is held off because the
-> presence/connection status it depends on is not yet reliable — see the `PlayerInfo.status` note
-> under [Per-player filtering](#per-player-filtering). That one flag gates every turn timer
-> (`:1189`) and the round-over self-advance (`:1109`), so in production nothing is ever auto-played
-> and `turnEndsAt` is never populated. Every lifecycle test constructs the controller with `true`,
-> so no test covers the shipped default.
->
-> A consequence worth knowing: because `turnDeadlines` is never written, the 45s-vs-800ms countdown
-> mismatch above **cannot occur in production today**. It is latent, waiting for auto-play to be
-> switched on.
+**Auto-play is on.** `game.auto-play-enabled=true`. It was held off while presence was unreliable;
+it now rests on session-counted **absence**, so a player with any session attached is never played
+for. The flag still gates both the turn timer and the round-over self-advance.
+
+The countdown the client draws uses the total that the current deadline was actually set from
+(`turnTimerTotals`), not `game.turn-timer-seconds` — those are different numbers that merely share a
+default, and advertising the wrong one drew a 45-second arc against an 800 ms deadline.
 
 Connected players still have unlimited thinking time: there is no turn timer for someone who is
 watching. Only absence starts a clock.
@@ -574,9 +570,10 @@ Leaving during `ROUND_OVER` now records an absence like any other — the player
 It used to report plain offline, which meant a table where everyone had gone could never
 self-advance.
 
-`GameStateController.handleSessionDisconnect` no longer keeps a record of its own and no longer
-writes Redis — `PresenceRedisProjection` is the sole writer. It cannot decide absence either,
-because a handler keyed by user cannot tell a closed spare tab from a player who left.
+`GameStateController` no longer listens for disconnects at all: everything that handler did is now
+done by Presence and the absence announcement. `findRoomForUser` went with it — scanning live
+engines for a user and taking the first match is meaningless when a player can be in several games.
+The reconnect path uses the database, which is the record of who is in which game.
 
 **A disconnected player is never removed from the game.** No code path calls
 `removePlayerFromGame` — it exists (`GameService.java:175-180`) with zero callers. They keep their

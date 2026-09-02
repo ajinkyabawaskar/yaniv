@@ -104,6 +104,13 @@ public class GameStateController {
     // roomId -> epoch ms when the current player's timer expires (for client display)
     private final Map<String, Long> turnDeadlines = new ConcurrentHashMap<>();
 
+    /**
+     * The total the current deadline was set from, so the client draws an arc that
+     * actually reaches zero when the turn is played. The grace and the display config
+     * are different numbers that merely happen to share a default.
+     */
+    private final Map<String, Integer> turnTimerTotals = new ConcurrentHashMap<>();
+
     // Turn timer configuration (game.turn-timer-seconds / game.auto-play-enabled)
     private final int turnTimerSeconds;
     private final boolean autoPlayEnabled;
@@ -125,7 +132,7 @@ public class GameStateController {
                               SimpMessagingTemplate messagingTemplate,
                               Presence presence,
                               @Value("${game.turn-timer-seconds:45}") int turnTimerSeconds,
-                              @Value("${game.auto-play-enabled:false}") boolean autoPlayEnabled,
+                              @Value("${game.auto-play-enabled:true}") boolean autoPlayEnabled,
                               @Value("${game.yaniv-contest-timer-seconds:15}") int yanivContestTimerSeconds,
                               @Value("${game.yaniv-threshold:7}") int yanivThreshold,
                               @Value("${game.absence-grace-seconds:45}") long absenceGraceSeconds) {
@@ -147,48 +154,6 @@ public class GameStateController {
      * If player is in an active game, mark them as disconnected but keep game state.
      * Their turn timer keeps running; auto-play takes over when it expires.
      */
-    @EventListener
-    public void handleSessionDisconnect(SessionDisconnectEvent event) {
-        String userId = getUserIdFromSession(event);
-
-        if (userId == null) {
-            return;
-        }
-
-        // Find which room this user is in (if any)
-        String roomId = findRoomForUser(userId);
-        if (roomId == null) {
-            return;
-        }
-
-        // Check if there's an active game engine for this room
-        YanivGameEngine engine = gameEngines.get(roomId);
-        if (engine == null) {
-            // Not in an active game, just update presence
-            return;
-        }
-
-        // Check if game is still in progress (not in lobby, not game over)
-        if (engine.isGameOver() || engine.isRoundOver()) {
-            // Game is between rounds or over, just update presence
-            return;
-        }
-
-        // Presence already recorded this, via the session listener. Nothing to track here:
-        // a set keyed by user cannot tell a closed spare tab from a player who left.
-
-        // Update presence to DISCONNECTED_IN_GAME status (extended TTL)
-
-        // If it is already this player's turn, arm their auto-play timer now
-        if (engine.getCurrentState() == YanivGameEngine.GameState.WAIT_FOR_TURN
-                && userId.equals(engine.getCurrentPlayer())) {
-            scheduleTurnTimerIfNeeded(engine, roomId);
-        }
-
-        // Broadcast disconnected status to other players
-
-        System.out.println("Player " + userId + " disconnected from active game in room " + roomId);
-    }
 
     /**
      * Handle WebSocket session connect.
@@ -203,14 +168,11 @@ public class GameStateController {
             return;
         }
 
-        // Find which room this user is in - check both active game engines and database
-        String roomId = findRoomForUser(userId);
+        // The database is the record of who is in which game. Scanning live engines by
+        // user was a first-match guess, and a player may be in several games at once.
+        String roomId = findActiveGameRoomForUser(userId);
         if (roomId == null) {
-            // Check if user has an active game in database (e.g., game engine was cleaned up)
-            roomId = findActiveGameRoomForUser(userId);
-            if (roomId == null) {
-                return;
-            }
+            return;
         }
 
         // Check if there's an active game engine for this room (memory or Redis snapshot)
@@ -875,7 +837,7 @@ public class GameStateController {
         if (engine.getCurrentState() == YanivGameEngine.GameState.WAIT_FOR_TURN) {
             Long deadline = turnDeadlines.get(roomId);
             if (deadline != null) {
-                message.turnTimerSeconds = turnTimerSeconds;
+                message.turnTimerSeconds = turnTimerTotals.getOrDefault(roomId, turnTimerSeconds);
                 message.turnEndsAt = deadline;
             }
         }
@@ -1006,17 +968,6 @@ public class GameStateController {
         return null;
     }
 
-    /**
-     * Find the room a user is currently in by checking game engines.
-     */
-    private String findRoomForUser(String userId) {
-        for (Map.Entry<String, YanivGameEngine> entry : gameEngines.entrySet()) {
-            if (entry.getValue().getAllPlayerIds().contains(userId)) {
-                return entry.getKey();
-            }
-        }
-        return null;
-    }
 
     /**
      * Find active game room for user by checking database.
@@ -1474,6 +1425,7 @@ public class GameStateController {
             old.cancel(false);
         }
         turnDeadlines.remove(roomId);
+        turnTimerTotals.remove(roomId);
 
         // BONUS_DISCARD is included: a player who drops while the engine waits for
         // their bonus decision would otherwise stall the room permanently.
@@ -1494,6 +1446,7 @@ public class GameStateController {
         boolean graceSpent = absentSince.get().equals(gracedAbsences.get(graceKey(roomId, currentPlayer)));
         long delayMs = graceSpent ? SPENT_GRACE_DELAY_MS : absenceGraceSeconds * 1000L;
         long deadline = System.currentTimeMillis() + delayMs;
+        turnTimerTotals.put(roomId, (int) Math.max(1, Math.round(delayMs / 1000.0)));
         turnDeadlines.put(roomId, deadline);
 
         final String expectedPlayer = engine.getCurrentPlayer();

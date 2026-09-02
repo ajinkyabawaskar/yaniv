@@ -149,6 +149,13 @@ class GameLifecycleScenariosTest {
         enginesMap().clear();
     }
 
+    /** A player comes back: a new session attaches to the room, as a reopened tab would. */
+    private void returnToRoom(String playerId) {
+        String sessionId = "session-return-" + playerId;
+        presence.sessionOpened(sessionId, playerId);
+        presence.attachedToRoom(sessionId, ROOM);
+    }
+
     /** State absence through Presence's own interface, not by writing a private field. */
     private void makeAbsentFromRoom(String playerId) {
         String sessionId = "session-" + playerId;
@@ -308,7 +315,6 @@ class GameLifecycleScenariosTest {
         startStartedGame();
         
         // Host disconnects and reconnects (simulates exit/re-enter)
-        controller.handleSessionDisconnect(disconnectEvent(HOST));
         controller.handleSessionConnect(connectEvent(HOST));
         
         // Host clicks start game
@@ -386,7 +392,6 @@ class GameLifecycleScenariosTest {
         String current = engineFromSnapshot().getCurrentPlayer();
 
         makeAbsentFromRoom(current);
-        controller.handleSessionDisconnect(disconnectEvent(current));
 
         verify(presenceService).setUserDisconnectedInGame(current);
         boolean autoPlayed = waitFor(() ->
@@ -402,7 +407,6 @@ class GameLifecycleScenariosTest {
         String opponent = current.equals(HOST) ? OTHER : HOST;
 
         makeAbsentFromRoom(opponent);
-        controller.handleSessionDisconnect(disconnectEvent(opponent));
 
         verify(presenceService).setUserDisconnectedInGame(opponent);
         try { Thread.sleep(1600); } catch (InterruptedException ignored) { }
@@ -422,7 +426,7 @@ class GameLifecycleScenariosTest {
         controller.callYaniv(ROOM, new GameStateController.YanivCallMessage(), auth(caller));
         assertTrue(engine.isYanivCalled());
 
-        controller.handleSessionDisconnect(disconnectEvent(caller));
+        makeAbsentFromRoom(caller); // the caller drops inside the contest window
         controller.contestYaniv(ROOM, new GameStateController.ContestYanivMessage(), auth(opponent));
         assertTrue(engine.isRoundOver(), "contest resolves despite caller disconnect");
     }
@@ -433,7 +437,6 @@ class GameLifecycleScenariosTest {
         int round = engineFromSnapshot().getRoundNumber();
 
         makeAbsentFromRoom(HOST);
-        controller.handleSessionDisconnect(disconnectEvent(HOST));
 
         // Behaviour change: leaving during ROUND_OVER now records an absence like any
         // other, because they are still in the game. It used to report plain offline,
@@ -456,7 +459,6 @@ class GameLifecycleScenariosTest {
         // Connected, but not watching a game: leaving is plain offline, not an absence.
         presence.sessionOpened("s-host", HOST);
         presence.sessionClosed("s-host");
-        controller.handleSessionDisconnect(disconnectEvent(HOST));
 
         verify(presenceService).setUserOffline(HOST);
         verify(presenceService, never()).setUserDisconnectedInGame(HOST);
@@ -467,7 +469,6 @@ class GameLifecycleScenariosTest {
         startStartedGame();
         String before = snapshotStore.get(ROOM);
 
-        controller.handleSessionDisconnect(disconnectEvent("ghost"));
 
         assertEquals(before, snapshotStore.get(ROOM), "snapshot untouched");
         assertEquals(YanivGameEngine.GameState.WAIT_FOR_TURN, engineFromSnapshot().getCurrentState());
@@ -514,8 +515,7 @@ class GameLifecycleScenariosTest {
         String current = engineFromSnapshot().getCurrentPlayer();
 
         makeAbsentFromRoom(current);
-        controller.handleSessionDisconnect(disconnectEvent(current)); // arms 1s timer
-        controller.handleSessionConnect(connectEvent(current));       // back before expiry
+        returnToRoom(current);                                        // back before expiry
 
         try { Thread.sleep(1800); } catch (InterruptedException ignored) { }
         assertTrue(messagesFor(current).stream().noneMatch(m -> current.equals(m.autoPlayedPlayerId)),
@@ -528,7 +528,6 @@ class GameLifecycleScenariosTest {
         startStartedGame();
         String current = engineFromSnapshot().getCurrentPlayer();
         makeAbsentFromRoom(current);
-        controller.handleSessionDisconnect(disconnectEvent(current));
 
         boolean fired = waitFor(() ->
                 messagesFor(current).stream().anyMatch(m -> current.equals(m.autoPlayedPlayerId)), 5000);
@@ -668,7 +667,6 @@ class GameLifecycleScenariosTest {
 
         // Player disconnects
         makeAbsentFromRoom(current);
-        controller.handleSessionDisconnect(disconnectEvent(current));
         verify(presenceService).setUserDisconnectedInGame(current);
 
         // Simulate server restart: engine evicted, disconnectedInGame map cleared (in-memory)
@@ -693,7 +691,6 @@ class GameLifecycleScenariosTest {
         String current = engineFromSnapshot().getCurrentPlayer();
 
         makeAbsentFromRoom(current);
-        controller.handleSessionDisconnect(disconnectEvent(current));
         controller.handleSessionConnect(connectEvent(current));
         String cardId = engineFromSnapshot().getPlayerHand(current).getCards().get(0).getId();
         controller.handleGameAction(ROOM, discardAction(current, List.of(cardId)), auth(current));
@@ -714,7 +711,6 @@ class GameLifecycleScenariosTest {
         startStartedGame();
         String current = engineFromSnapshot().getCurrentPlayer();
         makeAbsentFromRoom(current);
-        controller.handleSessionDisconnect(disconnectEvent(current));
 
         // Replace the live engine instance before the task fires
         YanivGameEngine replacement = YanivGameEngine.fromSnapshot(snapshotStore.get(ROOM));
@@ -837,7 +833,6 @@ class GameLifecycleScenariosTest {
         startStartedGame();
         String first = engineFromSnapshot().getCurrentPlayer();
         makeAbsentFromRoom(first);
-        controller.handleSessionDisconnect(disconnectEvent(first));
 
         // Rig the disconnected player's hand low so auto-play calls Yaniv
         YanivGameEngine engine = liveEngine();
