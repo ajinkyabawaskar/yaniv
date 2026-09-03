@@ -160,6 +160,31 @@ public class ScoringAndEliminationTest {
     }
 
     @Test
+    @DisplayName("A knocked-out player is not a winner of the rounds played after they are out")
+    void knockedOutPlayersAreNotRoundWinners() {
+        YanivGameEngine seed = new YanivGameEngine("room-7", List.of(P1, P2, P3), 7, 100);
+        GameSnapshot snap = GameSnapshot.fromJson(seed.toSnapshot());
+        // P3 is already out and holds nothing; P1 and P2 play on.
+        snap.eliminatedPlayers = new LinkedHashSet<>(List.of(P3));
+        snap.playerHands = new HashMap<>(Map.of(
+                P1, hand("card_1", "ACE"),
+                P2, hand("card_5", "FIVE"),
+                P3, new ArrayList<>()));
+        snap.playerScores = new HashMap<>(Map.of(P1, 10, P2, 10, P3, 100));
+        snap.currentPlayerIndex = 0;
+        snap.currentState = YanivGameEngine.GameState.WAIT_FOR_TURN.name();
+        YanivGameEngine engine = YanivGameEngine.fromSnapshot(snap.toJson());
+
+        engine.callYaniv(P1);
+        engine.contestYaniv(P2);
+
+        assertEquals(0, engine.getRoundScores().get(P3),
+                "precondition: a player who is out is parked on a round score of 0");
+        assertEquals(List.of(P1), engine.getRoundWinners(),
+                "a round score of 0 for a player who never played is not a win");
+    }
+
+    @Test
     @DisplayName("A game with no winner has no finishing order, so nobody is crowned first")
     void drawnGameHasNoFinishingOrder() {
         YanivGameEngine seed = new YanivGameEngine("room-6", List.of(P1, P2, P3), 7, 100);

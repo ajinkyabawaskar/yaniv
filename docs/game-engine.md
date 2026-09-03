@@ -320,9 +320,13 @@ held nor in the deck when the deck is rebuilt — putting those card ids in two 
 **The Asaf penalty is `hand + 30`, not a flat 30** (`:571-573`). A caller Asaf'd holding 6 takes 36.
 `docs/ui-ux-spec.md:127` renders this as "ASAF! +30 Penalty", which understates it.
 
-`getRoundWinners()` is every player scoring exactly 0 (`:699-710`). In an Asaf that is only the Asaf
-player. Note `GameStateController.java:747` still reports `roundWinner = callerId` as a legacy field
-even when the caller *lost* the Asaf.
+`getRoundWinners()` is every player scoring exactly 0 **who is still in the game** (`:845-856`). In
+an Asaf that is only the Asaf player. The eliminated check is load-bearing: the table above parks a
+knocked-out player on a round score of 0 for every remaining round, so without it they would be
+announced as a co-winner alongside the real one for the rest of the game. A player knocked out *by*
+the round being scored is safely excluded too — a round score of 0 leaves their running total
+untouched, so it can never be what pushed them over the target. Note `GameStateController.java:820`
+still reports `roundWinner = callerId` as a legacy field even when the caller *lost* the Asaf.
 
 ## The halving rule
 
@@ -680,6 +684,7 @@ The card-conservation, scoring and authorisation defects that used to fill this 
 | `processDiscard` had no state guard | requires `WAIT_FOR_TURN` | `CardConservationTest` |
 | `callYaniv` had no state guard | requires `WAIT_FOR_TURN` | `ScoringAndEliminationTest` |
 | Halving re-fired on an unchanged score | only on landing | `ScoringAndEliminationTest` |
+| Knocked-out players were announced as co-winners of every later round | `getRoundWinners` skips them | `ScoringAndEliminationTest.knockedOutPlayersAreNotRoundWinners` |
 | Asaf tie-break followed hash order | seat order | `YanivResolutionTest` |
 | `contestYaniv` accepted non-members | membership checked | `YanivResolutionTest` |
 | `next-round` accepted non-members | membership checked | `GameLifecycleScenariosTest.F4` |

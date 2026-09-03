@@ -818,7 +818,7 @@ public class GameStateController {
             message.isAsaf = engine.isAsaf();
             message.asafByUserId = engine.getAsafByUserId();
             message.roundWinner = engine.getCallerId(); // Legacy single winner (caller)
-            message.roundWinners = engine.getRoundWinners(); // All players with 0 score this round
+            message.roundWinners = engine.getRoundWinners(); // Players still in the game who scored 0 this round
         }
 
         if (engine.isYanivCalled()) {

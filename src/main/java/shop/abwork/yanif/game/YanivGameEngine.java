@@ -835,6 +835,12 @@ public class YanivGameEngine {
      * Get round winners - players who scored 0 this round.
      * In case of tie for lowest score (including caller), all tied players are winners.
      * In case of Asaf, only the Asaf player (lowest opponent) wins.
+     *
+     * Knocked-out players are skipped: they are dealt no hand, so applyScores parks them
+     * on a round score of 0, which would otherwise read as "won the round" for every
+     * round left in the game. A player knocked out by THIS round is safe to skip too --
+     * a round score of 0 leaves their total untouched, so it can never be what pushed
+     * them over the target.
      */
     public List<String> getRoundWinners() {
         if (roundScores == null || roundScores.isEmpty()) {
@@ -842,7 +848,7 @@ public class YanivGameEngine {
         }
         List<String> winners = new ArrayList<>();
         for (Map.Entry<String, Integer> entry : roundScores.entrySet()) {
-            if (entry.getValue() == 0) {
+            if (entry.getValue() == 0 && !eliminatedPlayers.contains(entry.getKey())) {
                 winners.add(entry.getKey());
             }
         }
