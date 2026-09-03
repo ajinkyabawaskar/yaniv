@@ -6,7 +6,7 @@ import './RulesView.css';
 /**
  * How to play. Every rule here is the one the engine actually enforces, not
  * generic Yaniv — the two differ in places (a two-card run is legal, a mixed-suit
- * run needs exactly five, Asaf costs your hand *plus* thirty). docs/game-engine.md
+ * run must empty your hand, Asaf costs your hand *plus* thirty). docs/game-engine.md
  * is the source; shared/rules-contract.json pins the combination cases.
  */
 
@@ -161,8 +161,8 @@ export default function RulesView() {
             ]}
             legal
           >
-            <strong>A mixed-suit run</strong> — but only with <em>exactly five cards</em>. Nothing
-            shorter counts, even if it would empty your hand.
+            <strong>A mixed-suit run</strong> — but only if it <em>empties your hand</em>. From a
+            full hand that means all five; from a three-card hand, all three.
           </Example>
 
           <Example
@@ -173,7 +173,8 @@ export default function RulesView() {
             ]}
             legal={false}
           >
-            Three in sequence but different suits. Make it five cards or keep them.
+            Three in sequence but different suits, with two cards still left over. Legal only if
+            these are your whole hand.
           </Example>
 
           <Example
@@ -373,7 +374,7 @@ export default function RulesView() {
               <tr>
                 <td>Mixed-suit runs</td>
                 <td>Not allowed at all</td>
-                <td className="mine">Legal at exactly five cards</td>
+                <td className="mine">Legal when they empty your hand</td>
               </tr>
               <tr>
                 <td>Tying with the caller</td>

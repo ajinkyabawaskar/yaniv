@@ -27,7 +27,7 @@ Distinct from a **running score**, the total a player has accumulated across rou
 eliminated on their *running* score.
 
 **Combination** — a legal discard: a **single**, a **set** (2–4 cards of one rank), or a
-**sequence** (2+ consecutive cards of one suit; mixed suits allowed only at exactly 5 cards). "Run" and "sequence" mean the same thing; prefer *sequence*, which is what the code says.
+**sequence** (2+ consecutive cards of one suit; mixed suits allowed only when the discard empties the hand). "Run" and "sequence" mean the same thing; prefer *sequence*, which is what the code says.
 
 **Pending discard** — cards removed from a hand but not yet on the pile, staged while the player
 draws. The reason you can never re-take the card you just discarded.

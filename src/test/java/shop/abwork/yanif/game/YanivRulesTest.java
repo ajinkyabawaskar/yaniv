@@ -100,28 +100,54 @@ public class YanivRulesTest {
     }
 
     @Test
-    @DisplayName("Special Rule: Mixed-Suit Sequence ONLY valid at exactly 5 cards")
-    void testMixedSuitSequenceRequiresFiveCards() {
+    @DisplayName("Special Rule: a mixed-suit sequence is legal only when it empties the hand")
+    void testMixedSuitSequenceMustClearTheHand() {
         Card threeS = new Card("3S", Card.Suit.SPADES, Card.Rank.THREE);
         Card fourH = new Card("4H", Card.Suit.HEARTS, Card.Rank.FOUR);
         Card fiveS = new Card("5S", Card.Suit.SPADES, Card.Rank.FIVE);
         Card sixD = new Card("6D", Card.Suit.DIAMONDS, Card.Rank.SIX);
         Card sevenH = new Card("7H", Card.Suit.HEARTS, Card.Rank.SEVEN);
 
+        // Clearing the hand: legal at every length from 2 up.
         List<Card> fiveCardMixedRun = List.of(threeS, fourH, fiveS, sixD, sevenH);
         assertTrue(CardCombinationValidator.isValidCombination(fiveCardMixedRun, 5),
-                "A 5-card mixed-suit run is the only legal mixed-suit sequence");
-
-        // Shorter mixed-suit runs are illegal even when they would empty the hand.
-        List<Card> threeCardMixedRun = List.of(fourH, fiveS, sixD);
-        assertFalse(CardCombinationValidator.isValidCombination(threeCardMixedRun, 3),
-                "A 3-card mixed-suit run is illegal even though it clears the hand");
-        assertFalse(CardCombinationValidator.isValidCombination(threeCardMixedRun, 5),
-                "A 3-card mixed-suit run is illegal with cards remaining");
+                "A 5-card mixed-suit run clears a full hand");
 
         List<Card> fourCardMixedRun = List.of(fourH, fiveS, sixD, sevenH);
-        assertFalse(CardCombinationValidator.isValidCombination(fourCardMixedRun, 4),
-                "A 4-card mixed-suit run is illegal even though it clears the hand");
+        assertTrue(CardCombinationValidator.isValidCombination(fourCardMixedRun, 4),
+                "A 4-card mixed-suit run is legal when it clears the hand");
+
+        List<Card> threeCardMixedRun = List.of(fourH, fiveS, sixD);
+        assertTrue(CardCombinationValidator.isValidCombination(threeCardMixedRun, 3),
+                "A 3-card mixed-suit run is legal when it clears the hand");
+
+        List<Card> twoCardMixedRun = List.of(fourH, fiveS);
+        assertTrue(CardCombinationValidator.isValidCombination(twoCardMixedRun, 2),
+                "A 2-card mixed-suit run is legal when it clears the hand");
+
+        // Leave a card behind and the same cards become illegal.
+        assertFalse(CardCombinationValidator.isValidCombination(fourCardMixedRun, 5),
+                "A 4-card mixed-suit run is illegal with a card left over");
+        assertFalse(CardCombinationValidator.isValidCombination(threeCardMixedRun, 5),
+                "A 3-card mixed-suit run is illegal with cards remaining");
+        assertFalse(CardCombinationValidator.isValidCombination(twoCardMixedRun, 5),
+                "A 2-card mixed-suit run is illegal with cards remaining");
+    }
+
+    @Test
+    @DisplayName("Clearing the hand excuses nothing else: order and wrapping still apply")
+    void testHandClearingMixedRunStillObeysSequenceRules() {
+        Card kingC = new Card("KC", Card.Suit.CLUBS, Card.Rank.KING);
+        Card aceH = new Card("AH", Card.Suit.HEARTS, Card.Rank.ACE);
+        Card twoS = new Card("2S", Card.Suit.SPADES, Card.Rank.TWO);
+        assertFalse(CardCombinationValidator.isValidCombination(List.of(kingC, aceH, twoS), 3),
+                "K-A-2 corner wrapping stays illegal even when it clears the hand");
+
+        Card fourH = new Card("4H", Card.Suit.HEARTS, Card.Rank.FOUR);
+        Card fiveS = new Card("5S", Card.Suit.SPADES, Card.Rank.FIVE);
+        Card sevenD = new Card("7D", Card.Suit.DIAMONDS, Card.Rank.SEVEN);
+        assertFalse(CardCombinationValidator.isValidCombination(List.of(fourH, fiveS, sevenD), 3),
+                "Non-consecutive cards are not a run, hand-clearing or not");
     }
 
     @Test
@@ -191,8 +217,8 @@ public class YanivRulesTest {
     @Test
     @DisplayName("Pickup Test Case 7, 8: [3♠, 4♥, 5♠, 6♦, 7♥] (Mixed Hand Clear) -> Pick ends [3♠], [7♥] VALID, middles INVALID")
     void testPickupTestCase7_8_MixedSequenceEndsOnly() {
-        // A mixed-suit sequence is only legal at a full hand, so the pile can only
-        // ever hold a 5-card one.
+        // A mixed-suit sequence is only legal when it empties the hand; a full hand
+        // makes it five cards long.
         Card threeS = new Card("3S", Card.Suit.SPADES, Card.Rank.THREE);
         Card fourH = new Card("4H", Card.Suit.HEARTS, Card.Rank.FOUR);
         Card fiveS = new Card("5S", Card.Suit.SPADES, Card.Rank.FIVE);

@@ -115,8 +115,8 @@ public final class AutoPlayStrategy {
 
     /**
      * All legal combinations the player could discard: every single, every same-rank set
-     * (2-4 cards), same-suit sequences of length >= 2 (Ace-low and Ace-high), and
-     * mixed-suit sequences only when they clear the entire hand (validator's rule).
+     * (2-4 cards), same-suit sequences of length >= 2 (Ace-low and Ace-high), and the
+     * whole hand as a mixed-suit sequence, which is legal only because it clears the hand.
      */
     static List<List<Card>> candidateDiscards(Hand hand) {
         List<Card> cards = hand.getCards();
@@ -148,9 +148,8 @@ public final class AutoPlayStrategy {
             candidates.addAll(sequenceWindows(suitCards));
         }
 
-        // Mixed-suit sequence (only legal at exactly a full hand's worth of cards)
-        if (cards.size() == CardCombinationValidator.FULL_HAND_SIZE
-                && CardCombinationValidator.isValidSequence(cards, handSize)) {
+        // The whole hand as one mixed-suit sequence; legal only because it empties the hand
+        if (CardCombinationValidator.isValidSequence(cards, handSize)) {
             candidates.add(new ArrayList<>(cards));
         }
 

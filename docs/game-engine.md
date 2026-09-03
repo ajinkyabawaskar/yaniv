@@ -153,40 +153,40 @@ the Ace-high heuristic in `DiscardCombination.sortSequenceCards` can never misfi
 (it would need a 12-card combination).
 
 **The floor is one card, not zero.** Every other path reaches it for free: discarding the whole hand
-still draws one card back, so a five-card mixed run leaves you with one. The bonus discard is the
+still draws one card back, so a hand-clearing mixed run leaves you with one. The bonus discard is the
 only second removal in a turn, and therefore the only route to an empty hand — which is why taking
 it on a last card deals a replacement.
 
 ## What may be discarded
 
 `isValidCombination(cards, handSize)` = single **or** set **or** sequence
-(`CardCombinationValidator.java:183-185`).
+(`CardCombinationValidator.java:164-166`).
 
 ### Single
 Any one card (`:17-19`). An empty list is invalid at every branch, so `processDiscard([])` throws.
 
 ### Set
 - **2 to 4 cards inclusive** (`:26-28`). A pair is a set.
-- All must share the same rank; **suits are unrestricted** (`:31-34`).
+- All must share the same rank; **suits are unrestricted** (`:35-39`).
 - **Cards must be distinct.** Listing the same card twice is rejected (`hasDuplicateCardIds`);
   it is not a pair. Card identity is the id alone, so without this a caller could name one card
   repeatedly and have it removed from the hand more than once.
 
 ### Sequence (run)
-- **Minimum 2 cards** (`:46-48`). Maximum is bounded by hand size, so 5.
-- **K-A-2 wrap is explicitly rejected** (`:51-53`, `hasCornerWrapping` `:86-97`).
-- **Normally all one suit** (`:56-61`).
-- **Mixed-suit runs are legal only at exactly 5 cards** — `cards.size() != FULL_HAND_SIZE` is
-  rejected. A 2, 3 or 4-card run must be single-suit **even if it would empty the hand**. Because a
-  hand never exceeds 5, such a discard always clears it, but the length is the condition, not the
-  clear. The `handSize` parameter is retained for API compatibility and no longer affects the
-  result.
+- **Minimum 2 cards** (`:70-72`). Maximum is bounded by hand size, so 5.
+- **K-A-2 wrap is explicitly rejected** (`:74-77`, `hasCornerWrapping` `:109-120`).
+- **Normally all one suit** (`:79-85`).
+- **Mixed-suit runs are legal only when they empty the hand** — `cards.size() != handSize` is
+  rejected. At any length from 2 upwards a mixed run is legal *provided nothing is left behind*; a
+  run that leaves even one card must be single-suit. This is what `handSize` is for, and it is why
+  every caller has to pass the hand's size before the discard. Clearing the hand relaxes only the
+  suit requirement — corner wrapping and non-consecutive ranks are still rejected first.
 - **Ace is low or high, chosen per combination, never both within one.** The ranks are mapped
-  through both ladders and the run is valid if *either* is strictly consecutive (`:103-115`).
+  through both ladders and the run is valid if *either* is strictly consecutive (`:126-138`).
   `A-2-3` valid, `Q-K-A` valid, `K-A-2` invalid.
-- Duplicate ranks produce a gap of −1 and are rejected (`:120-133`).
+- Duplicate ranks produce a gap of −1 and are rejected (`:143-156`).
 
-`getCombinationType` matches in the order SINGLE → SET → SEQUENCE/MIXED_SEQUENCE (`:200-217`), so a
+`getCombinationType` matches in the order SINGLE → SET → SEQUENCE/MIXED_SEQUENCE (`:181-198`), so a
 same-rank pair is always classified a SET.
 
 ## What may be picked up
@@ -211,8 +211,8 @@ returns the *low end*, not "the card on top". The authoritative list pushed to c
 `drawableDiscardCards` (`:703-713`).
 
 This section matches the pickup rules in `docs/yaniv-rules.md`, and the matrix there is encoded in
-`YanivRulesTest`. Because a mixed-suit run is only legal at 5 cards, a `MIXED_SEQUENCE` on the pile
-is always 5 cards, with its two ends drawable.
+`YanivRulesTest`. A `MIXED_SEQUENCE` on the pile can be 2 to 5 cards long — whatever emptied the
+discarder's hand — and in every case only its two ends are drawable.
 
 ## The bonus discard
 
@@ -573,9 +573,9 @@ absent by Presence, so unlike before, their drop *can* now trigger the advance.
 1. **If the hand is at or below the Yaniv threshold, call Yaniv** — unconditionally, with no regard
    for Asaf risk (`:48-50`).
 2. Otherwise enumerate every single, every set, every consecutive same-suit window (computed twice,
-   Ace low and Ace high), plus the whole hand as a mixed-suit run when that would empty it
-   (`:121-157`). Pick the lowest resulting total; tie-break on more cards discarded, then
-   lexicographically by joined card ids (`:105-114`).
+   Ace low and Ace high), plus the whole hand as a mixed-suit run, which is legal only because it
+   empties the hand (`:121-157`). Pick the lowest resulting total; tie-break on more cards
+   discarded, then lexicographically by joined card ids (`:105-114`).
 
 Two caveats: a deck draw is scored as **value-neutral**, ignoring that the drawn card adds to the
 hand (`:78-80`); and the evaluation models taking a pile card as a *swap* for the worst card, while
@@ -738,7 +738,7 @@ not to trust the other document.
 | Round starter | undocumented | the player after the **caller**, not the round winner |
 | Invites | the UI has always offered them | the handlers were unreachable until the destination prefix was corrected; still untested |
 | Discard/pickup matrix | `docs/yaniv-rules.md` | **agrees exactly** — this part is trustworthy |
-| Mixed-suit runs | previously "valid iff it empties the hand", in both the doc and the code | changed by decision to **exactly 5 cards**; doc, both validators and tests updated together |
+| Mixed-suit runs | briefly changed to "exactly 5 cards", then **reverted by decision** | back to **valid iff the discard empties the hand**, at any length ≥ 2; doc, both validators, the shared contract and the tests moved together |
 
 `CLAUDE.md` is verified **correct** about: connected players never being auto-played, the
 `finishMutation` ordering, the `game:{id}:state` key, snapshots only being trusted while MySQL says
