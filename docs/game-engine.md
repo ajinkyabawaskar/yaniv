@@ -370,6 +370,17 @@ did-not-move cases.
 Game over when `activePlayers <= 1` (`:621-625`). Otherwise state → `ROUND_OVER`, awaiting a client
 `next-round`.
 
+**A knocked-out player keeps their final hand until the next deal.** Elimination does *not* clear it
+(`:691-701`); `startNextRound` does (`:804-810`). The round-over screen reveals every hand, and the hand
+that knocked someone out is the whole story of the round they just lost — clearing it on the spot
+blanked exactly that, and showed them as if they had been holding air. The window is safe because
+nothing between the two points can draw: `ROUND_OVER` admits no turn, `recycleDeck` is reachable
+only from `processDraw` and the bonus path, and `startNextRound` builds a fresh deck rather than
+recycling one. Clearing at the deal is still *required* — an eliminated player is never dealt to
+again, so a kept hand would otherwise sit there for the rest of the game as a phantom card count,
+and `recycleDeck` skips eliminated hands when collecting held ids (`:542-548`), so it would regenerate
+cards they were still holding.
+
 If every remaining player were to cross `targetScore` in the same round, the winner is the one
 with the **lowest running score** among them; an exact tie leaves `winnerId` null, recorded as a
 genuine draw rather than an arbitrary pick.
@@ -379,7 +390,8 @@ genuine draw rather than an arbitrary pick.
 > a guard, not a live path.
 
 `startNextRound` (`:641-681`) requires `ROUND_OVER`, then builds a **brand-new 52-card deck** —
-it does not reuse the remainder. `winnerId` and `yanivCalledTimestamp` are deliberately *not* reset.
+it does not reuse the remainder. It deals to every active player and hands back the cards of
+everyone already out. `winnerId` and `yanivCalledTimestamp` are deliberately *not* reset.
 
 ## Deck exhaustion
 
@@ -488,7 +500,9 @@ still in the game has **no field to leak** rather than a field the client is tru
 sent **only in `WAIT_FOR_TURN`** and only when `game.spectator-meters-enabled`. See **Spectator
 readings** below.
 
-On `ROUND_OVER`/`GAME_OVER`, `allPlayerHands` is revealed to everyone (`:757-774`). The deck's
+On `ROUND_OVER`/`GAME_OVER`, `allPlayerHands` is revealed to everyone (`:757-774`), **including a
+player knocked out by the round being shown** — it no longer filters eliminated players, which used
+to leave their card row empty on the one screen that exists to show it. The deck's
 remaining order is never sent — only `deckCount`.
 
 **`PlayerInfo.status` is real.** For a game it reports absence from *that* game
@@ -751,6 +765,7 @@ The card-conservation, scoring and authorisation defects that used to fill this 
 | `processDiscard` had no state guard | requires `WAIT_FOR_TURN` | `CardConservationTest` |
 | `callYaniv` had no state guard | requires `WAIT_FOR_TURN` | `ScoringAndEliminationTest` |
 | Halving re-fired on an unchanged score | only on landing | `ScoringAndEliminationTest` |
+| Elimination blanked the hand on the round-over screen that reveals it | kept until `startNextRound` deals again | `ScoringAndEliminationTest.theKnockedOutHandIsStillOnTheResultScreen`, `.theKnockedOutHandIsClearedOnContinue` |
 | Knocked-out players were announced as co-winners of every later round | `getRoundWinners` skips them | `ScoringAndEliminationTest.knockedOutPlayersAreNotRoundWinners` |
 | Asaf tie-break followed hash order | seat order | `YanivResolutionTest` |
 | `contestYaniv` accepted non-members | membership checked | `YanivResolutionTest` |

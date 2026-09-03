@@ -129,6 +129,48 @@ public class ScoringAndEliminationTest {
     // ==========================================
 
     @Test
+    @DisplayName("A player knocked out this round still shows the hand they were holding")
+    void theKnockedOutHandIsStillOnTheResultScreen() {
+        // P1 calls Yaniv on 1. P2 takes their 5 onto 96 and crosses the target; P3
+        // survives on 2, so two players are left and the round -- not the game -- ends.
+        YanivGameEngine engine = craft(List.of(P1, P2, P3),
+                Map.of(P1, hand("card_1", "ACE"),
+                       P2, hand("card_5", "FIVE"),
+                       P3, hand("card_2", "TWO")),
+                Map.of(P1, 0, P2, 96, P3, 0),
+                100);
+
+        engine.callYaniv(P1);
+        engine.contestYaniv(P3);
+
+        assertTrue(engine.isRoundOver(), "precondition: the round ended, the game did not");
+        assertTrue(engine.getEliminatedPlayers().contains(P2), "precondition: 96 + 5 is out");
+        assertEquals(List.of("card_5"),
+                engine.getAllPlayerHands().getOrDefault(P2, List.of()).stream().map(Card::getId).toList(),
+                "the hand that knocked them out is the whole story of the round they lost");
+    }
+
+    @Test
+    @DisplayName("Continuing to the next round is what clears a knocked-out player's hand")
+    void theKnockedOutHandIsClearedOnContinue() {
+        YanivGameEngine engine = craft(List.of(P1, P2, P3),
+                Map.of(P1, hand("card_1", "ACE"),
+                       P2, hand("card_5", "FIVE"),
+                       P3, hand("card_2", "TWO")),
+                Map.of(P1, 0, P2, 96, P3, 0),
+                100);
+        engine.callYaniv(P1);
+        engine.contestYaniv(P3);
+        assertFalse(engine.getPlayerHand(P2).getCards().isEmpty(), "precondition: still holding it");
+
+        engine.startNextRound();
+
+        assertTrue(engine.getPlayerHand(P2).getCards().isEmpty(),
+                "a player who is out is never dealt to again, so a kept hand would sit "
+                        + "there forever as a phantom card count");
+    }
+
+    @Test
     @DisplayName("Finishing order is the winner, then players in reverse elimination order")
     void finishingOrderIsWinnerThenReverseElimination() {
         YanivGameEngine seed = new YanivGameEngine("room-3", List.of(P1, P2, P3), 7, 100);

@@ -475,9 +475,7 @@ public class YanivGameEngine {
     public Map<String, List<Card>> getAllPlayerHands() {
         Map<String, List<Card>> allHands = new HashMap<>();
         for (Map.Entry<String, Hand> entry : playerHands.entrySet()) {
-            if (!eliminatedPlayers.contains(entry.getKey())) {
-                allHands.put(entry.getKey(), entry.getValue().getCards());
-            }
+            allHands.put(entry.getKey(), entry.getValue().getCards());
         }
         return allHands;
     }
@@ -691,11 +689,15 @@ public class YanivGameEngine {
 
             if (playerScores.get(playerId) >= targetScore) {
                 eliminatedPlayers.add(playerId);
-                // Hand back their cards. An eliminated player is never dealt to again, so
-                // an uncleared hand would sit there forever: shown to clients as a phantom
-                // card count, and counted as neither held nor in the deck when the deck is
-                // rebuilt, so those ids end up in two places at once.
-                playerHands.put(playerId, new Hand());
+                // Their hand deliberately stays put. The round-over screen reveals every
+                // hand, and the one that knocked a player out is the whole story of the
+                // round they just lost -- clearing it here blanked exactly that. It is
+                // cleared in startNextRound instead, before the next deal, which is early
+                // enough: an eliminated player is never dealt to again, so an uncleared
+                // hand would otherwise sit there forever as a phantom card count, and
+                // recycleDeck would regenerate ids it is still holding. Nothing between
+                // here and there can draw -- ROUND_OVER admits no turn, and startNextRound
+                // builds a fresh deck rather than recycling one.
             }
         }
 
@@ -795,11 +797,15 @@ public class YanivGameEngine {
         this.deck = new Deck();
         this.deck.shuffle();
 
-        // Deal 5 new cards to each active player
+        // Deal 5 new cards to each active player. A player who is out is dealt nothing
+        // and handed back the cards they were knocked out holding -- kept until now so
+        // the round-over screen could reveal them. Clearing here is what stops that hand
+        // sitting there for the rest of the game.
         for (String playerId : playerIds) {
-            if (!eliminatedPlayers.contains(playerId)) {
-                Hand hand = new Hand(deck.drawCards(5));
-                playerHands.put(playerId, hand);
+            if (eliminatedPlayers.contains(playerId)) {
+                playerHands.put(playerId, new Hand());
+            } else {
+                playerHands.put(playerId, new Hand(deck.drawCards(5)));
             }
         }
 
