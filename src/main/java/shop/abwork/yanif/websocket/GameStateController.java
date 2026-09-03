@@ -84,6 +84,9 @@ public class GameStateController {
      * them, so eviction costs at most one restore. Not final: field-injected by Spring,
      * while direct construction in tests keeps the default.
      */
+    /** Kill switch for the knocked-out spectator meters; see buildGameStateForPlayers. */
+    private final boolean spectatorMetersEnabled;
+
     @Value("${game.engine-idle-eviction-minutes:5}")
     private long engineIdleEvictionMinutes = 5;
 
@@ -146,7 +149,8 @@ public class GameStateController {
                               @Value("${game.yaniv-contest-timer-seconds:15}") int yanivContestTimerSeconds,
                               @Value("${game.yaniv-threshold:7}") int yanivThreshold,
                               @Value("${game.absence-grace-seconds:45}") long absenceGraceSeconds,
-                              @Value("${game.bonus-discard-timeout-seconds:30}") int bonusDiscardTimeoutSeconds) {
+                              @Value("${game.bonus-discard-timeout-seconds:30}") int bonusDiscardTimeoutSeconds,
+                              @Value("${game.spectator-meters-enabled:true}") boolean spectatorMetersEnabled) {
         this.gameService = gameService;
         this.presenceService = presenceService;
         this.userService = userService;
@@ -158,6 +162,7 @@ public class GameStateController {
         this.yanivThreshold = yanivThreshold;
         this.absenceGraceSeconds = absenceGraceSeconds;
         this.bonusDiscardTimeoutSeconds = bonusDiscardTimeoutSeconds;
+        this.spectatorMetersEnabled = spectatorMetersEnabled;
 
     }
 
@@ -810,6 +815,27 @@ public class GameStateController {
             }
         }
         message.opponentCounts = opponentCounts;
+
+        // Spectator meters, for a player who has been knocked out and is now watching.
+        //
+        // This is the whole leak boundary of the feature, and it lives here on purpose:
+        // the payload is built per player, so gating it here means a player still in the
+        // game has no field to leak rather than a field the client is trusted to hide.
+        // Never move this decision to the client.
+        //
+        // Sent only while the table is waiting for somebody to play, which is the one
+        // state where every hand is settled and the round is still open:
+        //   YANIV_CALLED  -- readings would name who holds the Asaf before it is revealed,
+        //                    spoiling for the spectator the exact moment this exists for
+        //   BONUS_DISCARD -- the deciding player is mid-turn, still holding a card they
+        //                    are about to throw, so any reading of their hand is stale
+        //   ROUND_OVER /
+        //   GAME_OVER     -- the real hands are on show, so a derived hint adds nothing
+        if (spectatorMetersEnabled
+                && engine.getEliminatedPlayers().contains(userId)
+                && engine.getCurrentState() == YanivGameEngine.GameState.WAIT_FOR_TURN) {
+            message.spectatorReadings = engine.getSpectatorReadings();
+        }
 
         // Yaniv call contest timer data
         if (engine.isYanivCalled() || engine.isRoundOver() || engine.isGameOver()) {
@@ -1654,5 +1680,9 @@ public class GameStateController {
         // Bonus discard state
         public boolean bonusDiscardActive;    // True when player can do bonus discard
         public Map<String, Object> pendingBonusCard; // The card drawn that matches discarded rank
+
+        // Spectator meters. Present ONLY for a knocked-out player -- see the gate in
+        // buildGameStateForPlayers. Null for anyone still in the game.
+        public Map<String, YanivGameEngine.SpectatorReading> spectatorReadings;
     }
 }

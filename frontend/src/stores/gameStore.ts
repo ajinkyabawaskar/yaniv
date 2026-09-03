@@ -13,6 +13,20 @@ export interface PlayerInfo {
   status: string;
 }
 
+/**
+ * How close a player still in the game is to ending the round, and to losing the game.
+ * Only ever sent to a player who has been knocked out -- the server omits the whole map
+ * for anyone still holding cards, so this is undefined for them rather than hidden.
+ *
+ * lowestReachableHandScore is null for a player who can already call Yaniv. Everyone in
+ * Yaniv range must look identical, so the server sends no number to tell them apart.
+ */
+export interface SpectatorReading {
+  canCallYanivNow: boolean;
+  lowestReachableHandScore: number | null;
+  pointsFromElimination: number;
+}
+
 export interface GameState {
   gameId: string | null;
   roomCode: string | null;
@@ -55,6 +69,9 @@ export interface GameState {
   // Bonus discard fields
   bonusDiscardActive: boolean; // Whether player can do bonus discard
   pendingBonusCard: GameCard | null; // The drawn card matching discarded rank
+
+  // Spectator meters, present only while this player is knocked out and watching
+  spectatorReadings: Record<string, SpectatorReading> | null;
 
   // Disconnected players tracking for reconnection UI
 
@@ -108,6 +125,7 @@ export const useGameStore = create<GameState>((set) => ({
   // Bonus discard initial values
   bonusDiscardActive: false,
   pendingBonusCard: null,
+  spectatorReadings: null,
 
   // Disconnected players
 
@@ -158,6 +176,7 @@ export const useGameStore = create<GameState>((set) => ({
       autoPlayedPlayerId: null,
       bonusDiscardActive: false,
       pendingBonusCard: null,
+      spectatorReadings: null,
     }),
 }));
 

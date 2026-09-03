@@ -898,6 +898,56 @@ public class YanivGameEngine {
     }
 
     /**
+     * What a knocked-out player is told about someone still in the game.
+     *
+     * {@code lowestReachableHandScore} is deliberately null for a player who can already
+     * call Yaniv. Everyone in Yaniv range has to read identically -- that is the suspense,
+     * and it is also what stops the meter working as a hand-reading oracle at the one
+     * moment the exact number would give the round away. There is no number to compare
+     * because none is sent.
+     *
+     * @param canCallYanivNow         their hand score is already at or under the threshold
+     * @param lowestReachableHandScore the hand score they could reach next turn, or null
+     *                                 when they can already call
+     * @param pointsFromElimination   running score left before they are knocked out
+     */
+    public record SpectatorReading(boolean canCallYanivNow,
+                                   Integer lowestReachableHandScore,
+                                   int pointsFromElimination) {}
+
+    /**
+     * Readings on every player still in the game, for a spectator who has been knocked out.
+     *
+     * Two different questions, so two numbers: how close someone is to ending this *round*
+     * (hand score, via {@link TurnOutlook}) and how close they are to losing the *game*
+     * (running score against the target). A player one card from Yaniv but three points
+     * from elimination is not winning, and one number alone would say they were.
+     *
+     * Derived on demand and never persisted -- there is nothing here that a fresh read of
+     * the hands could not reproduce.
+     *
+     * <p><strong>This must only be given to a player who has been knocked out.</strong> It
+     * is computed from hidden hands, so handing it to anyone still playing leaks the table.
+     */
+    public Map<String, SpectatorReading> getSpectatorReadings() {
+        Map<String, SpectatorReading> readings = new LinkedHashMap<>();
+        for (String playerId : playerIds) {
+            if (eliminatedPlayers.contains(playerId)) {
+                continue;
+            }
+            Hand hand = playerHands.get(playerId);
+            if (hand == null) {
+                continue;
+            }
+            boolean canCallNow = hand.calculateScore() <= yanivThreshold;
+            Integer reachable = canCallNow ? null : TurnOutlook.lowestReachableHandScore(hand, discardPile);
+            int fromElimination = Math.max(0, targetScore - playerScores.getOrDefault(playerId, 0));
+            readings.put(playerId, new SpectatorReading(canCallNow, reachable, fromElimination));
+        }
+        return readings;
+    }
+
+    /**
      * Get current round number.
      */
     public int getRoundNumber() {

@@ -1692,3 +1692,66 @@
   .bonus-card-img { width: 68px; height: 96px; }
   .bonus-btn { font-size: 13px; padding: 11px 12px; }
 }
+
+/* ---------------------------------------------------------------------------
+   Spectator meters
+   Shown beside each player still in the game, and only to a player who has been
+   knocked out -- the server sends the data to nobody else. The emoji carries the
+   label so the row stays narrow enough to sit under a seat; the number is plain
+   points, the same scoring used everywhere else in the game.
+   --------------------------------------------------------------------------- */
+.spectator-meters {
+  display: flex;
+  gap: 4px;
+  margin-top: 3px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.spectator-meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+/* Closer to acting = hotter. Tiers, not exact values, so the badge reads at a
+   glance and cannot be inverted back into a precise hand. */
+.spectator-meter.far {
+  color: #94a3b8;
+  border-color: rgba(148, 163, 184, 0.25);
+}
+
+.spectator-meter.warm {
+  color: #fbbf24;
+  border-color: rgba(251, 191, 36, 0.35);
+}
+
+.spectator-meter.close {
+  color: #fb923c;
+  border-color: rgba(251, 146, 60, 0.45);
+}
+
+.spectator-meter.imminent {
+  color: #fca5a5;
+  border-color: rgba(248, 113, 113, 0.6);
+  background: rgba(127, 29, 29, 0.55);
+  animation: spectator-meter-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes spectator-meter-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spectator-meter.imminent {
+    animation: none;
+  }
+}

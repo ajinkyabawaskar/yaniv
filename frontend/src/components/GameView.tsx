@@ -208,6 +208,9 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
             yanivCalledAt: gameData.yanivCalledAt || null,
             yanivContestTimerSeconds: gameData.yanivContestTimerSeconds || 15,
             allPlayerHands: gameData.allPlayerHands || {},
+            // Only ever populated for a player who has been knocked out; the server
+            // omits it entirely for anyone still in the game, so this stays null there.
+            spectatorReadings: gameData.spectatorReadings || null,
             // Turn timer / auto-play fields
             turnEndsAt: gameData.turnEndsAt || null,
             turnTimerSeconds: gameData.turnTimerSeconds || 45,
@@ -341,8 +344,10 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
         // Carried on every state push, so a reload or a late join sees the truth.
         isDisconnected: p.status === 'DISCONNECTED_IN_GAME',
         isCurrentPlayer: p.userId === currentUserId,
+        // Undefined unless the viewer is knocked out and this seat is still playing.
+        spectatorReading: gameState.spectatorReadings?.[p.userId],
       }));
-  }, [gameState.players, gameState.scores, gameState.currentTurnPlayerId, gameState.eliminatedPlayers, gameState.opponentCounts, currentUserId, gameState.playerHand]);
+  }, [gameState.players, gameState.scores, gameState.currentTurnPlayerId, gameState.eliminatedPlayers, gameState.opponentCounts, currentUserId, gameState.playerHand, gameState.spectatorReadings]);
 
   if (loading) {
     return (

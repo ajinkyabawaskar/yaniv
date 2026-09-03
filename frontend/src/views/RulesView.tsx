@@ -313,6 +313,37 @@ export default function RulesView() {
           </p>
         </section>
 
+        <section className="rules-section">
+          <h2>Watching after you are out</h2>
+          <p>
+            Being knocked out does not send you away — you keep watching, and you get to see two
+            things nobody still holding cards can see. Both are plain points, the same scoring as
+            everywhere else in the game.
+          </p>
+          <ul className="rules-list">
+            <li>
+              <strong>🚨</strong> — the lowest hand score that player could get down to on their
+              next turn. It counts pairs and runs, so thirty points held as three Kings reads as
+              far more dangerous than thirty points in unrelated cards.
+            </li>
+            <li>
+              <strong>💀</strong> — how many points of their running total are left before they get
+              knocked out too. That is the one that decides the game: someone about to call Yaniv
+              while sitting three points from elimination is not winning.
+            </li>
+          </ul>
+          <p className="rules-note">
+            Once a player is close enough to call Yaniv, their 🚨 reads just <strong>YANIV</strong>
+            — the same for everyone in range, with no number to tell them apart. That is
+            deliberate. Knowing somebody can call is the fun part; knowing exactly who gets there
+            first would spoil it.
+          </p>
+          <p className="rules-note">
+            Nobody still in the game is sent any of this. What the game cannot do is stop you
+            telling them — so if you are out and sitting in the same room, play fair.
+          </p>
+        </section>
+
         <section className="rules-section rules-bonus">
           <h2>✨ Matching Rank Bonus</h2>
           <p>

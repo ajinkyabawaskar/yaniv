@@ -52,6 +52,18 @@ it. A score the round did not move is never halved.
 **Elimination** — a player whose running score reaches `targetScore` (default 100) is out. Last
 player standing wins.
 
+**Spectator** — a player who has been eliminated but is still watching the table. They stay in the
+room until the game ends and keep receiving state.
+
+**Spectator reading** — what a spectator is told about a player still in the game: their
+**reachable hand score**, their points from elimination, and whether they can call Yaniv right now.
+Derived from hidden hands, so it is only ever sent to a spectator. Everyone in Yaniv range reads
+identically, on purpose.
+
+**Reachable hand score** — the lowest hand score a player could hold when their next turn ends,
+counting the combinations they could shed and the one card they must draw. `TurnOutlook` computes
+it; it is the honest measure of "close to Yaniv", where a raw hand score is not.
+
 **Placement** — final standing: the winner first, then players in reverse elimination order.
 Outlasting someone ranks above them regardless of final points, because an eliminated player's
 score freezes when they go out.
@@ -98,5 +110,8 @@ server resumes games instead of re-dealing.
 - *"Score"* unqualified — say **hand score** or **running score**.
 - *"Winner"* unqualified — a **round winner** scores 0 for that round; the **game winner** is the
   last player not eliminated.
+- *"Win percentage"* / *"odds"* for a spectator reading — nothing simulates the rest of the game. A
+  reading is points, in the same scoring as everything else. Say **reachable hand score** or
+  **points from elimination**.
 - *"Joker"* — there are none. The 52-card deck has no jokers, despite stale references in
   `docs/prd.md` and the frontend's card preloader.

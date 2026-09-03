@@ -120,7 +120,7 @@ class GameLifecycleScenariosTest {
         controller = new GameStateController(gameService, presenceService, userService,
                 messagingTemplate, presence, 1 /* turn timer seconds */, true /* auto-play */,
                 1 /* yaniv contest window */, 7 /* yaniv threshold */,
-                2 /* absence grace seconds */, 1 /* bonus discard timeout seconds */);
+                2 /* absence grace seconds */, 1 /* bonus discard timeout seconds */, true /* spectator meters */);
         controller.watchForAbsenceChanges();
         // The real composition: Presence is the only writer of the Redis projection.
         new shop.abwork.yanif.presence.PresenceRedisProjection(presence, presenceService).follow(); // @PostConstruct does not run on a direct construction

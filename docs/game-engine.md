@@ -474,11 +474,19 @@ takes a room. Subscribing to it is also how the server learns which game a sessi
 - `hand` — the recipient's own cards only (`:688-701`)
 - `opponentCounts` — every *other* player's hand **size**, never card identities (`:731-740`)
 - `bonusDiscardActive` / `pendingBonusCard` — **only the player being asked** (`:861`)
+- `spectatorReadings` — **only a player who has been knocked out** (`:819-833`)
 
 That third one is a card-identity leak as much as a UI concern. The bonus card is in the deciding
 player's hand while they think about it, and if they keep it, it *stays* there — so naming it to the
 table hands everyone a card they are not entitled to see. It also raised the prompt on every screen,
 where nobody but the current player could dismiss it.
+
+`spectatorReadings` is the same class of leak, one step removed: it is *derived* from hidden hands
+rather than being them, but a precise reading of what every opponent can reach next turn is a read
+on the table. The gate therefore sits in `buildGameStateForPlayers` beside the others, so a player
+still in the game has **no field to leak** rather than a field the client is trusted to hide. It is
+sent **only in `WAIT_FOR_TURN`** and only when `game.spectator-meters-enabled`. See **Spectator
+readings** below.
 
 On `ROUND_OVER`/`GAME_OVER`, `allPlayerHands` is revealed to everyone (`:757-774`). The deck's
 remaining order is never sent — only `deckCount`.
@@ -493,6 +501,65 @@ row, the player rows and every display name (one batched `getUsersByIds`) once p
 each recipient's message is built from that shared `RoomView`. It used to re-query per recipient —
 roughly `1 + N·(2 + N)` round-trips, so 49 for a 6-player table on every single action.
 `GameLifecycleScenariosTest.F7` pins the count.
+
+## `TurnOutlook` — what a hand can do next turn
+
+`TurnOutlook` (`game/TurnOutlook.java`) answers one question: given a hand and the discard pile,
+what is the **lowest hand score this player could be holding when their next turn ends**?
+
+`legalDiscards` (`:124`) enumerates exactly what the engine accepts — every single, every same-rank
+set of 2–4, every same-suit run of 2+ with Ace low *and* high, and the whole hand as one mixed-suit
+run (legal only because it clears the hand). `evaluate` (`:79`) then prices each line.
+
+**A turn is discard *then* draw, and the draw only ever `addCard`s** (`YanivGameEngine:247,268`).
+Nothing here may model it as a swap: a card drawn cannot cancel out a card left behind. Every line
+therefore pays for exactly one card:
+
+- **pile draw** — the card's real value, taken only when it undercuts the deck
+- **deck draw** — `AVERAGE_DECK_CARD_VALUE` (`:37`), a flat **7**. A 52-card deck holds 340 points
+  (four suits of A–10 = 55, plus J/Q/K = 30), averaging 6.54. Card values are whole numbers, so
+  comparing a pile card against 7 and against the exact 6.54 selects the same cards.
+
+Two readers share it, so "what can this hand do" has one answer rather than two that drift:
+`AutoPlayStrategy.decide` (`:48`) plays the best line for an absent player, and the spectator
+readings below report the number. Both used to be one heuristic inside `AutoPlayStrategy` whose
+arithmetic was wrong in two ways — see the **Known defects** table.
+
+## Spectator readings
+
+`getSpectatorReadings()` (`YanivGameEngine:932`) is what a knocked-out player is told about everyone
+**still in the game**. Two questions, so two numbers, both in the units already on screen everywhere
+else — see `CONTEXT.md` on **hand score** vs **running score**:
+
+| Field | Means | Source |
+|---|---|---|
+| `lowestReachableHandScore` | how close to ending this **round** | `TurnOutlook`, so pairs and runs count |
+| `pointsFromElimination` | how close to losing the **game** | `targetScore` − running score, floored at 0 |
+| `canCallYanivNow` | their hand is already at or under the threshold | `Hand.calculateScore()` |
+
+Both are needed because they disagree: a player one card from Yaniv but three points from
+elimination is not winning, and either number alone would say they were.
+
+**`lowestReachableHandScore` is deliberately `null` whenever `canCallYanivNow`** (`:938-939`).
+Everyone in Yaniv range has to read identically — that is the suspense of not knowing which of them
+takes it, and it is also what stops the meter working as a hand-reading oracle at the one moment an
+exact number would give the round away. There is nothing to compare because nothing is sent.
+
+Nothing here is persisted or snapshotted; it is derived on each push from state already held.
+
+**The gate is `WAIT_FOR_TURN` only** (`GameStateController:834-836`), not merely "not round over".
+That state is the only one where every hand is settled *and* the round is still open. The three it
+excludes each fail one half of that:
+
+| State | Why not |
+|---|---|
+| `YANIV_CALLED` | a reading names whoever is holding under the caller — that is the **Asaf, announced before the reveal**, spoiling the exact moment these meters exist to keep tense |
+| `BONUS_DISCARD` | the deciding player is mid-turn, still holding a card they are about to throw, so any reading of their hand is already stale |
+| `ROUND_OVER` / `GAME_OVER` | the real hands are revealed, so a derived hint adds nothing |
+
+`DRAW_CARD` never needs excluding: `handleGameAction` runs `processDiscard` and `processDraw` inside
+one `synchronized (engine)` block, so it is transient and never reaches a client.
+`SpectatorMetersGateTest` pins the recipient gate and the contest window.
 
 ## Turn timers and auto-play
 
@@ -693,6 +760,7 @@ The card-conservation, scoring and authorisation defects that used to fill this 
 | `/start` re-dealt a FINISHED game | rejected | `GameLifecycleScenariosTest.F5` |
 | An unknown `actionType` silently persisted and broadcast | errors | `GameLifecycleScenariosTest.F6` |
 | `processDraw` trusted the caller's `Card` | resolves it from the pile | `ScoringAndEliminationTest` |
+| Auto-play priced a deck draw at zero and a pile draw as a *swap* | both modelled as the engine applies them — an **add** | `TurnOutlookTest`, `AutoPlayStrategyTest.discardsTheBiggerCardEvenWhenThePileOffersACheapOne` |
 | `gameEngines` was a bare `HashMap` | `ConcurrentHashMap` | — |
 | Turn-advance loops could spin forever | bounded, then throw | — |
 | Disconnect during `BONUS_DISCARD` stalled the room | covered by the turn timer | — |
@@ -716,9 +784,6 @@ exercising the bug; those are fixed too, and the suite is stable across repeated
 
 - **The invite feature has no test coverage.** Its handlers were unreachable until now, so nothing
   has ever exercised send / respond / cancel end to end.
-- **`AutoPlayStrategy.evaluate` does not model the real move.** A deck draw is scored as
-  value-neutral (`:78-80`), and taking a pile card is modelled as a *swap* while the engine only
-  **adds** it (`:82-97`). It is a heuristic ranking, not a simulation.
 - **`handSize` is now a dead parameter** threaded through three validator signatures, and
   `handSizeAtDiscard` is stored and snapshotted but read by no rule.
 - **The rules still exist in two languages.** Consolidated to one copy per side and pinned by the
@@ -763,6 +828,7 @@ else.
 | `game.absence-grace-seconds` | `45` | How long an absent player's turn is held before the server plays it for them. Once per absence, counted only during their turn. |
 | `game.spent-grace-delay-ms` | `800` | Pace of later turns in the same absence. Low keeps the table moving; too low and a whole game finishes while someone's phone is locked. |
 | `game.bonus-discard-timeout-seconds` | `30` | How long a matching-rank bonus decision is held before the server declines it. Applies to everyone, connected or not, and ignores `auto-play-enabled`: the decision blocks the whole room and declining costs the player nothing. A backstop for a client that cannot answer, not a game clock — the panel shows the countdown. |
+| `game.spectator-meters-enabled` | `true` | Whether a knocked-out player is sent readings on the players still in the game. Off removes the field entirely, for everyone.  |
 | `game.engine-idle-eviction-minutes` | `5` | How long a room may go untouched before its engine is dropped from memory. State survives in the snapshot, so eviction costs at most one restore. |
 
 Per-room, supplied in the `POST /api/v1/rooms` body: `targetScore` (default 100, unvalidated) and

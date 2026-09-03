@@ -5,6 +5,8 @@ import { hapticLightTick, hapticFirmSnap, hapticDoubleError } from '../utils/hap
 import './TableCanvas.css';
 import { Card, isValidCombination, calculateHandScore, getRankValueLow } from '../utils/yanivRules';
 
+import type { SpectatorReading } from '../stores/gameStore';
+
 export type { Card } from '../utils/yanivRules';
 
 export interface OpponentInfo {
@@ -17,6 +19,8 @@ export interface OpponentInfo {
   cardCount: number;
   isDisconnected?: boolean;
   isCurrentPlayer?: boolean;
+  /** Present only when the viewer has been knocked out and this seat is still playing. */
+  spectatorReading?: SpectatorReading;
 }
 
 interface TableCanvasProps {
@@ -106,6 +110,54 @@ export const getSuitColor = (suit: string) => {
 // Discard rules live in utils/yanivRules so they can be unit tested without React,
 // and so the shared contract test can run the same cases the server runs.
 export { getRankValueLow, getRankValueHigh, calculateHandScore, isValidCombination } from '../utils/yanivRules';
+
+/**
+ * What a knocked-out player is shown about someone still in the game.
+ *
+ * Both numbers are plain points -- the same scoring as the scoreboard, the round scores
+ * and the revealed hands -- so there is nothing new to learn to read them. The emoji is
+ * the label, which is why there is no wording: 🚨 is the race to end the round, 💀 is
+ * the race to be knocked out of the game.
+ *
+ * A player who can already call Yaniv shows the word rather than a number. Every player
+ * in Yaniv range has to look identical: the point is the suspense of not knowing which
+ * of them takes it, and a number here would give the round away.
+ */
+function SpectatorMeters({ reading }: { reading: SpectatorReading }) {
+  const reachable = reading.lowestReachableHandScore;
+
+  const yanivTier = reading.canCallYanivNow
+    ? 'imminent'
+    : reachable !== null && reachable <= 7
+    ? 'close'
+    : reachable !== null && reachable <= 15
+    ? 'warm'
+    : 'far';
+
+  const deathTier =
+    reading.pointsFromElimination <= 10 ? 'imminent' : reading.pointsFromElimination <= 25 ? 'close' : 'far';
+
+  return (
+    <div className="spectator-meters" aria-label="Spectator view">
+      <span
+        className={`spectator-meter yaniv ${yanivTier}`}
+        title={
+          reading.canCallYanivNow
+            ? 'Can call Yaniv right now'
+            : `Could get down to ${reachable} points next turn`
+        }
+      >
+        🚨 {reading.canCallYanivNow ? 'YANIV' : reachable}
+      </span>
+      <span
+        className={`spectator-meter elimination ${deathTier}`}
+        title={`${reading.pointsFromElimination} points from being knocked out`}
+      >
+        💀 {reading.pointsFromElimination}
+      </span>
+    </div>
+  );
+}
 
 export default function TableCanvas({
   hand,
@@ -650,6 +702,9 @@ export default function TableCanvas({
                   <div className="opponent-score-pill">
                     <span className="score-val">{opponent.score} pts</span>
                   </div>
+                  {opponent.spectatorReading && (
+                    <SpectatorMeters reading={opponent.spectatorReading} />
+                  )}
                   {/* Show YOUR TURN only when it's actually this player's turn AND it's the current user */}
                   {isTurn && isCurrentPlayer && (
                     <span className="current-player-turn-indicator-small">
