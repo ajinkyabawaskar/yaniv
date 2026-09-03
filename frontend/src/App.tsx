@@ -5,6 +5,7 @@ import { StompProvider } from './contexts/StompContext';
 import { useAuthStore } from './stores/authStore';
 import AuthView from './views/AuthView';
 import MainView from './views/MainView';
+import RulesView from './views/RulesView';
 import { preloadAllCards, preloadCardsViaLink } from './utils/cardPreload';
 import './App.css';
 
@@ -52,6 +53,8 @@ function AppContent() {
           </RequireAuth>
         }
       />
+      {/* Public: the rules are worth being able to link to someone who has no account yet */}
+      <Route path="/rules" element={<RulesView />} />
       <Route path="/" element={<Navigate to="/home" replace />} />
       <Route path="*" element={<Navigate to="/home" replace />} />
     </Routes>
