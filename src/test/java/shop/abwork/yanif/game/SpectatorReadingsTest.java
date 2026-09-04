@@ -80,10 +80,10 @@ class SpectatorReadingsTest {
 
         assertTrue(readings.get(P1).canCallYanivNow());
         assertTrue(readings.get(P2).canCallYanivNow());
-        assertNull(readings.get(P1).lowestReachableHandScore(),
-                "a player in Yaniv range must carry no hand-score number");
-        assertEquals(readings.get(P1).lowestReachableHandScore(),
-                readings.get(P2).lowestReachableHandScore(),
+        assertNull(readings.get(P1).yanivProximityPercent(),
+                "a player in Yaniv range must carry no proximity number");
+        assertEquals(readings.get(P1).yanivProximityPercent(),
+                readings.get(P2).yanivProximityPercent(),
                 "3 and 6 are both 'about to win' and must be told apart by nothing");
         assertFalse(readings.get(P3).canCallYanivNow());
     }
@@ -102,8 +102,8 @@ class SpectatorReadingsTest {
 
         Map<String, YanivGameEngine.SpectatorReading> readings = engine.getSpectatorReadings();
 
-        assertTrue(readings.get(P1).lowestReachableHandScore()
-                        < readings.get(P2).lowestReachableHandScore(),
+        assertTrue(readings.get(P1).yanivProximityPercent()
+                        > readings.get(P2).yanivProximityPercent(),
                 "identical hand scores, but a set sheds in one turn and singletons do not");
     }
 
@@ -135,5 +135,40 @@ class SpectatorReadingsTest {
                 Set.of());
 
         assertEquals(0, engine.getSpectatorReadings().get(P1).pointsFromElimination());
+    }
+
+    @Test
+    @DisplayName("Proximity is bucketed, so a percentage cannot be read back as a hand score")
+    void proximityIsCoarseEnoughToHideTheExactScore() {
+        // The whole point of reporting a percentage instead of the reachable score: a
+        // spectator who knows the formula must still not be able to invert one reading
+        // into the sum a player is about to land on.
+        Map<Integer, Integer> byScore = new HashMap<>();
+        for (int reachable = THRESHOLD + 1; reachable < YanivGameEngine.PROXIMITY_CEILING; reachable++) {
+            byScore.put(reachable, YanivGameEngine.yanivProximityPercent(reachable, THRESHOLD));
+        }
+
+        long distinctPercentages = byScore.values().stream().distinct().count();
+        assertTrue(distinctPercentages < byScore.size(),
+                "every reachable score mapping to its own percentage would just be the score again");
+
+        for (int percent : byScore.values()) {
+            assertEquals(0, percent % YanivGameEngine.PROXIMITY_BUCKET,
+                    "readings must land on whole buckets, never a revealing in-between value");
+            assertTrue(percent >= 0 && percent <= 100, "a percentage stays a percentage");
+        }
+    }
+
+    @Test
+    @DisplayName("Proximity rises as the reachable hand score falls, and saturates at both ends")
+    void proximityRunsTheRightWayRound() {
+        assertEquals(100, YanivGameEngine.yanivProximityPercent(THRESHOLD, THRESHOLD),
+                "reaching the threshold next turn is all the way there");
+        assertEquals(0, YanivGameEngine.yanivProximityPercent(
+                YanivGameEngine.PROXIMITY_CEILING + 15, THRESHOLD),
+                "a hopeless hand does not read worse than 0%");
+        assertTrue(YanivGameEngine.yanivProximityPercent(10, THRESHOLD)
+                        > YanivGameEngine.yanivProximityPercent(30, THRESHOLD),
+                "closer to Yaniv must read higher, not lower");
     }
 }

@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useStomp } from '../contexts/StompContext';
-import { useGameStore } from '../stores/gameStore';
+import { useGameStore, ReactionEvent } from '../stores/gameStore';
 import { gameApi } from '../utils/api';
 import TableCanvas, { OpponentInfo, getCardImagePath } from './TableCanvas';
 import ScoreboardView from './ScoreboardView';
@@ -35,6 +35,9 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
   const [startMessage, setStartMessage] = useState<string | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
   const [showRoundOver, setShowRoundOver] = useState(false);
+  // Emotes other players sent. Purely cosmetic, so they live here rather than in the
+  // game store: nothing else reads them and nothing should persist them.
+  const [reactions, setReactions] = useState<ReactionEvent[]>([]);
   
   const [isMobile, setIsMobile] = useState(false);
   const [showScoreboard, setShowScoreboard] = useState(false);
@@ -240,6 +243,22 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
         })
       : null;
 
+    // Emotes go to the whole room on a topic, not a per-player queue: every player is
+    // told the same thing and there is no hand to filter out.
+    const reactionSubscription = isConnected
+      ? subscribe('/topic/room/' + gameId + '/reactions', (message) => {
+          try {
+            const event = JSON.parse(message.body) as ReactionEvent;
+            if (!event?.id) return;
+            // Bounded: an emote is done animating in well under a second, and a long
+            // list would only grow for as long as the round lasts.
+            setReactions((prev) => [...prev, event].slice(-12));
+          } catch (err) {
+            console.error('Bad reaction payload:', err);
+          }
+        })
+      : null;
+
     if (isConnected) {
       send('/app/room/' + gameId + '/state', {});
       send('/app/room/' + gameId + '/join', {});
@@ -264,6 +283,7 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
 
     return () => {
       subscription?.unsubscribe();
+      reactionSubscription?.unsubscribe();
     };
   }, [gameId, isConnected]);
 
@@ -318,6 +338,20 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
       bonusDiscard: shouldDiscard,
       actionId: newActionId(),
     });
+  };
+
+  /**
+   * Fire an emote at a seat. Nothing is drawn locally in response -- the animation runs
+   * when the broadcast comes back, so the sender sees exactly what the room sees, and a
+   * dropped frame shows nothing rather than showing it to one player only.
+   */
+  const handleSendReaction = (type: 'LOVE' | 'RAGE' | 'TAUNT', targetUserId: string) => {
+    // Deliberately not queued while offline the way actions are. send() holds a frame
+    // back until the socket returns, which is right for a turn -- it still has to land --
+    // and wrong for an emote, which would arrive as a taunt fired at a round that has
+    // long since moved on. An emote missed is an emote gone.
+    if (!isConnected) return;
+    send('/app/room/' + gameId + '/reaction', { type, targetUserId });
   };
 
   const handleCallYaniv = () => {
@@ -537,6 +571,8 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
               bonusDiscardActive={gameState.bonusDiscardActive}
               pendingBonusCard={gameState.pendingBonusCard}
               onBonusDiscard={handleBonusDiscard}
+              reactions={reactions}
+              onSendReaction={handleSendReaction}
             />
           </div>
 
