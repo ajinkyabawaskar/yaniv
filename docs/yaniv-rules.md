@@ -12,7 +12,7 @@ A player may discard any **one** of the following valid combination types on the
 | --- | --- | --- | --- |
 | **Single Card** | 1 | 1 | Any single card in hand. |
 | **Set** | 2 | 4 | All cards must share the **exact same rank**. |
-| **Sequence (Run)** | 2 | Hand Size | Cards must be in **consecutive order** and share the **same suit** *(Exception: a 5-card Mixed-Suit Run)*. |
+| **Sequence (Run)** | 2 | Hand Size | Cards must be in **consecutive order** and share the **same suit** *(Exception: a mixed-suit run that empties the hand)*. |
 
 ---
 
@@ -26,10 +26,10 @@ When validating discards, explicitly reject any combination matching the followi
 * Valid sequence examples: $A\diamondsuit - 2\diamondsuit$, $Q\spadesuit - K\spadesuit - A\spadesuit$.
 * Corner-wrapping sequences like $K-A-2$ are **illegal**.
 
-2. **Mixed-Suit Sequences Shorter Than 5 Cards:**
+2. **Mixed-Suit Sequences That Leave Cards Behind:**
 
-* Sequence combinations across different suits are **strictly illegal** unless the run is exactly **5 cards**.
-* A 2, 3 or 4 card mixed-suit run is illegal **even when it would empty the hand**. At those lengths the run must be single-suit.
+* Sequence combinations across different suits are **strictly illegal** unless discarding them **empties the hand**.
+* A mixed-suit run that leaves even one card in hand is illegal; at that point the run must be single-suit.
 
 3. **Duplicate Rank Sequences:**
 
@@ -83,11 +83,12 @@ After a player plays a valid discard combination, the discarded cards are placed
 * **Ace Flexibility:**
 * **Low:** Ace pairs below 2 (e.g., $A\clubsuit - 2\clubsuit$ or $A\clubsuit - 2\clubsuit - 3\clubsuit$).
 * **High:** Ace pairs above King (e.g., $Q\clubsuit - K\clubsuit - A\clubsuit$).
-* **Special Rule — 5-Card Mixed-Suit Sequence:**
-* A consecutive sequence across **different suits** is **VALID** if and only if it is exactly **5 cards** (i.e., `discard.length == 5`).
-* Because a hand never exceeds 5 cards, such a discard always empties the hand — but the length, not the hand-clear, is the condition.
-* Legal: $3\spadesuit - 4\heartsuit - 5\spadesuit - 6\diamondsuit - 7\heartsuit$ (5 cards, mixed suits).
-* Illegal: $4\heartsuit - 5\spadesuit - 6\diamondsuit$ (only 3 cards), even from a 3-card hand.
+* **Special Rule — Hand-Clearing Mixed-Suit Sequence:**
+* A consecutive sequence across **different suits** is **VALID** if and only if discarding it empties the hand (i.e., `discard.length == hand.length`). Length itself is not the condition — the hand-clear is.
+* Legal: $3\spadesuit - 4\heartsuit - 5\spadesuit - 6\diamondsuit - 7\heartsuit$ from a 5-card hand.
+* Legal: $4\heartsuit - 5\spadesuit - 6\diamondsuit$ from a 3-card hand.
+* Illegal: $4\heartsuit - 5\spadesuit - 6\diamondsuit$ from a 4-card hand — one card would be left behind.
+* Clearing the hand excuses nothing else: $K\clubsuit - A\heartsuit - 2\spadesuit$ is still corner-wrapping, and non-consecutive ranks are still not a run.
 
 ---
 
@@ -156,7 +157,7 @@ the discard pile.
 │                                                                        │
 │ 3. SEQUENCES (Consecutive, Minimum 2)                                  │
 │    ├── Standard Run:[Same Suit, Consecutive]                           │
-│    └── Mixed Run:   [Mixed Suits, Consecutive, EXACTLY 5 Cards]        │
+│    └── Mixed Run:   [Mixed Suits, Consecutive, EMPTIES THE HAND]       │
 └────────────────────────────────────────────────────────────────────────┘
 
 ┌────────────────────────────────────────────────────────────────────────┐
@@ -225,4 +226,5 @@ def isValidPickup(chosenCard, topDiscardSet):
 | 6 | $[3\heartsuit, 4\heartsuit, 5\heartsuit]$ | $[4\heartsuit]$ | **INVALID** | Middle cards of a sequence are locked. |
 | 7 | $[3\spadesuit, 4\heartsuit, 5\spadesuit, 6\diamondsuit, 7\heartsuit]$ *(5-card Mixed Run)* | $[3\spadesuit]$ | **VALID** | First card of mixed sequence. |
 | 8 | $[3\spadesuit, 4\heartsuit, 5\spadesuit, 6\diamondsuit, 7\heartsuit]$ *(5-card Mixed Run)* | $[5\spadesuit]$ | **INVALID** | Middle card of mixed sequence remains locked. |
-| 9 | hand $[4\heartsuit, 5\spadesuit, 6\diamondsuit]$ discarded as a run | — | **INVALID DISCARD** | A mixed-suit run must be exactly 5 cards; clearing the hand is not enough. |
+| 9 | 3-card hand $[4\heartsuit, 5\spadesuit, 6\diamondsuit]$ discarded as a run | — | **VALID DISCARD** | A mixed-suit run is legal at any length once it empties the hand. |
+| 10 | 4-card hand $[4\heartsuit, 5\spadesuit, 6\diamondsuit, K\spadesuit]$, discarding $[4\heartsuit, 5\spadesuit, 6\diamondsuit]$ | — | **INVALID DISCARD** | The mixed-suit run leaves a card behind, so it must be single-suit. |

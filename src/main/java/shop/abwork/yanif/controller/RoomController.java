@@ -1,6 +1,7 @@
 package shop.abwork.yanif.controller;
 
 import shop.abwork.yanif.entity.Game;
+import shop.abwork.yanif.game.ScoreLimits;
 import shop.abwork.yanif.entity.GamePlayer;
 import shop.abwork.yanif.service.GameService;
 import shop.abwork.yanif.service.UserService;
@@ -104,15 +105,20 @@ public class RoomController {
                 return ResponseEntity.badRequest().body(Map.of("error",
                         "maxPlayers must be between " + MIN_PLAYERS_LIMIT + " and " + MAX_PLAYERS_LIMIT));
             }
-            if (request.targetScore != null && request.targetScore < 1) {
-                return ResponseEntity.badRequest().body(Map.of("error", "targetScore must be at least 1"));
+            // The score limit is a player-visible choice with a fixed set of values, not a
+            // free integer: anything else is a table nobody could have asked for through
+            // the product, and a 1-point one ends before the first turn.
+            if (request.targetScore != null && !ScoreLimits.isSupported(request.targetScore)) {
+                return ResponseEntity.badRequest().body(Map.of("error",
+                        "targetScore must be " + ScoreLimits.describe()));
             }
 
             // Generate unique room code
             String roomCode = generateUniqueRoomCode();
 
-            // Determine target score (default 100)
-            Integer targetScore = request.targetScore != null ? request.targetScore : 100;
+            // Determine target score
+            Integer targetScore = request.targetScore != null
+                    ? request.targetScore : ScoreLimits.DEFAULT;
             // Determine max players (default 6)
             Integer maxPlayers = request.maxPlayers != null ? request.maxPlayers : 6;
 

@@ -95,6 +95,24 @@ class AutoPlayStrategyTest {
     }
 
     @Test
+    void discardsTheBiggerCardEvenWhenThePileOffersACheapOne() {
+        // 9S 7H = 16 (not consecutive, so the hand is not itself a mixed-suit run), and
+        // the pile offers an Ace. The draw ADDS a card, so the 9 has to go and the turn
+        // ends on 7 + 1 = 8. The old swap model priced both singles at 1 -- it thought
+        // the Ace replaced whatever was left -- and broke the tie on id, throwing away
+        // the 7 and keeping the 9.
+        Hand h = hand(
+                card("s9", Card.Suit.SPADES, Card.Rank.NINE),
+                card("h7", Card.Suit.HEARTS, Card.Rank.SEVEN));
+        DiscardPile pile = pileWith(Card.Suit.DIAMONDS, Card.Rank.ACE);
+
+        AutoPlayStrategy.Decision d = AutoPlayStrategy.decide(h, pile, 7);
+
+        assertEquals(List.of("s9"), d.discardCards().stream().map(Card::getId).toList());
+        assertEquals("DISCARD_PILE", d.drawSource());
+    }
+
+    @Test
     void aceLowSequenceClearingHandIsChosenWhenItReachesZero() {
         // 4S 3S 2S AS (9 points) - ace-low run empties the hand entirely
         Hand h = hand(

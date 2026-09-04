@@ -475,9 +475,7 @@ public class YanivGameEngine {
     public Map<String, List<Card>> getAllPlayerHands() {
         Map<String, List<Card>> allHands = new HashMap<>();
         for (Map.Entry<String, Hand> entry : playerHands.entrySet()) {
-            if (!eliminatedPlayers.contains(entry.getKey())) {
-                allHands.put(entry.getKey(), entry.getValue().getCards());
-            }
+            allHands.put(entry.getKey(), entry.getValue().getCards());
         }
         return allHands;
     }
@@ -691,11 +689,15 @@ public class YanivGameEngine {
 
             if (playerScores.get(playerId) >= targetScore) {
                 eliminatedPlayers.add(playerId);
-                // Hand back their cards. An eliminated player is never dealt to again, so
-                // an uncleared hand would sit there forever: shown to clients as a phantom
-                // card count, and counted as neither held nor in the deck when the deck is
-                // rebuilt, so those ids end up in two places at once.
-                playerHands.put(playerId, new Hand());
+                // Their hand deliberately stays put. The round-over screen reveals every
+                // hand, and the one that knocked a player out is the whole story of the
+                // round they just lost -- clearing it here blanked exactly that. It is
+                // cleared in startNextRound instead, before the next deal, which is early
+                // enough: an eliminated player is never dealt to again, so an uncleared
+                // hand would otherwise sit there forever as a phantom card count, and
+                // recycleDeck would regenerate ids it is still holding. Nothing between
+                // here and there can draw -- ROUND_OVER admits no turn, and startNextRound
+                // builds a fresh deck rather than recycling one.
             }
         }
 
@@ -795,11 +797,15 @@ public class YanivGameEngine {
         this.deck = new Deck();
         this.deck.shuffle();
 
-        // Deal 5 new cards to each active player
+        // Deal 5 new cards to each active player. A player who is out is dealt nothing
+        // and handed back the cards they were knocked out holding -- kept until now so
+        // the round-over screen could reveal them. Clearing here is what stops that hand
+        // sitting there for the rest of the game.
         for (String playerId : playerIds) {
-            if (!eliminatedPlayers.contains(playerId)) {
-                Hand hand = new Hand(deck.drawCards(5));
-                playerHands.put(playerId, hand);
+            if (eliminatedPlayers.contains(playerId)) {
+                playerHands.put(playerId, new Hand());
+            } else {
+                playerHands.put(playerId, new Hand(deck.drawCards(5)));
             }
         }
 
@@ -824,6 +830,11 @@ public class YanivGameEngine {
         return gameId;
     }
 
+    /** What this table is played to: the running score at which a player is eliminated. */
+    public Integer getTargetScore() {
+        return targetScore;
+    }
+
     /**
      * Get round scores for the last completed round.
      */
@@ -835,6 +846,12 @@ public class YanivGameEngine {
      * Get round winners - players who scored 0 this round.
      * In case of tie for lowest score (including caller), all tied players are winners.
      * In case of Asaf, only the Asaf player (lowest opponent) wins.
+     *
+     * Knocked-out players are skipped: they are dealt no hand, so applyScores parks them
+     * on a round score of 0, which would otherwise read as "won the round" for every
+     * round left in the game. A player knocked out by THIS round is safe to skip too --
+     * a round score of 0 leaves their total untouched, so it can never be what pushed
+     * them over the target.
      */
     public List<String> getRoundWinners() {
         if (roundScores == null || roundScores.isEmpty()) {
@@ -842,7 +859,7 @@ public class YanivGameEngine {
         }
         List<String> winners = new ArrayList<>();
         for (Map.Entry<String, Integer> entry : roundScores.entrySet()) {
-            if (entry.getValue() == 0) {
+            if (entry.getValue() == 0 && !eliminatedPlayers.contains(entry.getKey())) {
                 winners.add(entry.getKey());
             }
         }
@@ -889,6 +906,100 @@ public class YanivGameEngine {
      */
     public Set<String> getEliminatedPlayers() {
         return new HashSet<>(eliminatedPlayers);
+    }
+
+    /**
+     * What a knocked-out player is told about someone still in the game.
+     *
+     * {@code yanivProximityPercent} is deliberately null for a player who can already
+     * call Yaniv. Everyone in Yaniv range has to read identically -- that is the suspense,
+     * and it is also what stops the meter working as a hand-reading oracle at the one
+     * moment the exact number would give the round away. There is no number to compare
+     * because none is sent.
+     *
+     * @param canCallYanivNow       their hand score is already at or under the threshold
+     * @param yanivProximityPercent how far along the way to Yaniv range they could get
+     *                              next turn, in whole 10% steps, or null when they can
+     *                              already call
+     * @param pointsFromElimination running score left before they are knocked out
+     */
+    public record SpectatorReading(boolean canCallYanivNow,
+                                   Integer yanivProximityPercent,
+                                   int pointsFromElimination) {}
+
+    /**
+     * A reachable hand score at or above this is "nowhere near Yaniv", and reads 0%.
+     *
+     * Five face cards is the worst hand in the game at 50, and the compulsory draw means
+     * the best line out of it still leaves the high thirties, so the scale has to top out
+     * somewhere above that band or every struggling hand would read identically.
+     */
+    static final int PROXIMITY_CEILING = 40;
+
+    /**
+     * Proximity is reported in steps this wide.
+     *
+     * The percentage exists so a spectator cannot read an exact hand score off the meter.
+     * A continuous percentage would be trivially reversible -- one number in, one number
+     * out -- so it is rounded into buckets, each covering three or four points of
+     * reachable score. Close enough to feel the race tighten, coarse enough that "80%"
+     * never names the sum a player is about to land on.
+     */
+    static final int PROXIMITY_BUCKET = 10;
+
+    /**
+     * How far a reachable hand score has come along the road to Yaniv range, as a
+     * percentage: 0% at {@link #PROXIMITY_CEILING} or worse, 100% once the player could
+     * be in range at the end of their next turn.
+     */
+    static int yanivProximityPercent(int reachableHandScore, int threshold) {
+        if (reachableHandScore <= threshold || threshold >= PROXIMITY_CEILING) {
+            return 100;
+        }
+        if (reachableHandScore >= PROXIMITY_CEILING) {
+            return 0;
+        }
+        double raw = (double) (PROXIMITY_CEILING - reachableHandScore)
+                / (PROXIMITY_CEILING - threshold) * 100.0;
+        return (int) Math.round(raw / PROXIMITY_BUCKET) * PROXIMITY_BUCKET;
+    }
+
+    /**
+     * Readings on every player still in the game, for a spectator who has been knocked out.
+     *
+     * Two different questions, so two numbers: how close someone is to ending this *round*
+     * (a bucketed percentage off {@link TurnOutlook}'s reachable hand score) and how close
+     * they are to losing the *game* (running score against the target). A player one card
+     * from Yaniv but three points from elimination is not winning, and one number alone
+     * would say they were.
+     *
+     * The round number is a percentage rather than the reachable score itself: the score
+     * named the exact sum a player was about to land on, which is the one thing the round
+     * is meant to keep tense.
+     *
+     * Derived on demand and never persisted -- there is nothing here that a fresh read of
+     * the hands could not reproduce.
+     *
+     * <p><strong>This must only be given to a player who has been knocked out.</strong> It
+     * is computed from hidden hands, so handing it to anyone still playing leaks the table.
+     */
+    public Map<String, SpectatorReading> getSpectatorReadings() {
+        Map<String, SpectatorReading> readings = new LinkedHashMap<>();
+        for (String playerId : playerIds) {
+            if (eliminatedPlayers.contains(playerId)) {
+                continue;
+            }
+            Hand hand = playerHands.get(playerId);
+            if (hand == null) {
+                continue;
+            }
+            boolean canCallNow = hand.calculateScore() <= yanivThreshold;
+            Integer proximity = canCallNow ? null : yanivProximityPercent(
+                    TurnOutlook.lowestReachableHandScore(hand, discardPile), yanivThreshold);
+            int fromElimination = Math.max(0, targetScore - playerScores.getOrDefault(playerId, 0));
+            readings.put(playerId, new SpectatorReading(canCallNow, proximity, fromElimination));
+        }
+        return readings;
     }
 
     /**

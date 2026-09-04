@@ -120,7 +120,7 @@ class GameLifecycleScenariosTest {
         controller = new GameStateController(gameService, presenceService, userService,
                 messagingTemplate, presence, 1 /* turn timer seconds */, true /* auto-play */,
                 1 /* yaniv contest window */, 7 /* yaniv threshold */,
-                2 /* absence grace seconds */, 1 /* bonus discard timeout seconds */);
+                2 /* absence grace seconds */, 1 /* bonus discard timeout seconds */, true /* spectator meters */);
         controller.watchForAbsenceChanges();
         // The real composition: Presence is the only writer of the Redis projection.
         new shop.abwork.yanif.presence.PresenceRedisProjection(presence, presenceService).follow(); // @PostConstruct does not run on a direct construction
@@ -980,8 +980,16 @@ class GameLifecycleScenariosTest {
         verify(userService, never()).getUserById(anyString());
     }
 
+    /**
+     * Re-aimed, not relaxed. This used to demand an eliminated player hold nothing the
+     * instant they went out, which blanked their cards on the very screen that reveals
+     * every hand -- the round they lost, shown as though they had been holding air. The
+     * protection it was written for (no phantom cards for someone who is out) still
+     * stands, it just belongs to the next deal: `ScoringAndEliminationTest
+     * .theKnockedOutHandIsClearedOnContinue` pins that half.
+     */
     @Test
-    void F8_eliminatedPlayerHoldsNoCards() {
+    void F8_anEliminatedPlayersLastHandSurvivesForTheReveal() {
         startStartedGame();
 
         GameSnapshot snap = GameSnapshot.fromJson(liveEngine().toSnapshot());
@@ -1000,12 +1008,15 @@ class GameLifecycleScenariosTest {
         controller.contestYaniv(ROOM, new GameStateController.ContestYanivMessage(), auth(OTHER));
 
         assertTrue(crafted.getEliminatedPlayers().contains(OTHER), "precondition: OTHER is out");
-        assertEquals(0, crafted.getPlayerHand(OTHER).size(),
-                "an eliminated player must not keep phantom cards");
 
         GameStateController.GameStateMessage last = messagesFor(HOST).get(messagesFor(HOST).size() - 1);
-        assertEquals(0, last.opponentCounts.get(OTHER),
-                "the UI must not be told an eliminated player still holds cards");
+        assertNotNull(last.allPlayerHands, "precondition: the result screen reveals hands");
+        assertEquals(List.of("card_13"),
+                last.allPlayerHands.getOrDefault(OTHER, List.of()).stream()
+                        .map(c -> (String) c.get("id")).toList(),
+                "the King that knocked them out is what the result screen has to show");
+        assertEquals(1, last.opponentCounts.get(OTHER),
+                "the count has to agree with the hand being revealed beside it");
     }
 
     // ------------------------------------------------- G. idle engine eviction

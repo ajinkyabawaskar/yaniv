@@ -241,6 +241,23 @@ public class GameService {
     }
 
     /**
+     * Change what a room is played to. Only meaningful before the deal: the engine reads
+     * the target score once, when the game starts.
+     *
+     * @param gameId      Game ID
+     * @param targetScore Running score at which a player is eliminated
+     * @return Updated game object
+     */
+    public Game updateTargetScore(String gameId, Integer targetScore) {
+        Game game = getGameById(gameId);
+        if (game == null) {
+            throw new RuntimeException("Game not found: " + gameId);
+        }
+        game.setTargetScore(targetScore);
+        return gameRepository.save(game);
+    }
+
+    /**
      * Finish a game (mark as FINISHED and set winner).
      *
      * @param gameId   Game ID

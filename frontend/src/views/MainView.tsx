@@ -202,8 +202,10 @@ export default function MainView({ initialRoomCode }: MainViewProps) {
             className="nav-logout-btn nav-help-btn"
             onClick={() => navigate('/rules')}
             title="How to play"
+            aria-label="How to play"
           >
-            📖 How to Play
+            <span className="nav-help-icon" aria-hidden="true">📖</span>
+            <span className="nav-help-label">How to Play</span>
           </button>
           <button
             className="nav-logout-btn"

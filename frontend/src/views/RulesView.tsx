@@ -6,7 +6,7 @@ import './RulesView.css';
 /**
  * How to play. Every rule here is the one the engine actually enforces, not
  * generic Yaniv — the two differ in places (a two-card run is legal, a mixed-suit
- * run needs exactly five, Asaf costs your hand *plus* thirty). docs/game-engine.md
+ * run must empty your hand, Asaf costs your hand *plus* thirty). docs/game-engine.md
  * is the source; shared/rules-contract.json pins the combination cases.
  */
 
@@ -25,19 +25,48 @@ const Cards = ({ cards, muted }: { cards: Spec[]; muted?: boolean }) => (
   </div>
 );
 
+/**
+ * `leftover` splits the row into what you are throwing and what stays behind,
+ * for the one rule whose verdict depends on the rest of the hand rather than on
+ * the cards themselves. Pass `[]` for a discard that empties the hand. Omitted
+ * on every other example, which keeps the plain single-row layout.
+ */
 const Example = ({
   cards,
+  leftover,
   legal,
+  verdict,
   children,
 }: {
   cards: Spec[];
+  leftover?: Spec[];
   legal: boolean;
+  verdict?: string;
   children: React.ReactNode;
 }) => (
   <div className={`rule-example ${legal ? 'is-legal' : 'is-illegal'}`}>
-    <Cards cards={cards} muted={!legal} />
+    {leftover === undefined ? (
+      <Cards cards={cards} muted={!legal} />
+    ) : (
+      <div className="rule-example-hand">
+        <div className="rule-hand-part">
+          <Cards cards={cards} />
+          <span className="rule-hand-label">discarding</span>
+        </div>
+        <div className="rule-hand-part is-leftover">
+          {leftover.length > 0 ? (
+            <Cards cards={leftover} muted />
+          ) : (
+            <span className="rule-hand-empty" aria-hidden="true" />
+          )}
+          <span className="rule-hand-label">
+            {leftover.length > 0 ? 'still in hand' : 'nothing left'}
+          </span>
+        </div>
+      </div>
+    )}
     <div className="rule-example-text">
-      <span className="rule-verdict">{legal ? '✓ Legal' : '✕ Not allowed'}</span>
+      <span className="rule-verdict">{verdict ?? (legal ? '✓ Legal' : '✕ Not allowed')}</span>
       <span>{children}</span>
     </div>
   </div>
@@ -159,10 +188,11 @@ export default function RulesView() {
               ['SIX', 'DIAMONDS'],
               ['SEVEN', 'HEARTS'],
             ]}
+            leftover={[]}
             legal
           >
-            <strong>A mixed-suit run</strong> — but only with <em>exactly five cards</em>. Nothing
-            shorter counts, even if it would empty your hand.
+            <strong>A mixed-suit run</strong> — legal only when it <em>empties your hand</em>. The
+            length is not the point: all five from a full hand, or all three from a three-card hand.
           </Example>
 
           <Example
@@ -171,9 +201,15 @@ export default function RulesView() {
               ['FIVE', 'SPADES'],
               ['SIX', 'DIAMONDS'],
             ]}
+            leftover={[
+              ['KING', 'SPADES'],
+              ['NINE', 'CLUBS'],
+            ]}
             legal={false}
+            verdict="✕ Not from this hand"
           >
-            Three in sequence but different suits. Make it five cards or keep them.
+            <strong>The same three cards, from a bigger hand.</strong> Two would be left behind, so
+            the suits have to match after all. Throw those two first and the run becomes legal.
           </Example>
 
           <Example
@@ -312,6 +348,37 @@ export default function RulesView() {
           </p>
         </section>
 
+        <section className="rules-section">
+          <h2>Watching after you are out</h2>
+          <p>
+            Being knocked out does not send you away — you keep watching, and you get to see two
+            things nobody still holding cards can see. Both are plain points, the same scoring as
+            everywhere else in the game.
+          </p>
+          <ul className="rules-list">
+            <li>
+              <strong>🚨</strong> — the lowest hand score that player could get down to on their
+              next turn. It counts pairs and runs, so thirty points held as three Kings reads as
+              far more dangerous than thirty points in unrelated cards.
+            </li>
+            <li>
+              <strong>💀</strong> — how many points of their running total are left before they get
+              knocked out too. That is the one that decides the game: someone about to call Yaniv
+              while sitting three points from elimination is not winning.
+            </li>
+          </ul>
+          <p className="rules-note">
+            Once a player is close enough to call Yaniv, their 🚨 reads just <strong>YANIV</strong>
+            — the same for everyone in range, with no number to tell them apart. That is
+            deliberate. Knowing somebody can call is the fun part; knowing exactly who gets there
+            first would spoil it.
+          </p>
+          <p className="rules-note">
+            Nobody still in the game is sent any of this. What the game cannot do is stop you
+            telling them — so if you are out and sitting in the same room, play fair.
+          </p>
+        </section>
+
         <section className="rules-section rules-bonus">
           <h2>✨ Matching Rank Bonus</h2>
           <p>
@@ -373,7 +440,7 @@ export default function RulesView() {
               <tr>
                 <td>Mixed-suit runs</td>
                 <td>Not allowed at all</td>
-                <td className="mine">Legal at exactly five cards</td>
+                <td className="mine">Legal when they empty your hand</td>
               </tr>
               <tr>
                 <td>Tying with the caller</td>
