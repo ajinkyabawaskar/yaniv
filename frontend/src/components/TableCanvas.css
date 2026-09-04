@@ -44,6 +44,85 @@
 }
 
 /* ==========================================================================
+   Emote Reaction Buttons
+   ========================================================================== */
+ .opponent-avatar-wrap .reaction-btn {
+   position: absolute;
+   left: -6px;
+   width: 24px;
+   height: 24px;
+   border-radius: 50%;
+   background: rgba(0, 0, 0, 0.5);
+   border: 1px solid var(--gold-primary);
+   color: var(--gold-light);
+   font-size: 13px;
+   display: flex;
+   align-items: center;
+   justify-content: center;
+   cursor: pointer;
+   z-index: 10;
+   transition: all 0.2s ease;
+   -webkit-tap-highlight-color: transparent;
+ }
+
+ .opponent-avatar-wrap .reaction-btn:hover {
+   background: rgba(212, 175, 55, 0.2);
+   border-color: var(--gold-primary);
+   transform: scale(1.15);
+ }
+
+ .opponent-avatar-wrap .reaction-love { top: 4px; }
+ .opponent-avatar-wrap .reaction-rage { top: 32px; }
+
+/* ==========================================================================
+   Reaction Animation Overlay
+   Particles spawn here and animate over the active player's avatar.
+   pointer-events: none ensures no layout impact.
+   ========================================================================== */
+ .reaction-animation-container {
+   position: absolute;
+   top: 0;
+   left: 0;
+   width: 100%;
+   height: 100%;
+   pointer-events: none;
+   z-index: 100;
+   overflow: visible;
+ }
+
+ .reaction-particle {
+   position: absolute;
+   pointer-events: none;
+   user-select: none;
+   font-size: 18px;
+ }
+
+ @keyframes love-float {
+   0%   { transform: translateY(0) scale(1); opacity: 1; }
+   100% { transform: translateY(-80px) scale(1.2); opacity: 0; }
+ }
+
+ .love-particle {
+   animation: love-float 1.3s ease-out forwards;
+ }
+
+ @keyframes rage-shake {
+   0%, 100% { transform: rotate(-25deg) scale(1); }
+   50% { transform: rotate(25deg) scale(1.2); }
+ }
+
+ @keyframes rage-fade {
+   0%   { opacity: 1; }
+   100% { opacity: 0; }
+ }
+
+ .rage-particle {
+   animation: rage-shake 0.6s ease-in-out, rage-fade 1.3s ease-out forwards;
+   top: 2px;
+ }
+}
+
+/* ==========================================================================
    1. Opponents Arc (Top Semi-Circle)
    ========================================================================== */
 .opponents-radial-arc {

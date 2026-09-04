@@ -209,6 +209,30 @@ export default function TableCanvas({
   const [yanivContestTimerRemaining, setYanivContestTimerRemaining] = useState<number>(0);
   const [showYanivContestOverlay, setShowYanivContestOverlay] = useState(false);
 
+  const [reactionParticles, setReactionParticles] = useState<
+    Array<{ id: string; type: 'love' | 'rage'; x: number; y: number }>
+  >([]);
+
+  const triggerReaction = useCallback(
+    (type: 'love' | 'rage', targetPlayerId: string) => {
+      const activePlayer = opponents.find((p) => p.isCurrentTurn || p.isCurrentPlayer);
+      if (!activePlayer) return;
+
+      const avatar = document.querySelector(`.opponent-avatar.current-player-avatar`);
+      if (!avatar) return;
+
+      const rect = avatar.getBoundingClientRect();
+      const x = rect.left + rect.width / 2;
+      const y = rect.top + rect.height / 2;
+
+      setReactionParticles((prev) => [
+        ...prev,
+        { id: Date.now().toString(), type, x, y },
+      ]);
+    },
+    [opponents]
+  );
+
   // Preserve user custom card reordering when hand state updates from server
   useEffect(() => {
     setLocalSortedHand((prev) => {
@@ -530,6 +554,14 @@ export default function TableCanvas({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedCards]);
 
+  // Clean up reaction particles after animation completes (1.5s > 1.3s love/rage animation)
+  useEffect(() => {
+    const cleanupTimer = setTimeout(() => {
+      setReactionParticles([]);
+    }, 1500);
+    return () => clearTimeout(cleanupTimer);
+  }, []);
+
   const selectedCardIndex = useMemo(() => {
     if (selectedCards.length === 1) {
       return localSortedHand.findIndex((c) => c.id === selectedCards[0]);
@@ -695,6 +727,22 @@ export default function TableCanvas({
                       🤖
                     </span>
                   )}
+                  <div className="reaction-buttons">
+                    <button
+                      className="reaction-btn reaction-love"
+                      onClick={() => triggerReaction('love', opponent.userId || '')}
+                      title="Love"
+                    >
+                      ❤️
+                    </button>
+                    <button
+                      className="reaction-btn reaction-rage"
+                      onClick={() => triggerReaction('rage', opponent.userId || '')}
+                      title="Rage"
+                    >
+                      😡
+                    </button>
+                  </div>
                 </div>
 
                 <div className="opponent-meta">
@@ -734,6 +782,28 @@ export default function TableCanvas({
                   <span className="card-count-badge">{opponent.cardCount}</span>
                 </div>
               </motion.div>
+            );
+          })}
+        </div>
+
+        {/* 3. Reaction Animation Overlay */}
+        <div className="reaction-animation-container">
+          {reactionParticles.map((particle) => {
+            const className = particle.type === 'love'
+              ? 'love-particle'
+              : 'rage-particle';
+            const html = particle.type === 'love' ? '❤️' : '😡';
+            return (
+              <span
+                key={particle.id}
+                className={className}
+                style={{
+                  left: particle.x - 9,
+                  top: particle.y - 9,
+                }}
+              >
+                {html}
+              </span>
             );
           })}
         </div>
