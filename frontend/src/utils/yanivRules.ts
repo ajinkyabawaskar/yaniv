@@ -16,9 +16,6 @@ export interface Card {
   suit: string;
 }
 
-/** Cards dealt to each player at the start of a round; hands never exceed this. */
-export const FULL_HAND_SIZE = 5;
-
 /**
  * Rank value for SEQUENCE adjacency with Ace low.
  *
@@ -69,8 +66,8 @@ const isValidSequenceRanks = (ranks: number[]): boolean => {
 /**
  * Is this a legal discard? Mirrors `CardCombinationValidator.isValidCombination`.
  *
- * @param handSize size of the hand before the discard; unused today, kept so the
- *                 signature matches the server's.
+ * @param handSize size of the hand before the discard. A mixed-suit run is legal only
+ *                 when it empties the hand, so leaving this out rejects every one.
  */
 export const isValidCombination = (cards: Card[], handSize?: number): { valid: boolean; reason?: string } => {
   if (!cards || cards.length === 0) return { valid: false, reason: 'No cards selected' };
@@ -97,11 +94,11 @@ export const isValidCombination = (cards: Card[], handSize?: number): { valid: b
     const suits = new Set(cards.map((c) => c.suit));
     const isMixedSuit = suits.size > 1;
 
-    // Mixed-suit sequences are only legal at exactly a full hand's worth of cards.
-    if (isMixedSuit && cards.length !== FULL_HAND_SIZE) {
+    // A mixed-suit sequence is only legal when discarding it empties the hand.
+    if (isMixedSuit && cards.length !== handSize) {
       return {
         valid: false,
-        reason: `Mixed-suit sequences must be exactly ${FULL_HAND_SIZE} cards`,
+        reason: 'A mixed-suit run is only legal when it empties your hand',
       };
     }
 

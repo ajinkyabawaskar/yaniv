@@ -27,7 +27,7 @@ Distinct from a **running score**, the total a player has accumulated across rou
 eliminated on their *running* score.
 
 **Combination** — a legal discard: a **single**, a **set** (2–4 cards of one rank), or a
-**sequence** (2+ consecutive cards of one suit; mixed suits allowed only at exactly 5 cards). "Run" and "sequence" mean the same thing; prefer *sequence*, which is what the code says.
+**sequence** (2+ consecutive cards of one suit; mixed suits allowed only when the discard empties the hand). "Run" and "sequence" mean the same thing; prefer *sequence*, which is what the code says.
 
 **Pending discard** — cards removed from a hand but not yet on the pile, staged while the player
 draws. The reason you can never re-take the card you just discarded.
@@ -49,8 +49,40 @@ the round early; it does not decide who receives the Asaf.
 **Halving** — a round that moves a running score exactly onto a positive multiple of 50 halves
 it. A score the round did not move is never halved.
 
-**Elimination** — a player whose running score reaches `targetScore` (default 100) is out. Last
-player standing wins.
+**Score limit** (`targetScore`) — the running score at which a player is out. Per-room, **100 or
+200**, chosen by the host in the waiting room and locked once the game is dealt. Both values are
+multiples of 50, so **Halving** makes the limit itself the one total a player can land on and
+survive.
+
+**Elimination** — a player whose running score reaches the **score limit** is out. Last player
+standing wins.
+
+**Spectator** — a player who has been eliminated but is still watching the table. They stay in the
+room until the game ends and keep receiving state.
+
+**Spectator reading** — what a spectator is told about a player still in the game: their **Yaniv
+proximity**, their points from elimination, and whether they can call Yaniv right now. Derived from
+hidden hands, so it is only ever sent to a spectator. Everyone in Yaniv range reads identically, on
+purpose.
+
+**Reachable hand score** — the lowest hand score a player could hold when their next turn ends,
+counting the combinations they could shed and the one card they must draw. `TurnOutlook` computes
+it; it is the honest measure of "close to Yaniv", where a raw hand score is not. It is an internal
+figure: it drives auto-play and feeds **Yaniv proximity**, but it is never sent to a client.
+
+**Yaniv proximity** — how far along the way to Yaniv range a player could get by the end of their
+next turn, as a percentage in whole 10% steps. 0% at a **reachable hand score** of 40 or worse,
+100% once they could be in range. It exists so a spectator meter can show the race tightening
+without naming the exact sum a player is about to land on; the steps are wide enough that several
+reachable scores share one reading. Not a probability — see **Language to avoid**.
+
+**Emote** — a cosmetic message a player sends to the room mid-round: love or rage aimed at another
+seat, or a **taunt** thrown from your own. Broadcast on a room topic by `ReactionController`, which
+writes the words itself so every screen shows the same thing. Nothing about an emote touches the
+rules engine, and none of it is persisted or snapshotted — a lost emote costs a player nothing.
+
+**Taunt** — the emote a player throws at the whole table rather than at one seat. It carries
+server-written text and reads as a banner across the felt with the sender's name on it.
 
 **Placement** — final standing: the winner first, then players in reverse elimination order.
 Outlasting someone ranks above them regardless of final points, because an eliminated player's
@@ -98,5 +130,8 @@ server resumes games instead of re-dealing.
 - *"Score"* unqualified — say **hand score** or **running score**.
 - *"Winner"* unqualified — a **round winner** scores 0 for that round; the **game winner** is the
   last player not eliminated.
+- *"Win percentage"* / *"odds"* for a spectator reading — nothing simulates the rest of the game.
+  **Yaniv proximity** is a percentage of the way to Yaniv *range*, not a chance of winning, and
+  **points from elimination** is plain points. Say those, never "chance" or "likely to win".
 - *"Joker"* — there are none. The 52-card deck has no jokers, despite stale references in
   `docs/prd.md` and the frontend's card preloader.

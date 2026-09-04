@@ -13,6 +13,41 @@ export interface PlayerInfo {
   status: string;
 }
 
+/**
+ * How close a player still in the game is to ending the round, and to losing the game.
+ * Only ever sent to a player who has been knocked out -- the server omits the whole map
+ * for anyone still holding cards, so this is undefined for them rather than hidden.
+ *
+ * yanivProximityPercent is null for a player who can already call Yaniv. Everyone in
+ * Yaniv range must look identical, so the server sends no number to tell them apart.
+ *
+ * It is a percentage, in whole 10% steps, rather than the reachable hand score it comes
+ * from: the score named the exact sum a player was about to land on, which is the one
+ * thing the round is meant to keep tense. Do not reconstruct a score from it.
+ */
+export interface SpectatorReading {
+  canCallYanivNow: boolean;
+  yanivProximityPercent: number | null;
+  pointsFromElimination: number;
+}
+
+/**
+ * An emote another player sent, as it comes off the room topic. Cosmetic and transient:
+ * never stored, never replayed, and safe to miss.
+ *
+ * targetUserId is the seat it animates over -- someone else for LOVE and RAGE, the
+ * sender's own seat for a TAUNT thrown at the table. text is written by the server so
+ * every screen shows the same words.
+ */
+export interface ReactionEvent {
+  id: string;
+  type: 'LOVE' | 'RAGE' | 'TAUNT';
+  fromUserId: string;
+  fromDisplayName: string;
+  targetUserId: string;
+  text?: string | null;
+}
+
 export interface GameState {
   gameId: string | null;
   roomCode: string | null;
@@ -55,6 +90,9 @@ export interface GameState {
   // Bonus discard fields
   bonusDiscardActive: boolean; // Whether player can do bonus discard
   pendingBonusCard: GameCard | null; // The drawn card matching discarded rank
+
+  // Spectator meters, present only while this player is knocked out and watching
+  spectatorReadings: Record<string, SpectatorReading> | null;
 
   // Disconnected players tracking for reconnection UI
 
@@ -108,6 +146,7 @@ export const useGameStore = create<GameState>((set) => ({
   // Bonus discard initial values
   bonusDiscardActive: false,
   pendingBonusCard: null,
+  spectatorReadings: null,
 
   // Disconnected players
 
@@ -158,6 +197,7 @@ export const useGameStore = create<GameState>((set) => ({
       autoPlayedPlayerId: null,
       bonusDiscardActive: false,
       pendingBonusCard: null,
+      spectatorReadings: null,
     }),
 }));
 

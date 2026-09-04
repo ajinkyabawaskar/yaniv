@@ -10,9 +10,6 @@ import java.util.*;
  */
 public class CardCombinationValidator {
 
-    /** Cards dealt to each player at the start of a round; hands never exceed this. */
-    public static final int FULL_HAND_SIZE = 5;
-
     /**
      * Validate if cards form a valid single card.
      * Any single card is valid.
@@ -62,10 +59,12 @@ public class CardCombinationValidator {
      * A sequence requires 2 or more consecutive cards of the same suit.
      * Supports both Ace-low (A-2-3) and Ace-high (10-J-Q-K-A) sequences.
      *
-     * Special rule: A mixed-suit sequence is valid ONLY at exactly FULL_HAND_SIZE cards.
-     * Shorter mixed-suit runs are illegal even when they would empty the hand.
+     * Special rule: A mixed-suit sequence is valid ONLY when discarding it empties the
+     * hand, at any length from 2 upwards. With a card left over it must be single-suit.
      *
-     * @param handSize retained for API compatibility; no longer affects the result.
+     * @param handSize the hand's size before this discard; a mixed-suit run is legal
+     *                 only when {@code cards.size() == handSize}. Pass -1 (or any size
+     *                 that cannot clear the hand) to reject mixed-suit runs outright.
      */
     public static boolean isValidSequence(List<Card> cards, int handSize) {
         if (cards == null || cards.size() < 2) {
@@ -85,9 +84,8 @@ public class CardCombinationValidator {
 
         boolean isMixedSuitSequence = suits.size() > 1;
 
-        // Mixed-suit sequence is only valid at exactly a full hand's worth of cards.
-        // Hands never exceed FULL_HAND_SIZE, so such a discard always clears the hand.
-        if (isMixedSuitSequence && cards.size() != FULL_HAND_SIZE) {
+        // A mixed-suit sequence is only valid when it clears the hand outright.
+        if (isMixedSuitSequence && cards.size() != handSize) {
             return false;
         }
 
@@ -161,7 +159,7 @@ public class CardCombinationValidator {
 
     /**
      * Validate if a combination is valid (single, set, or sequence).
-     * Requires handSize for mixed-suit sequence validation.
+     * Requires handSize so a mixed-suit sequence can be checked against the hand it clears.
      */
     public static boolean isValidCombination(List<Card> cards, int handSize) {
         return isValidSingle(cards) || isValidSet(cards) || isValidSequence(cards, handSize);

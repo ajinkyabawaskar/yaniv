@@ -95,6 +95,70 @@ public class ScoringAndEliminationTest {
     }
 
     // ==========================================
+    // Halving against the table's limit
+    //
+    // Halving keys off multiples of 50 and knows nothing about targetScore, so the same
+    // round can be survivable at one limit and fatal at another. A 200 table is therefore
+    // not merely a longer 100 table -- 200 is a halving point, so the limit itself is the
+    // one total you can land on and walk away from.
+    // ==========================================
+
+    @Test
+    @DisplayName("At a 200 limit, a round landing on exactly 200 halves to 100 and survives")
+    void landingOnA200LimitHalvesUnderItAndSurvives() {
+        // P2 calls Yaniv on 1; P1 takes their 5 onto 195. 200 is a multiple of 50, so it
+        // halves to 100 first, and 100 is under the limit -- the round ends, not the game.
+        YanivGameEngine engine = craft(List.of(P2, P1),
+                Map.of(P2, hand("card_1", "ACE"), P1, hand("card_5", "FIVE")),
+                Map.of(P2, 0, P1, 195),
+                200);
+
+        engine.callYaniv(P2);
+        engine.contestYaniv(P1);
+
+        assertEquals(100, engine.getPlayerScores().get(P1), "195 + 5 = 200, halved to 100");
+        assertFalse(engine.getEliminatedPlayers().contains(P1),
+                "landing on a 200 limit is a reprieve, not an exit: halving runs first");
+        assertTrue(engine.isRoundOver(), "both players are still in, so the round ended");
+    }
+
+    @Test
+    @DisplayName("At a 200 limit, a round landing past it off a multiple of 50 eliminates")
+    void crossingA200LimitOffAHalvingPointEliminates() {
+        // The ordinary way out of a 200 table: 199 + 5 = 204 is not a multiple of 50, so
+        // nothing halves and the total stands above the limit.
+        YanivGameEngine engine = craft(List.of(P2, P1),
+                Map.of(P2, hand("card_1", "ACE"), P1, hand("card_5", "FIVE")),
+                Map.of(P2, 0, P1, 199),
+                200);
+
+        engine.callYaniv(P2);
+        engine.contestYaniv(P1);
+
+        assertEquals(204, engine.getPlayerScores().get(P1), "199 + 5 = 204, not a halving point");
+        assertTrue(engine.getEliminatedPlayers().contains(P1), "204 is past a 200 limit");
+    }
+
+    @Test
+    @DisplayName("Halving onto a 200 limit exactly is still elimination")
+    void halvingOntoA200LimitStillEliminates() {
+        // Pins the composition of the two rules at their shared boundary: halve first,
+        // then eliminate inclusively. A 395 running total is not a state a real 200 table
+        // reaches -- the player would already be out -- but the boundary is the point.
+        YanivGameEngine engine = craft(List.of(P2, P1),
+                Map.of(P2, hand("card_1", "ACE"), P1, hand("card_5", "FIVE")),
+                Map.of(P2, 0, P1, 395),
+                200);
+
+        engine.callYaniv(P2);
+        engine.contestYaniv(P1);
+
+        assertEquals(200, engine.getPlayerScores().get(P1), "395 + 5 = 400, halved to 200");
+        assertTrue(engine.getEliminatedPlayers().contains(P1),
+                "elimination is >= the limit, so halving onto it exactly does not save you");
+    }
+
+    // ==========================================
     // Yaniv may only be called at the start of a turn
     // ==========================================
 
@@ -129,6 +193,48 @@ public class ScoringAndEliminationTest {
     // ==========================================
 
     @Test
+    @DisplayName("A player knocked out this round still shows the hand they were holding")
+    void theKnockedOutHandIsStillOnTheResultScreen() {
+        // P1 calls Yaniv on 1. P2 takes their 5 onto 96 and crosses the target; P3
+        // survives on 2, so two players are left and the round -- not the game -- ends.
+        YanivGameEngine engine = craft(List.of(P1, P2, P3),
+                Map.of(P1, hand("card_1", "ACE"),
+                       P2, hand("card_5", "FIVE"),
+                       P3, hand("card_2", "TWO")),
+                Map.of(P1, 0, P2, 96, P3, 0),
+                100);
+
+        engine.callYaniv(P1);
+        engine.contestYaniv(P3);
+
+        assertTrue(engine.isRoundOver(), "precondition: the round ended, the game did not");
+        assertTrue(engine.getEliminatedPlayers().contains(P2), "precondition: 96 + 5 is out");
+        assertEquals(List.of("card_5"),
+                engine.getAllPlayerHands().getOrDefault(P2, List.of()).stream().map(Card::getId).toList(),
+                "the hand that knocked them out is the whole story of the round they lost");
+    }
+
+    @Test
+    @DisplayName("Continuing to the next round is what clears a knocked-out player's hand")
+    void theKnockedOutHandIsClearedOnContinue() {
+        YanivGameEngine engine = craft(List.of(P1, P2, P3),
+                Map.of(P1, hand("card_1", "ACE"),
+                       P2, hand("card_5", "FIVE"),
+                       P3, hand("card_2", "TWO")),
+                Map.of(P1, 0, P2, 96, P3, 0),
+                100);
+        engine.callYaniv(P1);
+        engine.contestYaniv(P3);
+        assertFalse(engine.getPlayerHand(P2).getCards().isEmpty(), "precondition: still holding it");
+
+        engine.startNextRound();
+
+        assertTrue(engine.getPlayerHand(P2).getCards().isEmpty(),
+                "a player who is out is never dealt to again, so a kept hand would sit "
+                        + "there forever as a phantom card count");
+    }
+
+    @Test
     @DisplayName("Finishing order is the winner, then players in reverse elimination order")
     void finishingOrderIsWinnerThenReverseElimination() {
         YanivGameEngine seed = new YanivGameEngine("room-3", List.of(P1, P2, P3), 7, 100);
@@ -157,6 +263,31 @@ public class ScoringAndEliminationTest {
 
         assertEquals(List.of(P1, P2, P3), roundTripped.getFinishingOrder(),
                 "placement must not change because the game was restored");
+    }
+
+    @Test
+    @DisplayName("A knocked-out player is not a winner of the rounds played after they are out")
+    void knockedOutPlayersAreNotRoundWinners() {
+        YanivGameEngine seed = new YanivGameEngine("room-7", List.of(P1, P2, P3), 7, 100);
+        GameSnapshot snap = GameSnapshot.fromJson(seed.toSnapshot());
+        // P3 is already out and holds nothing; P1 and P2 play on.
+        snap.eliminatedPlayers = new LinkedHashSet<>(List.of(P3));
+        snap.playerHands = new HashMap<>(Map.of(
+                P1, hand("card_1", "ACE"),
+                P2, hand("card_5", "FIVE"),
+                P3, new ArrayList<>()));
+        snap.playerScores = new HashMap<>(Map.of(P1, 10, P2, 10, P3, 100));
+        snap.currentPlayerIndex = 0;
+        snap.currentState = YanivGameEngine.GameState.WAIT_FOR_TURN.name();
+        YanivGameEngine engine = YanivGameEngine.fromSnapshot(snap.toJson());
+
+        engine.callYaniv(P1);
+        engine.contestYaniv(P2);
+
+        assertEquals(0, engine.getRoundScores().get(P3),
+                "precondition: a player who is out is parked on a round score of 0");
+        assertEquals(List.of(P1), engine.getRoundWinners(),
+                "a round score of 0 for a player who never played is not a win");
     }
 
     @Test

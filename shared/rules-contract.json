@@ -180,7 +180,7 @@
       "valid": true
     },
     {
-      "name": "a five-card mixed-suit run is legal",
+      "name": "a five-card mixed-suit run clears a full hand, so it is legal",
       "handSize": 5,
       "cards": [
         ["c1", "THREE", "SPADES"],
@@ -192,12 +192,43 @@
       "valid": true
     },
     {
-      "name": "a three-card mixed-suit run is illegal even when it clears the hand",
+      "name": "a four-card mixed-suit run is legal when it clears the hand",
+      "handSize": 4,
+      "cards": [
+        ["c1", "FOUR", "HEARTS"],
+        ["c2", "FIVE", "SPADES"],
+        ["c3", "SIX", "DIAMONDS"],
+        ["c4", "SEVEN", "HEARTS"]
+      ],
+      "valid": true
+    },
+    {
+      "name": "a three-card mixed-suit run is legal when it clears the hand",
       "handSize": 3,
       "cards": [
         ["c1", "FOUR", "HEARTS"],
         ["c2", "FIVE", "SPADES"],
         ["c3", "SIX", "DIAMONDS"]
+      ],
+      "valid": true
+    },
+    {
+      "name": "a two-card mixed-suit run is legal when it clears the hand",
+      "handSize": 2,
+      "cards": [
+        ["c1", "FOUR", "HEARTS"],
+        ["c2", "FIVE", "SPADES"]
+      ],
+      "valid": true
+    },
+    {
+      "name": "a four-card mixed-suit run is illegal with a card left over",
+      "handSize": 5,
+      "cards": [
+        ["c1", "FOUR", "HEARTS"],
+        ["c2", "FIVE", "SPADES"],
+        ["c3", "SIX", "DIAMONDS"],
+        ["c4", "SEVEN", "HEARTS"]
       ],
       "valid": false
     },
@@ -212,22 +243,31 @@
       "valid": false
     },
     {
-      "name": "a four-card mixed-suit run is illegal even when it clears the hand",
-      "handSize": 4,
+      "name": "a two-card mixed-suit run is illegal with cards remaining",
+      "handSize": 5,
       "cards": [
         ["c1", "FOUR", "HEARTS"],
-        ["c2", "FIVE", "SPADES"],
-        ["c3", "SIX", "DIAMONDS"],
-        ["c4", "SEVEN", "HEARTS"]
+        ["c2", "FIVE", "SPADES"]
       ],
       "valid": false
     },
     {
-      "name": "a two-card mixed-suit run is illegal",
-      "handSize": 2,
+      "name": "clearing the hand does not excuse K-A-2 corner wrapping",
+      "handSize": 3,
+      "cards": [
+        ["c1", "KING", "CLUBS"],
+        ["c2", "ACE", "HEARTS"],
+        ["c3", "TWO", "SPADES"]
+      ],
+      "valid": false
+    },
+    {
+      "name": "clearing the hand does not make non-consecutive mixed cards a run",
+      "handSize": 3,
       "cards": [
         ["c1", "FOUR", "HEARTS"],
-        ["c2", "FIVE", "SPADES"]
+        ["c2", "FIVE", "SPADES"],
+        ["c3", "SEVEN", "DIAMONDS"]
       ],
       "valid": false
     }

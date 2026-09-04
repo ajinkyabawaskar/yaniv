@@ -138,6 +138,9 @@
 .nav-help-btn {
   border-color: rgba(212, 175, 55, 0.35);
   white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .nav-help-btn:hover {
@@ -147,14 +150,19 @@
 }
 
 @media (max-width: 600px) {
-  /* The icon carries it on a narrow navbar */
+  /* The icon carries it on a narrow navbar. The label is removed outright rather
+     than collapsed with font-size: 0 -- iOS renders Apple Color Emoji at a minimum
+     size regardless, so the old rule left the label's book showing next to the one
+     the pseudo-element added, and the button read as two books. */
   .nav-help-btn {
-    font-size: 0;
     padding: 6px 10px;
   }
 
-  .nav-help-btn::before {
-    content: '📖';
+  .nav-help-label {
+    display: none;
+  }
+
+  .nav-help-icon {
     font-size: 14px;
   }
 }

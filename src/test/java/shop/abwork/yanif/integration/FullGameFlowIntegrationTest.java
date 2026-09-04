@@ -381,7 +381,7 @@ class FullGameFlowIntegrationTest {
         assertFalse(discardPile3.isDrawable("4H")); // Middle - NOT drawable
         assertEquals(2, discardPile3.getDrawableCards().size());
 
-        // Test 4: Mixed sequence (hand clear, always 5 cards) - only ends drawable
+        // Test 4: Mixed sequence (legal only because it cleared the hand) - only ends drawable
         DiscardPile discardPile4 = new DiscardPile();
         Card threeSpades = new Card("3S", Card.Suit.SPADES, Card.Rank.THREE);
         Card fourHearts2 = new Card("4H2", Card.Suit.HEARTS, Card.Rank.FOUR);

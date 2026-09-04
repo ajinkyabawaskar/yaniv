@@ -23,8 +23,10 @@ Line numbers drift; method names don't. If a citation doesn't land, search for t
 | `game/model/DiscardCombination.java` | One discard, and the sort that decides a run's "ends" |
 | `game/AutoPlayStrategy.java` | The move a bot plays for a disconnected player |
 | `game/GameSnapshot.java` | The engine state that survives a restart |
+| `game/ScoreLimits.java` | **The limits a table may be played to**, shared by the create-room API and the host's picker |
 | `websocket/GameStateController.java` | Orchestration: turn timers, contest timer, dedup, persistence |
 | `frontend/src/utils/yanivRules.ts` | **A second copy of the discard rules, in TypeScript**, for client-side validation |
+| `frontend/src/utils/scoreLimits.ts` | **A second copy of the offered score limits**, for the host's picker |
 | `shared/rules-contract.json` | The case table both implementations are tested against |
 
 > **The discard rules exist twice.** `frontend/src/utils/yanivRules.ts` reimplements combination
@@ -153,40 +155,40 @@ the Ace-high heuristic in `DiscardCombination.sortSequenceCards` can never misfi
 (it would need a 12-card combination).
 
 **The floor is one card, not zero.** Every other path reaches it for free: discarding the whole hand
-still draws one card back, so a five-card mixed run leaves you with one. The bonus discard is the
+still draws one card back, so a hand-clearing mixed run leaves you with one. The bonus discard is the
 only second removal in a turn, and therefore the only route to an empty hand — which is why taking
 it on a last card deals a replacement.
 
 ## What may be discarded
 
 `isValidCombination(cards, handSize)` = single **or** set **or** sequence
-(`CardCombinationValidator.java:183-185`).
+(`CardCombinationValidator.java:164-166`).
 
 ### Single
 Any one card (`:17-19`). An empty list is invalid at every branch, so `processDiscard([])` throws.
 
 ### Set
 - **2 to 4 cards inclusive** (`:26-28`). A pair is a set.
-- All must share the same rank; **suits are unrestricted** (`:31-34`).
+- All must share the same rank; **suits are unrestricted** (`:35-39`).
 - **Cards must be distinct.** Listing the same card twice is rejected (`hasDuplicateCardIds`);
   it is not a pair. Card identity is the id alone, so without this a caller could name one card
   repeatedly and have it removed from the hand more than once.
 
 ### Sequence (run)
-- **Minimum 2 cards** (`:46-48`). Maximum is bounded by hand size, so 5.
-- **K-A-2 wrap is explicitly rejected** (`:51-53`, `hasCornerWrapping` `:86-97`).
-- **Normally all one suit** (`:56-61`).
-- **Mixed-suit runs are legal only at exactly 5 cards** — `cards.size() != FULL_HAND_SIZE` is
-  rejected. A 2, 3 or 4-card run must be single-suit **even if it would empty the hand**. Because a
-  hand never exceeds 5, such a discard always clears it, but the length is the condition, not the
-  clear. The `handSize` parameter is retained for API compatibility and no longer affects the
-  result.
+- **Minimum 2 cards** (`:70-72`). Maximum is bounded by hand size, so 5.
+- **K-A-2 wrap is explicitly rejected** (`:74-77`, `hasCornerWrapping` `:109-120`).
+- **Normally all one suit** (`:79-85`).
+- **Mixed-suit runs are legal only when they empty the hand** — `cards.size() != handSize` is
+  rejected. At any length from 2 upwards a mixed run is legal *provided nothing is left behind*; a
+  run that leaves even one card must be single-suit. This is what `handSize` is for, and it is why
+  every caller has to pass the hand's size before the discard. Clearing the hand relaxes only the
+  suit requirement — corner wrapping and non-consecutive ranks are still rejected first.
 - **Ace is low or high, chosen per combination, never both within one.** The ranks are mapped
-  through both ladders and the run is valid if *either* is strictly consecutive (`:103-115`).
+  through both ladders and the run is valid if *either* is strictly consecutive (`:126-138`).
   `A-2-3` valid, `Q-K-A` valid, `K-A-2` invalid.
-- Duplicate ranks produce a gap of −1 and are rejected (`:120-133`).
+- Duplicate ranks produce a gap of −1 and are rejected (`:143-156`).
 
-`getCombinationType` matches in the order SINGLE → SET → SEQUENCE/MIXED_SEQUENCE (`:200-217`), so a
+`getCombinationType` matches in the order SINGLE → SET → SEQUENCE/MIXED_SEQUENCE (`:181-198`), so a
 same-rank pair is always classified a SET.
 
 ## What may be picked up
@@ -211,8 +213,8 @@ returns the *low end*, not "the card on top". The authoritative list pushed to c
 `drawableDiscardCards` (`:703-713`).
 
 This section matches the pickup rules in `docs/yaniv-rules.md`, and the matrix there is encoded in
-`YanivRulesTest`. Because a mixed-suit run is only legal at 5 cards, a `MIXED_SEQUENCE` on the pile
-is always 5 cards, with its two ends drawable.
+`YanivRulesTest`. A `MIXED_SEQUENCE` on the pile can be 2 to 5 cards long — whatever emptied the
+discarder's hand — and in every case only its two ends are drawable.
 
 ## The bonus discard
 
@@ -320,9 +322,13 @@ held nor in the deck when the deck is rebuilt — putting those card ids in two 
 **The Asaf penalty is `hand + 30`, not a flat 30** (`:571-573`). A caller Asaf'd holding 6 takes 36.
 `docs/ui-ux-spec.md:127` renders this as "ASAF! +30 Penalty", which understates it.
 
-`getRoundWinners()` is every player scoring exactly 0 (`:699-710`). In an Asaf that is only the Asaf
-player. Note `GameStateController.java:747` still reports `roundWinner = callerId` as a legacy field
-even when the caller *lost* the Asaf.
+`getRoundWinners()` is every player scoring exactly 0 **who is still in the game** (`:845-856`). In
+an Asaf that is only the Asaf player. The eliminated check is load-bearing: the table above parks a
+knocked-out player on a round score of 0 for every remaining round, so without it they would be
+announced as a co-winner alongside the real one for the rest of the game. A player knocked out *by*
+the round being scored is safely excluded too — a round score of 0 leaves their running total
+untouched, so it can never be what pushed them over the target. Note `GameStateController.java:820`
+still reports `roundWinner = callerId` as a legacy field even when the caller *lost* the Asaf.
 
 ## The halving rule
 
@@ -348,23 +354,90 @@ round N+2: 50 + 25 = 75  -> stays 75
 (Previously it ran unconditionally at every round end, so an unchanged score kept re-halving:
 100 → 50 → 25. Pinned now by `ScoringAndEliminationTest`.)
 
-Interaction with the default `targetScore = 100`: landing on exactly 100 halves to 50 and you
-survive; landing on 200 halves to 100, which is still `>= 100`, so you are eliminated in the same
-pass.
+### Interaction with the table's limit
 
-It is now covered by `ScoringAndEliminationTest`, which pins both the landing and the
-did-not-move cases.
+Halving keys off multiples of 50 and knows nothing about `targetScore`, and it runs **before** the
+elimination test. Because both supported limits are themselves multiples of 50, **the limit is the
+one total you can land on and walk away from** — landing on it exactly halves you to half the limit,
+which is always under it.
+
+| Table limit | Land on exactly the limit | Land past it, off a multiple of 50 | Land on twice the limit |
+| ----------- | ------------------------- | ---------------------------------- | ----------------------- |
+| `100`       | 100 → 50, survives        | 104 stands, eliminated             | 200 → 100, eliminated   |
+| `200`       | 200 → 100, survives       | 204 stands, eliminated             | 400 → 200, eliminated   |
+
+The last column is the inclusive boundary: halving onto the limit exactly is still `>= targetScore`,
+so it does not save you. In a real game it is mostly theoretical — a player that far past the limit
+would already be out — but it is what pins the ordering of the two rules.
+
+This is why a 200 table is not simply a longer 100 table. The reachable escape at 200 is landing on
+exactly 200 and continuing from 100; the ordinary way out is any total past 200 that is not a
+multiple of 50.
+
+`ScoringAndEliminationTest` pins the landing case, the did-not-move case, and all three columns at
+`targetScore = 200`.
 
 ## Elimination and game end
 
 `checkEliminations` (`:609-635`): halve, then **eliminate iff `score >= targetScore`** — inclusive
 (`:614-616`).
 
-`targetScore` defaults to **100**, is **per-room** and caller-supplied via `POST /api/v1/rooms`, with
-**no range validation** (`RoomController.java:99`).
+### Choosing `targetScore`
+
+`targetScore` is **per-room** and defaults to **100** (`ScoreLimits.DEFAULT`). It reaches a room two
+ways, and `ScoreLimits.isSupported` gates both — the supported set is **100 or 200**:
+
+| Entry point | Who | When |
+|---|---|---|
+| `POST /api/v1/rooms` body | whoever creates the room | at creation; omitting it means 100 |
+| `/app/room/{roomId}/target-score` | **the host only** | **while the room is `LOBBY` only** |
+
+`handleSetTargetScore` persists through `GameService.updateTargetScore` and then re-broadcasts
+**lobby state to the whole table**, not just to the host: 100 and 200 are materially different games
+(see [Interaction with the table's limit](#interaction-with-the-tables-limit)), so a guest deciding
+whether to sit down needs to see the change.
+
+The lock at `LOBBY` is not cosmetic. The engine reads `targetScore` exactly once, when `startGame`
+constructs it, so a later change would not move the finish line so much as retroactively decide who
+had already crossed it. `startGame` is the only reader; a running engine never consults the row again.
+
+**The status check and the deal are serialised on the engine map.** The two are separate inbound
+STOMP messages and may be handled on different threads, so a status check alone loses the race: a
+host who picks 200 and immediately deals could have the write land *after* `startGame` built the
+engine at 100, leaving the row saying 200 while the engine eliminated at 100. `handleSetTargetScore`
+re-checks status **and** the absence of an engine inside `synchronized (gameEngines)`, and
+`startGame` takes the same lock across the transition, the read and the publish. This is not the
+per-action path — that locks the engine itself — so nothing hot contends on it.
+
+For the same reason, `buildGameStateForPlayers` reports **the engine's** limit rather than the row's:
+if the two ever disagree the scoreboard must not be the thing that reads correctly.
+
+Two further guards fell out of the same lock:
+
+- **`startGame` re-reads the status under it.** Its own checks are a read-then-write and the Deal
+  button stays live after a click, so two starts could both pass them and the second would put a
+  freshly dealt engine over a game already under way.
+- **`broadcastLobbyState` refuses to publish over a live game.** Lobby-shaped state blanks every
+  seated client, and the settings broadcast could otherwise land on top of the deal's. A *finished*
+  game still receives it — that is how a table returns to the waiting room, and it is the same test
+  `handleJoin` applies.
+
+Pinned by `WaitingRoomScoreLimitTest`. The client's copy of the offered set is pinned to
+`ScoreLimits` by `ScoreLimitsContractTest`.
 
 Game over when `activePlayers <= 1` (`:621-625`). Otherwise state → `ROUND_OVER`, awaiting a client
 `next-round`.
+
+**A knocked-out player keeps their final hand until the next deal.** Elimination does *not* clear it
+(`:691-701`); `startNextRound` does (`:804-810`). The round-over screen reveals every hand, and the hand
+that knocked someone out is the whole story of the round they just lost — clearing it on the spot
+blanked exactly that, and showed them as if they had been holding air. The window is safe because
+nothing between the two points can draw: `ROUND_OVER` admits no turn, `recycleDeck` is reachable
+only from `processDraw` and the bonus path, and `startNextRound` builds a fresh deck rather than
+recycling one. Clearing at the deal is still *required* — an eliminated player is never dealt to
+again, so a kept hand would otherwise sit there for the rest of the game as a phantom card count,
+and `recycleDeck` skips eliminated hands when collecting held ids (`:542-548`), so it would regenerate
+cards they were still holding.
 
 If every remaining player were to cross `targetScore` in the same round, the winner is the one
 with the **lowest running score** among them; an exact tie leaves `winnerId` null, recorded as a
@@ -375,7 +448,8 @@ genuine draw rather than an arbitrary pick.
 > a guard, not a live path.
 
 `startNextRound` (`:641-681`) requires `ROUND_OVER`, then builds a **brand-new 52-card deck** —
-it does not reuse the remainder. `winnerId` and `yanivCalledTimestamp` are deliberately *not* reset.
+it does not reuse the remainder. It deals to every active player and hands back the cards of
+everyone already out. `winnerId` and `yanivCalledTimestamp` are deliberately *not* reset.
 
 ## Deck exhaustion
 
@@ -470,13 +544,23 @@ takes a room. Subscribing to it is also how the server learns which game a sessi
 - `hand` — the recipient's own cards only (`:688-701`)
 - `opponentCounts` — every *other* player's hand **size**, never card identities (`:731-740`)
 - `bonusDiscardActive` / `pendingBonusCard` — **only the player being asked** (`:861`)
+- `spectatorReadings` — **only a player who has been knocked out** (`:819-833`)
 
 That third one is a card-identity leak as much as a UI concern. The bonus card is in the deciding
 player's hand while they think about it, and if they keep it, it *stays* there — so naming it to the
 table hands everyone a card they are not entitled to see. It also raised the prompt on every screen,
 where nobody but the current player could dismiss it.
 
-On `ROUND_OVER`/`GAME_OVER`, `allPlayerHands` is revealed to everyone (`:757-774`). The deck's
+`spectatorReadings` is the same class of leak, one step removed: it is *derived* from hidden hands
+rather than being them, but a precise reading of what every opponent can reach next turn is a read
+on the table. The gate therefore sits in `buildGameStateForPlayers` beside the others, so a player
+still in the game has **no field to leak** rather than a field the client is trusted to hide. It is
+sent **only in `WAIT_FOR_TURN`** and only when `game.spectator-meters-enabled`. See **Spectator
+readings** below.
+
+On `ROUND_OVER`/`GAME_OVER`, `allPlayerHands` is revealed to everyone (`:757-774`), **including a
+player knocked out by the round being shown** — it no longer filters eliminated players, which used
+to leave their card row empty on the one screen that exists to show it. The deck's
 remaining order is never sent — only `deckCount`.
 
 **`PlayerInfo.status` is real.** For a game it reports absence from *that* game
@@ -489,6 +573,76 @@ row, the player rows and every display name (one batched `getUsersByIds`) once p
 each recipient's message is built from that shared `RoomView`. It used to re-query per recipient —
 roughly `1 + N·(2 + N)` round-trips, so 49 for a 6-player table on every single action.
 `GameLifecycleScenariosTest.F7` pins the count.
+
+## `TurnOutlook` — what a hand can do next turn
+
+`TurnOutlook` (`game/TurnOutlook.java`) answers one question: given a hand and the discard pile,
+what is the **lowest hand score this player could be holding when their next turn ends**?
+
+`legalDiscards` (`:124`) enumerates exactly what the engine accepts — every single, every same-rank
+set of 2–4, every same-suit run of 2+ with Ace low *and* high, and the whole hand as one mixed-suit
+run (legal only because it clears the hand). `evaluate` (`:79`) then prices each line.
+
+**A turn is discard *then* draw, and the draw only ever `addCard`s** (`YanivGameEngine:247,268`).
+Nothing here may model it as a swap: a card drawn cannot cancel out a card left behind. Every line
+therefore pays for exactly one card:
+
+- **pile draw** — the card's real value, taken only when it undercuts the deck
+- **deck draw** — `AVERAGE_DECK_CARD_VALUE` (`:37`), a flat **7**. A 52-card deck holds 340 points
+  (four suits of A–10 = 55, plus J/Q/K = 30), averaging 6.54. Card values are whole numbers, so
+  comparing a pile card against 7 and against the exact 6.54 selects the same cards.
+
+Two readers share it, so "what can this hand do" has one answer rather than two that drift:
+`AutoPlayStrategy.decide` (`:48`) plays the best line for an absent player, and the spectator
+readings below report the number. Both used to be one heuristic inside `AutoPlayStrategy` whose
+arithmetic was wrong in two ways — see the **Known defects** table.
+
+## Spectator readings
+
+`getSpectatorReadings()` (`YanivGameEngine:986`) is what a knocked-out player is told about everyone
+**still in the game**. Two questions, so two numbers — and deliberately **not** in the same units:
+
+| Field | Means | Source |
+|---|---|---|
+| `yanivProximityPercent` | how close to ending this **round**, as a percentage | `TurnOutlook`'s reachable score, bucketed by `yanivProximityPercent` (`:955`) |
+| `pointsFromElimination` | how close to losing the **game**, in points | `targetScore` − running score, floored at 0 |
+| `canCallYanivNow` | their hand is already at or under the threshold | `Hand.calculateScore()` |
+
+Both are needed because they disagree: a player one card from Yaniv but three points from
+elimination is not winning, and either number alone would say they were.
+
+**The round meter is a percentage, not the reachable hand score it comes from.** The score named
+the exact sum a player was about to land on, which is the one thing the round is meant to keep
+tense — a spectator could read off "they will be sitting on 9" and know the round before it
+happened. `pointsFromElimination` stays in plain points because the score limit is public and
+counting down to it gives nothing away.
+
+A percentage alone would not be enough: one number in, one number out is trivially invertible. So
+the scale is **bucketed** — `PROXIMITY_CEILING` (`:937`, a reachable score of 40 or worse reads 0%)
+and `PROXIMITY_BUCKET` (`:948`, whole 10% steps), which puts three or four reachable scores behind
+every value the spectator sees. `SpectatorReadingsTest` pins that the buckets really do collapse
+distinct scores, and that the meter runs the right way round.
+
+**`yanivProximityPercent` is deliberately `null` whenever `canCallYanivNow`** (`:997-998`).
+Everyone in Yaniv range has to read identically — that is the suspense of not knowing which of them
+takes it, and it is also what stops the meter working as a hand-reading oracle at the one moment an
+exact number would give the round away. There is nothing to compare because nothing is sent.
+
+Nothing here is persisted or snapshotted; it is derived on each push from state already held.
+
+**The gate is `WAIT_FOR_TURN` only** (`GameStateController:834-836`), not merely "not round over".
+That state is the only one where every hand is settled *and* the round is still open. The three it
+excludes each fail one half of that:
+
+| State | Why not |
+|---|---|
+| `YANIV_CALLED` | a reading names whoever is holding under the caller — that is the **Asaf, announced before the reveal**, spoiling the exact moment these meters exist to keep tense |
+| `BONUS_DISCARD` | the deciding player is mid-turn, still holding a card they are about to throw, so any reading of their hand is already stale |
+| `ROUND_OVER` / `GAME_OVER` | the real hands are revealed, so a derived hint adds nothing |
+
+`DRAW_CARD` never needs excluding: `handleGameAction` runs `processDiscard` and `processDraw` inside
+one `synchronized (engine)` block, so it is transient and never reaches a client.
+`SpectatorMetersGateTest` pins the recipient gate and the contest window.
 
 ## Turn timers and auto-play
 
@@ -573,9 +727,9 @@ absent by Presence, so unlike before, their drop *can* now trigger the advance.
 1. **If the hand is at or below the Yaniv threshold, call Yaniv** — unconditionally, with no regard
    for Asaf risk (`:48-50`).
 2. Otherwise enumerate every single, every set, every consecutive same-suit window (computed twice,
-   Ace low and Ace high), plus the whole hand as a mixed-suit run when that would empty it
-   (`:121-157`). Pick the lowest resulting total; tie-break on more cards discarded, then
-   lexicographically by joined card ids (`:105-114`).
+   Ace low and Ace high), plus the whole hand as a mixed-suit run, which is legal only because it
+   empties the hand (`:121-157`). Pick the lowest resulting total; tie-break on more cards
+   discarded, then lexicographically by joined card ids (`:105-114`).
 
 Two caveats: a deck draw is scored as **value-neutral**, ignoring that the drawn card adds to the
 hand (`:78-80`); and the evaluation models taking a pile card as a *swap* for the worst card, while
@@ -680,6 +834,8 @@ The card-conservation, scoring and authorisation defects that used to fill this 
 | `processDiscard` had no state guard | requires `WAIT_FOR_TURN` | `CardConservationTest` |
 | `callYaniv` had no state guard | requires `WAIT_FOR_TURN` | `ScoringAndEliminationTest` |
 | Halving re-fired on an unchanged score | only on landing | `ScoringAndEliminationTest` |
+| Elimination blanked the hand on the round-over screen that reveals it | kept until `startNextRound` deals again | `ScoringAndEliminationTest.theKnockedOutHandIsStillOnTheResultScreen`, `.theKnockedOutHandIsClearedOnContinue` |
+| Knocked-out players were announced as co-winners of every later round | `getRoundWinners` skips them | `ScoringAndEliminationTest.knockedOutPlayersAreNotRoundWinners` |
 | Asaf tie-break followed hash order | seat order | `YanivResolutionTest` |
 | `contestYaniv` accepted non-members | membership checked | `YanivResolutionTest` |
 | `next-round` accepted non-members | membership checked | `GameLifecycleScenariosTest.F4` |
@@ -688,6 +844,7 @@ The card-conservation, scoring and authorisation defects that used to fill this 
 | `/start` re-dealt a FINISHED game | rejected | `GameLifecycleScenariosTest.F5` |
 | An unknown `actionType` silently persisted and broadcast | errors | `GameLifecycleScenariosTest.F6` |
 | `processDraw` trusted the caller's `Card` | resolves it from the pile | `ScoringAndEliminationTest` |
+| Auto-play priced a deck draw at zero and a pile draw as a *swap* | both modelled as the engine applies them — an **add** | `TurnOutlookTest`, `AutoPlayStrategyTest.discardsTheBiggerCardEvenWhenThePileOffersACheapOne` |
 | `gameEngines` was a bare `HashMap` | `ConcurrentHashMap` | — |
 | Turn-advance loops could spin forever | bounded, then throw | — |
 | Disconnect during `BONUS_DISCARD` stalled the room | covered by the turn timer | — |
@@ -701,6 +858,9 @@ The card-conservation, scoring and authorisation defects that used to fill this 
 | Reconnect during a storage outage NPE'd | returns without touching the room | — |
 | Unauthenticated STOMP CONNECT passed through | rejected | — |
 | `maxPlayers` was unvalidated | constrained to 2–6 | — |
+| `targetScore` accepted any positive integer, so a 1-point table was creatable over the API | constrained to `ScoreLimits.supported()` | `CreateRoomScoreLimitTest` |
+| A second `start` re-dealt a game in progress | status re-read under the engine-map lock | `WaitingRoomScoreLimitTest.theDealIsNotRepeatable` |
+| A pre-start broadcast could land after the deal's and blank the table | `broadcastLobbyState` refuses to publish over a live game | — |
 | Invite handlers were unreachable | destination prefix corrected | — |
 | Dedup was dead (no client `actionId`) | client sends a stable `actionId` | — |
 
@@ -711,9 +871,6 @@ exercising the bug; those are fixed too, and the suite is stable across repeated
 
 - **The invite feature has no test coverage.** Its handlers were unreachable until now, so nothing
   has ever exercised send / respond / cancel end to end.
-- **`AutoPlayStrategy.evaluate` does not model the real move.** A deck draw is scored as
-  value-neutral (`:78-80`), and taking a pile card is modelled as a *swap* while the engine only
-  **adds** it (`:82-97`). It is a heuristic ranking, not a simulation.
 - **`handSize` is now a dead parameter** threaded through three validator signatures, and
   `handSizeAtDiscard` is stored and snapshotted but read by no rule.
 - **The rules still exist in two languages.** Consolidated to one copy per side and pinned by the
@@ -738,7 +895,7 @@ not to trust the other document.
 | Round starter | undocumented | the player after the **caller**, not the round winner |
 | Invites | the UI has always offered them | the handlers were unreachable until the destination prefix was corrected; still untested |
 | Discard/pickup matrix | `docs/yaniv-rules.md` | **agrees exactly** — this part is trustworthy |
-| Mixed-suit runs | previously "valid iff it empties the hand", in both the doc and the code | changed by decision to **exactly 5 cards**; doc, both validators and tests updated together |
+| Mixed-suit runs | briefly changed to "exactly 5 cards", then **reverted by decision** | back to **valid iff the discard empties the hand**, at any length ≥ 2; doc, both validators, the shared contract and the tests moved together |
 
 `CLAUDE.md` is verified **correct** about: connected players never being auto-played, the
 `finishMutation` ordering, the `game:{id}:state` key, snapshots only being trusted while MySQL says
@@ -758,7 +915,10 @@ else.
 | `game.absence-grace-seconds` | `45` | How long an absent player's turn is held before the server plays it for them. Once per absence, counted only during their turn. |
 | `game.spent-grace-delay-ms` | `800` | Pace of later turns in the same absence. Low keeps the table moving; too low and a whole game finishes while someone's phone is locked. |
 | `game.bonus-discard-timeout-seconds` | `30` | How long a matching-rank bonus decision is held before the server declines it. Applies to everyone, connected or not, and ignores `auto-play-enabled`: the decision blocks the whole room and declining costs the player nothing. A backstop for a client that cannot answer, not a game clock — the panel shows the countdown. |
+| `game.spectator-meters-enabled` | `true` | Whether a knocked-out player is sent readings on the players still in the game. Off removes the field entirely, for everyone.  |
 | `game.engine-idle-eviction-minutes` | `5` | How long a room may go untouched before its engine is dropped from memory. State survives in the snapshot, so eviction costs at most one restore. |
 
-Per-room, supplied in the `POST /api/v1/rooms` body: `targetScore` (default 100, unvalidated) and
-`maxPlayers` (default 6, valid range 2–6, validated on create).
+Per-room, supplied in the `POST /api/v1/rooms` body: `targetScore` (default 100, must be one of
+`ScoreLimits.supported()` — 100 or 200 — validated on create and again on the host's picker) and
+`maxPlayers` (default 6, valid range 2–6, validated on create). See
+[Choosing `targetScore`](#choosing-targetscore) for who may change the limit and when.

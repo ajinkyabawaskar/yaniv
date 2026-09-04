@@ -1,11 +1,12 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useStomp } from '../contexts/StompContext';
-import { useGameStore } from '../stores/gameStore';
+import { useGameStore, ReactionEvent } from '../stores/gameStore';
 import { gameApi } from '../utils/api';
 import TableCanvas, { OpponentInfo, getCardImagePath } from './TableCanvas';
 import ScoreboardView from './ScoreboardView';
 import { playTurnChangeSound, playYourTurnSound, isSoundEnabled, setSoundEnabled, setupAudioUnlock } from '../utils/sound';
 import { isBgMusicEnabled, setBgMusicEnabled, setupBgMusicUnlock, preloadBgMusic } from '../utils/backgroundMusic';
+import { SCORE_LIMITS, DEFAULT_SCORE_LIMIT, canChooseScoreLimit } from '../utils/scoreLimits';
 import './GameView.css';
 
 interface GameViewProps {
@@ -34,6 +35,9 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
   const [startMessage, setStartMessage] = useState<string | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
   const [showRoundOver, setShowRoundOver] = useState(false);
+  // Emotes other players sent. Purely cosmetic, so they live here rather than in the
+  // game store: nothing else reads them and nothing should persist them.
+  const [reactions, setReactions] = useState<ReactionEvent[]>([]);
   
   const [isMobile, setIsMobile] = useState(false);
   const [showScoreboard, setShowScoreboard] = useState(false);
@@ -208,6 +212,9 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
             yanivCalledAt: gameData.yanivCalledAt || null,
             yanivContestTimerSeconds: gameData.yanivContestTimerSeconds || 15,
             allPlayerHands: gameData.allPlayerHands || {},
+            // Only ever populated for a player who has been knocked out; the server
+            // omits it entirely for anyone still in the game, so this stays null there.
+            spectatorReadings: gameData.spectatorReadings || null,
             // Turn timer / auto-play fields
             turnEndsAt: gameData.turnEndsAt || null,
             turnTimerSeconds: gameData.turnTimerSeconds || 45,
@@ -236,6 +243,22 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
         })
       : null;
 
+    // Emotes go to the whole room on a topic, not a per-player queue: every player is
+    // told the same thing and there is no hand to filter out.
+    const reactionSubscription = isConnected
+      ? subscribe('/topic/room/' + gameId + '/reactions', (message) => {
+          try {
+            const event = JSON.parse(message.body) as ReactionEvent;
+            if (!event?.id) return;
+            // Bounded: an emote is done animating in well under a second, and a long
+            // list would only grow for as long as the round lasts.
+            setReactions((prev) => [...prev, event].slice(-12));
+          } catch (err) {
+            console.error('Bad reaction payload:', err);
+          }
+        })
+      : null;
+
     if (isConnected) {
       send('/app/room/' + gameId + '/state', {});
       send('/app/room/' + gameId + '/join', {});
@@ -260,6 +283,7 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
 
     return () => {
       subscription?.unsubscribe();
+      reactionSubscription?.unsubscribe();
     };
   }, [gameId, isConnected]);
 
@@ -269,6 +293,12 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
       send('/app/room/' + gameId + '/join', {});
     }
   }, [isConnected, gameId, send, flushPending]);
+
+  const handleSetScoreLimit = (limit: number) => {
+    if (limit === gameState.targetScore) return;
+    setStartMessage(null);
+    send('/app/room/' + gameId + '/target-score', { targetScore: limit });
+  };
 
   const handleStartGame = () => {
     if (!isConnected) {
@@ -310,6 +340,20 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
     });
   };
 
+  /**
+   * Fire an emote at a seat. Nothing is drawn locally in response -- the animation runs
+   * when the broadcast comes back, so the sender sees exactly what the room sees, and a
+   * dropped frame shows nothing rather than showing it to one player only.
+   */
+  const handleSendReaction = (type: 'LOVE' | 'RAGE' | 'TAUNT', targetUserId: string) => {
+    // Deliberately not queued while offline the way actions are. send() holds a frame
+    // back until the socket returns, which is right for a turn -- it still has to land --
+    // and wrong for an emote, which would arrive as a taunt fired at a round that has
+    // long since moved on. An emote missed is an emote gone.
+    if (!isConnected) return;
+    send('/app/room/' + gameId + '/reaction', { type, targetUserId });
+  };
+
   const handleCallYaniv = () => {
     const userId = localStorage.getItem('userId');
     send('/app/room/' + gameId + '/call-yaniv', {
@@ -341,8 +385,10 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
         // Carried on every state push, so a reload or a late join sees the truth.
         isDisconnected: p.status === 'DISCONNECTED_IN_GAME',
         isCurrentPlayer: p.userId === currentUserId,
+        // Undefined unless the viewer is knocked out and this seat is still playing.
+        spectatorReading: gameState.spectatorReadings?.[p.userId],
       }));
-  }, [gameState.players, gameState.scores, gameState.currentTurnPlayerId, gameState.eliminatedPlayers, gameState.opponentCounts, currentUserId, gameState.playerHand]);
+  }, [gameState.players, gameState.scores, gameState.currentTurnPlayerId, gameState.eliminatedPlayers, gameState.opponentCounts, currentUserId, gameState.playerHand, gameState.spectatorReadings]);
 
   if (loading) {
     return (
@@ -440,6 +486,36 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
               </div>
             </div>
 
+            <div className="score-limit-row">
+              <span className="score-limit-label">Played to</span>
+              {canChooseScoreLimit(isHost, gameState.currentState) ? (
+                <div className="score-limit-choices" role="group" aria-label="Score limit">
+                  {SCORE_LIMITS.map((limit) => (
+                    <button
+                      key={limit}
+                      type="button"
+                      className={
+                        'score-limit-btn' +
+                        ((gameState.targetScore || DEFAULT_SCORE_LIMIT) === limit ? ' is-selected' : '')
+                      }
+                      aria-pressed={(gameState.targetScore || DEFAULT_SCORE_LIMIT) === limit}
+                      onClick={() => handleSetScoreLimit(limit)}
+                      disabled={!isConnected}
+                    >
+                      {limit}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <span className="score-limit-fixed">
+                  {gameState.targetScore || DEFAULT_SCORE_LIMIT} pts
+                </span>
+              )}
+              <span className="score-limit-hint">
+                Reach it and you are out. Landing on it exactly halves you instead.
+              </span>
+            </div>
+
             {isHost ? (
               <div className="host-controls">
                 <button
@@ -495,6 +571,8 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
               bonusDiscardActive={gameState.bonusDiscardActive}
               pendingBonusCard={gameState.pendingBonusCard}
               onBonusDiscard={handleBonusDiscard}
+              reactions={reactions}
+              onSendReaction={handleSendReaction}
             />
           </div>
 
