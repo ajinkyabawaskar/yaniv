@@ -599,20 +599,31 @@ arithmetic was wrong in two ways — see the **Known defects** table.
 
 ## Spectator readings
 
-`getSpectatorReadings()` (`YanivGameEngine:932`) is what a knocked-out player is told about everyone
-**still in the game**. Two questions, so two numbers, both in the units already on screen everywhere
-else — see `CONTEXT.md` on **hand score** vs **running score**:
+`getSpectatorReadings()` (`YanivGameEngine:986`) is what a knocked-out player is told about everyone
+**still in the game**. Two questions, so two numbers — and deliberately **not** in the same units:
 
 | Field | Means | Source |
 |---|---|---|
-| `lowestReachableHandScore` | how close to ending this **round** | `TurnOutlook`, so pairs and runs count |
-| `pointsFromElimination` | how close to losing the **game** | `targetScore` − running score, floored at 0 |
+| `yanivProximityPercent` | how close to ending this **round**, as a percentage | `TurnOutlook`'s reachable score, bucketed by `yanivProximityPercent` (`:955`) |
+| `pointsFromElimination` | how close to losing the **game**, in points | `targetScore` − running score, floored at 0 |
 | `canCallYanivNow` | their hand is already at or under the threshold | `Hand.calculateScore()` |
 
 Both are needed because they disagree: a player one card from Yaniv but three points from
 elimination is not winning, and either number alone would say they were.
 
-**`lowestReachableHandScore` is deliberately `null` whenever `canCallYanivNow`** (`:938-939`).
+**The round meter is a percentage, not the reachable hand score it comes from.** The score named
+the exact sum a player was about to land on, which is the one thing the round is meant to keep
+tense — a spectator could read off "they will be sitting on 9" and know the round before it
+happened. `pointsFromElimination` stays in plain points because the score limit is public and
+counting down to it gives nothing away.
+
+A percentage alone would not be enough: one number in, one number out is trivially invertible. So
+the scale is **bucketed** — `PROXIMITY_CEILING` (`:937`, a reachable score of 40 or worse reads 0%)
+and `PROXIMITY_BUCKET` (`:948`, whole 10% steps), which puts three or four reachable scores behind
+every value the spectator sees. `SpectatorReadingsTest` pins that the buckets really do collapse
+distinct scores, and that the meter runs the right way round.
+
+**`yanivProximityPercent` is deliberately `null` whenever `canCallYanivNow`** (`:997-998`).
 Everyone in Yaniv range has to read identically — that is the suspense of not knowing which of them
 takes it, and it is also what stops the meter working as a hand-reading oracle at the one moment an
 exact number would give the round away. There is nothing to compare because nothing is sent.

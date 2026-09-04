@@ -18,13 +18,34 @@ export interface PlayerInfo {
  * Only ever sent to a player who has been knocked out -- the server omits the whole map
  * for anyone still holding cards, so this is undefined for them rather than hidden.
  *
- * lowestReachableHandScore is null for a player who can already call Yaniv. Everyone in
+ * yanivProximityPercent is null for a player who can already call Yaniv. Everyone in
  * Yaniv range must look identical, so the server sends no number to tell them apart.
+ *
+ * It is a percentage, in whole 10% steps, rather than the reachable hand score it comes
+ * from: the score named the exact sum a player was about to land on, which is the one
+ * thing the round is meant to keep tense. Do not reconstruct a score from it.
  */
 export interface SpectatorReading {
   canCallYanivNow: boolean;
-  lowestReachableHandScore: number | null;
+  yanivProximityPercent: number | null;
   pointsFromElimination: number;
+}
+
+/**
+ * An emote another player sent, as it comes off the room topic. Cosmetic and transient:
+ * never stored, never replayed, and safe to miss.
+ *
+ * targetUserId is the seat it animates over -- someone else for LOVE and RAGE, the
+ * sender's own seat for a TAUNT thrown at the table. text is written by the server so
+ * every screen shows the same words.
+ */
+export interface ReactionEvent {
+  id: string;
+  type: 'LOVE' | 'RAGE' | 'TAUNT';
+  fromUserId: string;
+  fromDisplayName: string;
+  targetUserId: string;
+  text?: string | null;
 }
 
 export interface GameState {
