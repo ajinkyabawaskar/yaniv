@@ -830,6 +830,11 @@ public class YanivGameEngine {
         return gameId;
     }
 
+    /** What this table is played to: the running score at which a player is eliminated. */
+    public Integer getTargetScore() {
+        return targetScore;
+    }
+
     /**
      * Get round scores for the last completed round.
      */

@@ -6,6 +6,7 @@ import TableCanvas, { OpponentInfo, getCardImagePath } from './TableCanvas';
 import ScoreboardView from './ScoreboardView';
 import { playTurnChangeSound, playYourTurnSound, isSoundEnabled, setSoundEnabled, setupAudioUnlock } from '../utils/sound';
 import { isBgMusicEnabled, setBgMusicEnabled, setupBgMusicUnlock, preloadBgMusic } from '../utils/backgroundMusic';
+import { SCORE_LIMITS, DEFAULT_SCORE_LIMIT, canChooseScoreLimit } from '../utils/scoreLimits';
 import './GameView.css';
 
 interface GameViewProps {
@@ -273,6 +274,12 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
     }
   }, [isConnected, gameId, send, flushPending]);
 
+  const handleSetScoreLimit = (limit: number) => {
+    if (limit === gameState.targetScore) return;
+    setStartMessage(null);
+    send('/app/room/' + gameId + '/target-score', { targetScore: limit });
+  };
+
   const handleStartGame = () => {
     if (!isConnected) {
       setStartMessage('Connecting to game server... please wait');
@@ -443,6 +450,36 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
                   </div>
                 ))}
               </div>
+            </div>
+
+            <div className="score-limit-row">
+              <span className="score-limit-label">Played to</span>
+              {canChooseScoreLimit(isHost, gameState.currentState) ? (
+                <div className="score-limit-choices" role="group" aria-label="Score limit">
+                  {SCORE_LIMITS.map((limit) => (
+                    <button
+                      key={limit}
+                      type="button"
+                      className={
+                        'score-limit-btn' +
+                        ((gameState.targetScore || DEFAULT_SCORE_LIMIT) === limit ? ' is-selected' : '')
+                      }
+                      aria-pressed={(gameState.targetScore || DEFAULT_SCORE_LIMIT) === limit}
+                      onClick={() => handleSetScoreLimit(limit)}
+                      disabled={!isConnected}
+                    >
+                      {limit}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <span className="score-limit-fixed">
+                  {gameState.targetScore || DEFAULT_SCORE_LIMIT} pts
+                </span>
+              )}
+              <span className="score-limit-hint">
+                Reach it and you are out. Landing on it exactly halves you instead.
+              </span>
             </div>
 
             {isHost ? (

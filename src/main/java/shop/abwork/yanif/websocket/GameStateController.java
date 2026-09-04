@@ -8,6 +8,7 @@ import shop.abwork.yanif.presence.PresenceStatus;
 import shop.abwork.yanif.entity.GamePlayer;
 import shop.abwork.yanif.entity.User;
 import shop.abwork.yanif.game.AutoPlayStrategy;
+import shop.abwork.yanif.game.ScoreLimits;
 import shop.abwork.yanif.game.YanivGameEngine;
 import shop.abwork.yanif.game.model.Card;
 import shop.abwork.yanif.game.model.Hand;
@@ -577,6 +578,8 @@ public class GameStateController {
         lobbyState.gameId = game.getId();
         lobbyState.roomCode = game.getRoomCode();
         lobbyState.maxPlayers = game.getMaxPlayers();
+        lobbyState.targetScore = game.getTargetScore() != null
+                ? game.getTargetScore() : ScoreLimits.DEFAULT;
         lobbyState.currentState = game.getStatus().toString();
         lobbyState.roundNumber = 0;
         lobbyState.scores = new HashMap<>();
@@ -607,6 +610,52 @@ public class GameStateController {
                     gameStateDestination(roomId),
                     lobbyState
             );
+        }
+    }
+
+    /**
+     * Set what the table is played to, before the deal.
+     *
+     * Host only, lobby only. The engine reads the target score exactly once, when the
+     * game starts, so changing it later would not move the finish line so much as
+     * retroactively decide who had already crossed it.
+     *
+     * The whole table is re-broadcast rather than answering the host alone: a guest
+     * decides whether to sit down based on what the table is played to, and 100 and 200
+     * are materially different games.
+     */
+    @MessageMapping("/room/{roomId}/target-score")
+    public void handleSetTargetScore(@DestinationVariable String roomId,
+                                     TargetScoreMessage request,
+                                     Authentication auth) {
+        try {
+            String userId = auth.getName();
+
+            Game game = gameService.getGameById(roomId);
+            if (game == null) {
+                sendErrorToUser(roomId, userId, "Game not found");
+                return;
+            }
+            if (!userId.equals(game.getHostUserId())) {
+                sendErrorToUser(roomId, userId, "Only the host can change the score limit");
+                return;
+            }
+            if (game.getStatus() != Game.GameStatus.LOBBY) {
+                sendErrorToUser(roomId, userId, "The score limit is locked once the game has started");
+                return;
+            }
+            Integer requested = request != null ? request.targetScore : null;
+            if (!ScoreLimits.isSupported(requested)) {
+                sendErrorToUser(roomId, userId, "Score limit must be " + ScoreLimits.describe());
+                return;
+            }
+
+            gameService.updateTargetScore(roomId, requested);
+            broadcastLobbyState(roomId);
+
+        } catch (Exception e) {
+            System.err.println("Error setting target score: " + e.getMessage());
+            sendErrorToUser(roomId, auth.getName(), e.getMessage());
         }
     }
 
@@ -656,7 +705,7 @@ public class GameStateController {
                     .toList();
             YanivGameEngine engine = new YanivGameEngine(roomId, (List<String>) playerIds,
                     yanivThreshold,
-                    game.getTargetScore() != null ? game.getTargetScore() : 100);
+                    game.getTargetScore() != null ? game.getTargetScore() : ScoreLimits.DEFAULT);
             engine.setYanivContestTimerSeconds(yanivContestTimerSeconds);
             gameEngines.put(roomId, engine);
             engineLastTouched.put(roomId, System.currentTimeMillis());
@@ -738,7 +787,7 @@ public class GameStateController {
         var game = view.game();
         message.roomCode = game != null ? game.getRoomCode() : "";
         message.maxPlayers = game != null ? game.getMaxPlayers() : 6;
-        message.targetScore = game != null ? game.getTargetScore() : 100;
+        message.targetScore = game != null ? game.getTargetScore() : ScoreLimits.DEFAULT;
         message.roundNumber = engine.getRoundNumber();
         message.currentState = engine.getCurrentState().toString();
         message.currentTurnPlayerId = engine.getCurrentPlayer();
@@ -1613,6 +1662,10 @@ public class GameStateController {
         public String drawnCardId;
         public String actionId;         // For deduplication (client-generated unique ID)
         public Boolean bonusDiscard;    // For BONUS_DISCARD action: true to discard, false to keep
+    }
+
+    public static class TargetScoreMessage {
+        public Integer targetScore;
     }
 
     public static class YanivCallMessage {

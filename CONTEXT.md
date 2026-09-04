@@ -49,8 +49,13 @@ the round early; it does not decide who receives the Asaf.
 **Halving** — a round that moves a running score exactly onto a positive multiple of 50 halves
 it. A score the round did not move is never halved.
 
-**Elimination** — a player whose running score reaches `targetScore` (default 100) is out. Last
-player standing wins.
+**Score limit** (`targetScore`) — the running score at which a player is out. Per-room, **100 or
+200**, chosen by the host in the waiting room and locked once the game is dealt. Both values are
+multiples of 50, so **Halving** makes the limit itself the one total a player can land on and
+survive.
+
+**Elimination** — a player whose running score reaches the **score limit** is out. Last player
+standing wins.
 
 **Spectator** — a player who has been eliminated but is still watching the table. They stay in the
 room until the game ends and keep receiving state.

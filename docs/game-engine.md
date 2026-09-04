@@ -23,8 +23,10 @@ Line numbers drift; method names don't. If a citation doesn't land, search for t
 | `game/model/DiscardCombination.java` | One discard, and the sort that decides a run's "ends" |
 | `game/AutoPlayStrategy.java` | The move a bot plays for a disconnected player |
 | `game/GameSnapshot.java` | The engine state that survives a restart |
+| `game/ScoreLimits.java` | **The limits a table may be played to**, shared by the create-room API and the host's picker |
 | `websocket/GameStateController.java` | Orchestration: turn timers, contest timer, dedup, persistence |
 | `frontend/src/utils/yanivRules.ts` | **A second copy of the discard rules, in TypeScript**, for client-side validation |
+| `frontend/src/utils/scoreLimits.ts` | **A second copy of the offered score limits**, for the host's picker |
 | `shared/rules-contract.json` | The case table both implementations are tested against |
 
 > **The discard rules exist twice.** `frontend/src/utils/yanivRules.ts` reimplements combination
@@ -380,8 +382,27 @@ multiple of 50.
 `checkEliminations` (`:609-635`): halve, then **eliminate iff `score >= targetScore`** — inclusive
 (`:614-616`).
 
-`targetScore` defaults to **100**, is **per-room** and caller-supplied via `POST /api/v1/rooms`, with
-**no range validation** (`RoomController.java:99`).
+### Choosing `targetScore`
+
+`targetScore` is **per-room** and defaults to **100** (`ScoreLimits.DEFAULT`). It reaches a room two
+ways, and `ScoreLimits.isSupported` gates both — the supported set is **100 or 200**:
+
+| Entry point | Who | When |
+|---|---|---|
+| `POST /api/v1/rooms` body | whoever creates the room | at creation; omitting it means 100 |
+| `/app/room/{roomId}/target-score` | **the host only** | **while the room is `LOBBY` only** |
+
+`handleSetTargetScore` persists through `GameService.updateTargetScore` and then re-broadcasts
+**lobby state to the whole table**, not just to the host: 100 and 200 are materially different games
+(see [Interaction with the table's limit](#interaction-with-the-tables-limit)), so a guest deciding
+whether to sit down needs to see the change.
+
+The lock at `LOBBY` is not cosmetic. The engine reads `targetScore` exactly once, when `startGame`
+constructs it, so a later change would not move the finish line so much as retroactively decide who
+had already crossed it. `startGame` is the only reader; a running engine never consults the row again.
+
+Pinned by `WaitingRoomScoreLimitTest`. The client's copy of the offered set is pinned to
+`ScoreLimits` by `ScoreLimitsContractTest`.
 
 Game over when `activePlayers <= 1` (`:621-625`). Otherwise state → `ROUND_OVER`, awaiting a client
 `next-round`.

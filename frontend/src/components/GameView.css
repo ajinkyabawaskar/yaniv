@@ -264,6 +264,71 @@
   color: #34d399;
 }
 
+.score-limit-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border: 1px solid rgba(212, 175, 55, 0.25);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.score-limit-label {
+  font-family: 'Cinzel', serif;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: #d4af37;
+}
+
+.score-limit-choices {
+  display: flex;
+  gap: 6px;
+}
+
+.score-limit-btn {
+  min-width: 58px;
+  padding: 7px 12px;
+  border: 1px solid rgba(212, 175, 55, 0.45);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #f5e6c8;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.score-limit-btn:hover:not(:disabled):not(.is-selected) {
+  background: rgba(212, 175, 55, 0.18);
+}
+
+.score-limit-btn.is-selected {
+  background: var(--gold-gradient);
+  color: #0c2b1e;
+  border-color: transparent;
+  box-shadow: 0 2px 12px rgba(212, 175, 55, 0.45);
+}
+
+.score-limit-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.score-limit-fixed {
+  font-size: 14px;
+  font-weight: 700;
+  color: #f5e6c8;
+}
+
+.score-limit-hint {
+  flex: 1 1 100%;
+  font-size: 11px;
+  line-height: 1.4;
+  color: rgba(245, 230, 200, 0.6);
+}
+
 .host-controls {
   display: flex;
   flex-direction: column;
