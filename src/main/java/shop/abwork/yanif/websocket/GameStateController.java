@@ -650,7 +650,21 @@ public class GameStateController {
                 return;
             }
 
-            gameService.updateTargetScore(roomId, requested);
+            // Read-then-write against the deal, which is a separate inbound message and may
+            // be on another thread: without this, a host who picks 200 and immediately
+            // deals can have the write land after startGame already built the engine at
+            // 100, leaving the row saying 200 and the engine eliminating at 100. Locking
+            // the engine map is what startGame takes to publish an engine; it is not the
+            // per-action path, which locks the engine itself, so nothing hot contends here.
+            synchronized (gameEngines) {
+                if (gameEngines.containsKey(roomId)
+                        || gameService.getGameById(roomId).getStatus() != Game.GameStatus.LOBBY) {
+                    sendErrorToUser(roomId, userId,
+                            "The score limit is locked once the game has started");
+                    return;
+                }
+                gameService.updateTargetScore(roomId, requested);
+            }
             broadcastLobbyState(roomId);
 
         } catch (Exception e) {
@@ -698,17 +712,23 @@ public class GameStateController {
                 return;
             }
 
-            gameService.updateGameStatus(roomId, Game.GameStatus.IN_PROGRESS);
-
             List<String> playerIds = players.stream()
                     .map(gp -> gp.getId().getUserId())
                     .toList();
-            YanivGameEngine engine = new YanivGameEngine(roomId, (List<String>) playerIds,
-                    yanivThreshold,
-                    game.getTargetScore() != null ? game.getTargetScore() : ScoreLimits.DEFAULT);
-            engine.setYanivContestTimerSeconds(yanivContestTimerSeconds);
-            gameEngines.put(roomId, engine);
-            engineLastTouched.put(roomId, System.currentTimeMillis());
+
+            // Moving to IN_PROGRESS, reading the limit and publishing the engine are one
+            // step, so a concurrent score-limit change either lands wholly before the deal
+            // or is refused. See handleSetTargetScore.
+            YanivGameEngine engine;
+            synchronized (gameEngines) {
+                gameService.updateGameStatus(roomId, Game.GameStatus.IN_PROGRESS);
+                Integer limit = gameService.getGameById(roomId).getTargetScore();
+                engine = new YanivGameEngine(roomId, (List<String>) playerIds,
+                        yanivThreshold, limit != null ? limit : ScoreLimits.DEFAULT);
+                engine.setYanivContestTimerSeconds(yanivContestTimerSeconds);
+                gameEngines.put(roomId, engine);
+                engineLastTouched.put(roomId, System.currentTimeMillis());
+            }
 
             for (String playerId : playerIds) {
             }
@@ -787,7 +807,13 @@ public class GameStateController {
         var game = view.game();
         message.roomCode = game != null ? game.getRoomCode() : "";
         message.maxPlayers = game != null ? game.getMaxPlayers() : 6;
-        message.targetScore = game != null ? game.getTargetScore() : ScoreLimits.DEFAULT;
+        // The engine is what actually eliminates, so report its limit rather than the
+        // row's: they can only differ if something went wrong, and showing the row
+        // would hide it behind a scoreboard that reads correctly.
+        message.targetScore = engine.getTargetScore() != null
+                ? engine.getTargetScore()
+                : (game != null && game.getTargetScore() != null
+                        ? game.getTargetScore() : ScoreLimits.DEFAULT);
         message.roundNumber = engine.getRoundNumber();
         message.currentState = engine.getCurrentState().toString();
         message.currentTurnPlayerId = engine.getCurrentPlayer();

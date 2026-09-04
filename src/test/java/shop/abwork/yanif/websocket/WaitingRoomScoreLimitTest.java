@@ -192,6 +192,35 @@ class WaitingRoomScoreLimitTest {
         setLimit(HOST, null);
 
         assertEquals(200, roomGame.getTargetScore(), "the host's earlier choice survives");
+        assertNotNull(lastMessageTo(HOST).error, "the host is told why the limit was not changed");
+    }
+
+    @Test
+    @DisplayName("The limit is locked by the deal itself, not only by the status write")
+    void lockedOnceAnEngineExists() {
+        controller.startGame(ROOM, auth(HOST));
+
+        setLimit(HOST, 200);
+
+        assertEquals(100, roomGame.getTargetScore(),
+                "a change landing after the engine was built would leave the row and the "
+                        + "engine disagreeing about who is eliminated");
+        assertNotNull(lastMessageTo(HOST).error);
+    }
+
+    @Test
+    @DisplayName("What players are shown is the limit the engine eliminates at")
+    void thePushedLimitComesFromTheEngine() {
+        setLimit(HOST, 200);
+        controller.startGame(ROOM, auth(HOST));
+
+        // Drift the row away from the dealt engine, however that might happen. The engine
+        // is what eliminates, so it is what players must be shown.
+        roomGame.setTargetScore(100);
+        controller.handleJoin(ROOM, auth(GUEST));
+
+        assertEquals(200, lastMessageTo(GUEST).targetScore,
+                "the scoreboard must not read correctly while the engine plays to something else");
     }
 
     @Test

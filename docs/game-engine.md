@@ -401,6 +401,17 @@ The lock at `LOBBY` is not cosmetic. The engine reads `targetScore` exactly once
 constructs it, so a later change would not move the finish line so much as retroactively decide who
 had already crossed it. `startGame` is the only reader; a running engine never consults the row again.
 
+**The status check and the deal are serialised on the engine map.** The two are separate inbound
+STOMP messages and may be handled on different threads, so a status check alone loses the race: a
+host who picks 200 and immediately deals could have the write land *after* `startGame` built the
+engine at 100, leaving the row saying 200 while the engine eliminated at 100. `handleSetTargetScore`
+re-checks status **and** the absence of an engine inside `synchronized (gameEngines)`, and
+`startGame` takes the same lock across the transition, the read and the publish. This is not the
+per-action path — that locks the engine itself — so nothing hot contends on it.
+
+For the same reason, `buildGameStateForPlayers` reports **the engine's** limit rather than the row's:
+if the two ever disagree the scoreboard must not be the thing that reads correctly.
+
 Pinned by `WaitingRoomScoreLimitTest`. The client's copy of the offered set is pinned to
 `ScoreLimits` by `ScoreLimitsContractTest`.
 
