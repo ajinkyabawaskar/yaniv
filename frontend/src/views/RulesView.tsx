@@ -25,19 +25,48 @@ const Cards = ({ cards, muted }: { cards: Spec[]; muted?: boolean }) => (
   </div>
 );
 
+/**
+ * `leftover` splits the row into what you are throwing and what stays behind,
+ * for the one rule whose verdict depends on the rest of the hand rather than on
+ * the cards themselves. Pass `[]` for a discard that empties the hand. Omitted
+ * on every other example, which keeps the plain single-row layout.
+ */
 const Example = ({
   cards,
+  leftover,
   legal,
+  verdict,
   children,
 }: {
   cards: Spec[];
+  leftover?: Spec[];
   legal: boolean;
+  verdict?: string;
   children: React.ReactNode;
 }) => (
   <div className={`rule-example ${legal ? 'is-legal' : 'is-illegal'}`}>
-    <Cards cards={cards} muted={!legal} />
+    {leftover === undefined ? (
+      <Cards cards={cards} muted={!legal} />
+    ) : (
+      <div className="rule-example-hand">
+        <div className="rule-hand-part">
+          <Cards cards={cards} />
+          <span className="rule-hand-label">discarding</span>
+        </div>
+        <div className="rule-hand-part is-leftover">
+          {leftover.length > 0 ? (
+            <Cards cards={leftover} muted />
+          ) : (
+            <span className="rule-hand-empty" aria-hidden="true" />
+          )}
+          <span className="rule-hand-label">
+            {leftover.length > 0 ? 'still in hand' : 'nothing left'}
+          </span>
+        </div>
+      </div>
+    )}
     <div className="rule-example-text">
-      <span className="rule-verdict">{legal ? '✓ Legal' : '✕ Not allowed'}</span>
+      <span className="rule-verdict">{verdict ?? (legal ? '✓ Legal' : '✕ Not allowed')}</span>
       <span>{children}</span>
     </div>
   </div>
@@ -159,10 +188,11 @@ export default function RulesView() {
               ['SIX', 'DIAMONDS'],
               ['SEVEN', 'HEARTS'],
             ]}
+            leftover={[]}
             legal
           >
-            <strong>A mixed-suit run</strong> — but only if it <em>empties your hand</em>. From a
-            full hand that means all five; from a three-card hand, all three.
+            <strong>A mixed-suit run</strong> — legal only when it <em>empties your hand</em>. The
+            length is not the point: all five from a full hand, or all three from a three-card hand.
           </Example>
 
           <Example
@@ -171,10 +201,15 @@ export default function RulesView() {
               ['FIVE', 'SPADES'],
               ['SIX', 'DIAMONDS'],
             ]}
+            leftover={[
+              ['KING', 'SPADES'],
+              ['NINE', 'CLUBS'],
+            ]}
             legal={false}
+            verdict="✕ Not from this hand"
           >
-            Three in sequence but different suits, with two cards still left over. Legal only if
-            these are your whole hand.
+            <strong>The same three cards, from a bigger hand.</strong> Two would be left behind, so
+            the suits have to match after all. Throw those two first and the run becomes legal.
           </Example>
 
           <Example

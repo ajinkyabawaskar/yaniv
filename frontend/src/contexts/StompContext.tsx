@@ -3,6 +3,13 @@ import SockJS from 'sockjs-client';
 import { Client, Message, StompSubscription } from '@stomp/stompjs';
 import { useAuthStore } from '../stores/authStore';
 
+/**
+ * Set by the server on an ERROR frame when a CONNECT is refused for *auth* reasons, as
+ * opposed to a server fault. Spelled identically in `config/StompAuthErrorHandler.java`;
+ * both sides assert it, because a mismatch fails silently as an endless retry loop.
+ */
+const AUTH_ERROR_HEADER = 'x-auth-error';
+
 interface StompContextType {
   isConnected: boolean;
   client: Client | null;
@@ -114,6 +121,20 @@ export function StompProvider({ children }: { children: React.ReactNode }) {
 
       client.onStompError = (frame) => {
         console.error('STOMP error:', frame.headers['message'], frame.body);
+
+        // stompjs retries a refused CONNECT forever on reconnectDelay. That is right for a
+        // server that is down and useless for a token the server will not accept: it is
+        // refused identically every 3s, nothing in the loop re-authenticates, and the tab
+        // simply never connects. Recovery needed a manual logout or reload -- the REST side
+        // has done this since the beginning (api.ts clears auth on a 401); the socket was
+        // the one channel with no way back.
+        if (frame.headers[AUTH_ERROR_HEADER]) {
+          // Stop the retries first. sessionExpired() re-renders StompProvider with a null
+          // token and the cleanup deactivates this client anyway, but leaving that to a
+          // React effect means the interval keeps firing until it runs.
+          client.deactivate().catch(() => {});
+          useAuthStore.getState().sessionExpired();
+        }
       };
 
       // Closing a tab does not unmount React, so the cleanup below never runs and the

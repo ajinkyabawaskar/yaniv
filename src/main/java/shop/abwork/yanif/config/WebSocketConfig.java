@@ -4,7 +4,6 @@ import shop.abwork.yanif.security.JwtProvider;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
-import org.springframework.messaging.MessagingException;
 import org.springframework.messaging.simp.config.ChannelRegistration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
 import org.springframework.scheduling.TaskScheduler;
@@ -72,12 +71,16 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                 // accepted, and every downstream handler then NPE'd on auth.getName().
                 String authorization = accessor.getFirstNativeHeader("Authorization");
                 if (authorization == null || !authorization.startsWith("Bearer ")) {
-                    throw new MessagingException("CONNECT requires a Bearer token");
+                    throw new StompAuthenticationException(
+                            "missing-token", "CONNECT requires a Bearer token");
                 }
 
                 String token = authorization.substring(7);
                 if (!jwtProvider.validateToken(token)) {
-                    throw new MessagingException("CONNECT carried an invalid token");
+                    // Expired, wrong signing secret, malformed -- validateToken collapses all of
+                    // them, and the client's response is the same either way: re-authenticate.
+                    throw new StompAuthenticationException(
+                            "invalid-token", "CONNECT carried an invalid token");
                 }
 
                 String userId = jwtProvider.extractUserId(token);
@@ -93,6 +96,8 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         // Register WebSocket endpoint with SockJS fallback
         // Allow all origins for network access (in production, restrict to specific domains)
+        registry.setErrorHandler(new StompAuthErrorHandler());
+
         registry.addEndpoint("/ws")
                 .setAllowedOriginPatterns("*")
                 .withSockJS();
