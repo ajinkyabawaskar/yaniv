@@ -23,8 +23,10 @@ Line numbers drift; method names don't. If a citation doesn't land, search for t
 | `game/model/DiscardCombination.java` | One discard, and the sort that decides a run's "ends" |
 | `game/AutoPlayStrategy.java` | The move a bot plays for a disconnected player |
 | `game/GameSnapshot.java` | The engine state that survives a restart |
+| `game/ScoreLimits.java` | **The limits a table may be played to**, shared by the create-room API and the host's picker |
 | `websocket/GameStateController.java` | Orchestration: turn timers, contest timer, dedup, persistence |
 | `frontend/src/utils/yanivRules.ts` | **A second copy of the discard rules, in TypeScript**, for client-side validation |
+| `frontend/src/utils/scoreLimits.ts` | **A second copy of the offered score limits**, for the host's picker |
 | `shared/rules-contract.json` | The case table both implementations are tested against |
 
 > **The discard rules exist twice.** `frontend/src/utils/yanivRules.ts` reimplements combination
@@ -352,20 +354,76 @@ round N+2: 50 + 25 = 75  -> stays 75
 (Previously it ran unconditionally at every round end, so an unchanged score kept re-halving:
 100 → 50 → 25. Pinned now by `ScoringAndEliminationTest`.)
 
-Interaction with the default `targetScore = 100`: landing on exactly 100 halves to 50 and you
-survive; landing on 200 halves to 100, which is still `>= 100`, so you are eliminated in the same
-pass.
+### Interaction with the table's limit
 
-It is now covered by `ScoringAndEliminationTest`, which pins both the landing and the
-did-not-move cases.
+Halving keys off multiples of 50 and knows nothing about `targetScore`, and it runs **before** the
+elimination test. Because both supported limits are themselves multiples of 50, **the limit is the
+one total you can land on and walk away from** — landing on it exactly halves you to half the limit,
+which is always under it.
+
+| Table limit | Land on exactly the limit | Land past it, off a multiple of 50 | Land on twice the limit |
+| ----------- | ------------------------- | ---------------------------------- | ----------------------- |
+| `100`       | 100 → 50, survives        | 104 stands, eliminated             | 200 → 100, eliminated   |
+| `200`       | 200 → 100, survives       | 204 stands, eliminated             | 400 → 200, eliminated   |
+
+The last column is the inclusive boundary: halving onto the limit exactly is still `>= targetScore`,
+so it does not save you. In a real game it is mostly theoretical — a player that far past the limit
+would already be out — but it is what pins the ordering of the two rules.
+
+This is why a 200 table is not simply a longer 100 table. The reachable escape at 200 is landing on
+exactly 200 and continuing from 100; the ordinary way out is any total past 200 that is not a
+multiple of 50.
+
+`ScoringAndEliminationTest` pins the landing case, the did-not-move case, and all three columns at
+`targetScore = 200`.
 
 ## Elimination and game end
 
 `checkEliminations` (`:609-635`): halve, then **eliminate iff `score >= targetScore`** — inclusive
 (`:614-616`).
 
-`targetScore` defaults to **100**, is **per-room** and caller-supplied via `POST /api/v1/rooms`, with
-**no range validation** (`RoomController.java:99`).
+### Choosing `targetScore`
+
+`targetScore` is **per-room** and defaults to **100** (`ScoreLimits.DEFAULT`). It reaches a room two
+ways, and `ScoreLimits.isSupported` gates both — the supported set is **100 or 200**:
+
+| Entry point | Who | When |
+|---|---|---|
+| `POST /api/v1/rooms` body | whoever creates the room | at creation; omitting it means 100 |
+| `/app/room/{roomId}/target-score` | **the host only** | **while the room is `LOBBY` only** |
+
+`handleSetTargetScore` persists through `GameService.updateTargetScore` and then re-broadcasts
+**lobby state to the whole table**, not just to the host: 100 and 200 are materially different games
+(see [Interaction with the table's limit](#interaction-with-the-tables-limit)), so a guest deciding
+whether to sit down needs to see the change.
+
+The lock at `LOBBY` is not cosmetic. The engine reads `targetScore` exactly once, when `startGame`
+constructs it, so a later change would not move the finish line so much as retroactively decide who
+had already crossed it. `startGame` is the only reader; a running engine never consults the row again.
+
+**The status check and the deal are serialised on the engine map.** The two are separate inbound
+STOMP messages and may be handled on different threads, so a status check alone loses the race: a
+host who picks 200 and immediately deals could have the write land *after* `startGame` built the
+engine at 100, leaving the row saying 200 while the engine eliminated at 100. `handleSetTargetScore`
+re-checks status **and** the absence of an engine inside `synchronized (gameEngines)`, and
+`startGame` takes the same lock across the transition, the read and the publish. This is not the
+per-action path — that locks the engine itself — so nothing hot contends on it.
+
+For the same reason, `buildGameStateForPlayers` reports **the engine's** limit rather than the row's:
+if the two ever disagree the scoreboard must not be the thing that reads correctly.
+
+Two further guards fell out of the same lock:
+
+- **`startGame` re-reads the status under it.** Its own checks are a read-then-write and the Deal
+  button stays live after a click, so two starts could both pass them and the second would put a
+  freshly dealt engine over a game already under way.
+- **`broadcastLobbyState` refuses to publish over a live game.** Lobby-shaped state blanks every
+  seated client, and the settings broadcast could otherwise land on top of the deal's. A *finished*
+  game still receives it — that is how a table returns to the waiting room, and it is the same test
+  `handleJoin` applies.
+
+Pinned by `WaitingRoomScoreLimitTest`. The client's copy of the offered set is pinned to
+`ScoreLimits` by `ScoreLimitsContractTest`.
 
 Game over when `activePlayers <= 1` (`:621-625`). Otherwise state → `ROUND_OVER`, awaiting a client
 `next-round`.
@@ -789,6 +847,9 @@ The card-conservation, scoring and authorisation defects that used to fill this 
 | Reconnect during a storage outage NPE'd | returns without touching the room | — |
 | Unauthenticated STOMP CONNECT passed through | rejected | — |
 | `maxPlayers` was unvalidated | constrained to 2–6 | — |
+| `targetScore` accepted any positive integer, so a 1-point table was creatable over the API | constrained to `ScoreLimits.supported()` | `CreateRoomScoreLimitTest` |
+| A second `start` re-dealt a game in progress | status re-read under the engine-map lock | `WaitingRoomScoreLimitTest.theDealIsNotRepeatable` |
+| A pre-start broadcast could land after the deal's and blank the table | `broadcastLobbyState` refuses to publish over a live game | — |
 | Invite handlers were unreachable | destination prefix corrected | — |
 | Dedup was dead (no client `actionId`) | client sends a stable `actionId` | — |
 
@@ -846,5 +907,7 @@ else.
 | `game.spectator-meters-enabled` | `true` | Whether a knocked-out player is sent readings on the players still in the game. Off removes the field entirely, for everyone.  |
 | `game.engine-idle-eviction-minutes` | `5` | How long a room may go untouched before its engine is dropped from memory. State survives in the snapshot, so eviction costs at most one restore. |
 
-Per-room, supplied in the `POST /api/v1/rooms` body: `targetScore` (default 100, unvalidated) and
-`maxPlayers` (default 6, valid range 2–6, validated on create).
+Per-room, supplied in the `POST /api/v1/rooms` body: `targetScore` (default 100, must be one of
+`ScoreLimits.supported()` — 100 or 200 — validated on create and again on the host's picker) and
+`maxPlayers` (default 6, valid range 2–6, validated on create). See
+[Choosing `targetScore`](#choosing-targetscore) for who may change the limit and when.
