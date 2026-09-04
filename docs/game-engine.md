@@ -826,6 +826,7 @@ The card-conservation, scoring and authorisation defects that used to fill this 
 | Reconnect during a storage outage NPE'd | returns without touching the room | — |
 | Unauthenticated STOMP CONNECT passed through | rejected | — |
 | `maxPlayers` was unvalidated | constrained to 2–6 | — |
+| `targetScore` accepted any positive integer, so a 1-point table was creatable over the API | constrained to `ScoreLimits.supported()` | `CreateRoomScoreLimitTest` |
 | Invite handlers were unreachable | destination prefix corrected | — |
 | Dedup was dead (no client `actionId`) | client sends a stable `actionId` | — |
 
@@ -883,5 +884,7 @@ else.
 | `game.spectator-meters-enabled` | `true` | Whether a knocked-out player is sent readings on the players still in the game. Off removes the field entirely, for everyone.  |
 | `game.engine-idle-eviction-minutes` | `5` | How long a room may go untouched before its engine is dropped from memory. State survives in the snapshot, so eviction costs at most one restore. |
 
-Per-room, supplied in the `POST /api/v1/rooms` body: `targetScore` (default 100, unvalidated) and
-`maxPlayers` (default 6, valid range 2–6, validated on create).
+Per-room, supplied in the `POST /api/v1/rooms` body: `targetScore` (default 100, must be one of
+`ScoreLimits.supported()` — 100 or 200 — validated on create and again on the host's picker) and
+`maxPlayers` (default 6, valid range 2–6, validated on create). See
+[Choosing `targetScore`](#choosing-targetscore) for who may change the limit and when.
