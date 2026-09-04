@@ -352,12 +352,28 @@ round N+2: 50 + 25 = 75  -> stays 75
 (Previously it ran unconditionally at every round end, so an unchanged score kept re-halving:
 100 → 50 → 25. Pinned now by `ScoringAndEliminationTest`.)
 
-Interaction with the default `targetScore = 100`: landing on exactly 100 halves to 50 and you
-survive; landing on 200 halves to 100, which is still `>= 100`, so you are eliminated in the same
-pass.
+### Interaction with the table's limit
 
-It is now covered by `ScoringAndEliminationTest`, which pins both the landing and the
-did-not-move cases.
+Halving keys off multiples of 50 and knows nothing about `targetScore`, and it runs **before** the
+elimination test. Because both supported limits are themselves multiples of 50, **the limit is the
+one total you can land on and walk away from** — landing on it exactly halves you to half the limit,
+which is always under it.
+
+| Table limit | Land on exactly the limit | Land past it, off a multiple of 50 | Land on twice the limit |
+| ----------- | ------------------------- | ---------------------------------- | ----------------------- |
+| `100`       | 100 → 50, survives        | 104 stands, eliminated             | 200 → 100, eliminated   |
+| `200`       | 200 → 100, survives       | 204 stands, eliminated             | 400 → 200, eliminated   |
+
+The last column is the inclusive boundary: halving onto the limit exactly is still `>= targetScore`,
+so it does not save you. In a real game it is mostly theoretical — a player that far past the limit
+would already be out — but it is what pins the ordering of the two rules.
+
+This is why a 200 table is not simply a longer 100 table. The reachable escape at 200 is landing on
+exactly 200 and continuing from 100; the ordinary way out is any total past 200 that is not a
+multiple of 50.
+
+`ScoringAndEliminationTest` pins the landing case, the did-not-move case, and all three columns at
+`targetScore = 200`.
 
 ## Elimination and game end
 

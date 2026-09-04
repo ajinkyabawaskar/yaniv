@@ -95,6 +95,70 @@ public class ScoringAndEliminationTest {
     }
 
     // ==========================================
+    // Halving against the table's limit
+    //
+    // Halving keys off multiples of 50 and knows nothing about targetScore, so the same
+    // round can be survivable at one limit and fatal at another. A 200 table is therefore
+    // not merely a longer 100 table -- 200 is a halving point, so the limit itself is the
+    // one total you can land on and walk away from.
+    // ==========================================
+
+    @Test
+    @DisplayName("At a 200 limit, a round landing on exactly 200 halves to 100 and survives")
+    void landingOnA200LimitHalvesUnderItAndSurvives() {
+        // P2 calls Yaniv on 1; P1 takes their 5 onto 195. 200 is a multiple of 50, so it
+        // halves to 100 first, and 100 is under the limit -- the round ends, not the game.
+        YanivGameEngine engine = craft(List.of(P2, P1),
+                Map.of(P2, hand("card_1", "ACE"), P1, hand("card_5", "FIVE")),
+                Map.of(P2, 0, P1, 195),
+                200);
+
+        engine.callYaniv(P2);
+        engine.contestYaniv(P1);
+
+        assertEquals(100, engine.getPlayerScores().get(P1), "195 + 5 = 200, halved to 100");
+        assertFalse(engine.getEliminatedPlayers().contains(P1),
+                "landing on a 200 limit is a reprieve, not an exit: halving runs first");
+        assertTrue(engine.isRoundOver(), "both players are still in, so the round ended");
+    }
+
+    @Test
+    @DisplayName("At a 200 limit, a round landing past it off a multiple of 50 eliminates")
+    void crossingA200LimitOffAHalvingPointEliminates() {
+        // The ordinary way out of a 200 table: 199 + 5 = 204 is not a multiple of 50, so
+        // nothing halves and the total stands above the limit.
+        YanivGameEngine engine = craft(List.of(P2, P1),
+                Map.of(P2, hand("card_1", "ACE"), P1, hand("card_5", "FIVE")),
+                Map.of(P2, 0, P1, 199),
+                200);
+
+        engine.callYaniv(P2);
+        engine.contestYaniv(P1);
+
+        assertEquals(204, engine.getPlayerScores().get(P1), "199 + 5 = 204, not a halving point");
+        assertTrue(engine.getEliminatedPlayers().contains(P1), "204 is past a 200 limit");
+    }
+
+    @Test
+    @DisplayName("Halving onto a 200 limit exactly is still elimination")
+    void halvingOntoA200LimitStillEliminates() {
+        // Pins the composition of the two rules at their shared boundary: halve first,
+        // then eliminate inclusively. A 395 running total is not a state a real 200 table
+        // reaches -- the player would already be out -- but the boundary is the point.
+        YanivGameEngine engine = craft(List.of(P2, P1),
+                Map.of(P2, hand("card_1", "ACE"), P1, hand("card_5", "FIVE")),
+                Map.of(P2, 0, P1, 395),
+                200);
+
+        engine.callYaniv(P2);
+        engine.contestYaniv(P1);
+
+        assertEquals(200, engine.getPlayerScores().get(P1), "395 + 5 = 400, halved to 200");
+        assertTrue(engine.getEliminatedPlayers().contains(P1),
+                "elimination is >= the limit, so halving onto it exactly does not save you");
+    }
+
+    // ==========================================
     // Yaniv may only be called at the start of a turn
     // ==========================================
 
