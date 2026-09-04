@@ -209,6 +209,19 @@ class WaitingRoomScoreLimitTest {
     }
 
     @Test
+    @DisplayName("Dealing twice does not put a fresh engine over the game in progress")
+    void theDealIsNotRepeatable() throws Exception {
+        controller.startGame(ROOM, auth(HOST));
+        YanivGameEngine dealt = liveEngine();
+
+        controller.startGame(ROOM, auth(HOST));
+
+        assertSame(dealt, liveEngine(),
+                "the Deal button stays live after a click, and a second engine would "
+                        + "re-deal a game already under way");
+    }
+
+    @Test
     @DisplayName("What players are shown is the limit the engine eliminates at")
     void thePushedLimitComesFromTheEngine() {
         setLimit(HOST, 200);

@@ -600,6 +600,14 @@ public class GameStateController {
         Game game = gameService.getGameById(roomId);
         if (game == null) return;
 
+        // Lobby-shaped state blanks every seated client, so it must never land on a room
+        // that has since been dealt. A pre-start action and the deal arriving close
+        // together is exactly how that happens. A finished game still gets lobby state:
+        // that is how a table returns to the waiting room, and it is what handleJoin asks
+        // for by the same test.
+        YanivGameEngine live = gameEngines.get(roomId);
+        if (live != null && !live.isGameOver()) return;
+
         GameStateMessage lobbyState = buildLobbyStateMessage(game);
 
         var players = gameService.getGamePlayers(roomId);
@@ -664,8 +672,10 @@ public class GameStateController {
                     return;
                 }
                 gameService.updateTargetScore(roomId, requested);
+                // Inside the lock: released first, this broadcast could be overtaken by
+                // the deal's and then land on top of it.
+                broadcastLobbyState(roomId);
             }
-            broadcastLobbyState(roomId);
 
         } catch (Exception e) {
             System.err.println("Error setting target score: " + e.getMessage());
@@ -721,8 +731,16 @@ public class GameStateController {
             // or is refused. See handleSetTargetScore.
             YanivGameEngine engine;
             synchronized (gameEngines) {
+                // Re-read under the lock. The checks above are a read-then-write, and the
+                // Deal button stays live after a click, so two starts can both pass them
+                // and the second would put a freshly dealt engine over a game in progress.
+                Game current = gameService.getGameById(roomId);
+                if (current.getStatus() != Game.GameStatus.LOBBY || gameEngines.containsKey(roomId)) {
+                    sendErrorToUser(roomId, userId, "Game already in progress");
+                    return;
+                }
                 gameService.updateGameStatus(roomId, Game.GameStatus.IN_PROGRESS);
-                Integer limit = gameService.getGameById(roomId).getTargetScore();
+                Integer limit = current.getTargetScore();
                 engine = new YanivGameEngine(roomId, (List<String>) playerIds,
                         yanivThreshold, limit != null ? limit : ScoreLimits.DEFAULT);
                 engine.setYanivContestTimerSeconds(yanivContestTimerSeconds);

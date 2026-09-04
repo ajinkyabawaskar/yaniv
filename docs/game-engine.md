@@ -412,6 +412,16 @@ per-action path — that locks the engine itself — so nothing hot contends on 
 For the same reason, `buildGameStateForPlayers` reports **the engine's** limit rather than the row's:
 if the two ever disagree the scoreboard must not be the thing that reads correctly.
 
+Two further guards fell out of the same lock:
+
+- **`startGame` re-reads the status under it.** Its own checks are a read-then-write and the Deal
+  button stays live after a click, so two starts could both pass them and the second would put a
+  freshly dealt engine over a game already under way.
+- **`broadcastLobbyState` refuses to publish over a live game.** Lobby-shaped state blanks every
+  seated client, and the settings broadcast could otherwise land on top of the deal's. A *finished*
+  game still receives it — that is how a table returns to the waiting room, and it is the same test
+  `handleJoin` applies.
+
 Pinned by `WaitingRoomScoreLimitTest`. The client's copy of the offered set is pinned to
 `ScoreLimits` by `ScoreLimitsContractTest`.
 
@@ -838,6 +848,8 @@ The card-conservation, scoring and authorisation defects that used to fill this 
 | Unauthenticated STOMP CONNECT passed through | rejected | — |
 | `maxPlayers` was unvalidated | constrained to 2–6 | — |
 | `targetScore` accepted any positive integer, so a 1-point table was creatable over the API | constrained to `ScoreLimits.supported()` | `CreateRoomScoreLimitTest` |
+| A second `start` re-dealt a game in progress | status re-read under the engine-map lock | `WaitingRoomScoreLimitTest.theDealIsNotRepeatable` |
+| A pre-start broadcast could land after the deal's and blank the table | `broadcastLobbyState` refuses to publish over a live game | — |
 | Invite handlers were unreachable | destination prefix corrected | — |
 | Dedup was dead (no client `actionId`) | client sends a stable `actionId` | — |
 
