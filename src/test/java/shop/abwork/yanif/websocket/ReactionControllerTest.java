@@ -84,14 +84,30 @@ class ReactionControllerTest {
     }
 
     @Test
-    @DisplayName("Love and rage land on the seat they were aimed at, and carry no text")
+    @DisplayName("Love and rage land on the seat they were aimed at, and carry their own words")
     void aimedEmotesKeepTheirTarget() {
         controller.handleReaction(ROOM, message("love", OTHER), authOf(SENDER));
 
         ReactionController.ReactionBroadcast sent = captureBroadcast();
         assertEquals("LOVE", sent.type, "the type is normalised, so a lowercase client still works");
         assertEquals(OTHER, sent.targetUserId);
-        assertNull(sent.text);
+        assertEquals("thanks for the card(s)", sent.text);
+    }
+
+    @Test
+    @DisplayName("Every emote the game offers carries server-authored words")
+    void everyEmoteTypeCarriesText() {
+        for (String type : List.of("LOVE", "RAGE", "TAUNT")) {
+            // A fresh controller per type: the cooldown is per sender, and this sends
+            // three emotes from one seat inside its window.
+            reset(messagingTemplate);
+            ReactionController fresh = new ReactionController(gameService, userService, messagingTemplate);
+            fresh.handleReaction(ROOM, message(type, OTHER), authOf(SENDER));
+
+            ReactionController.ReactionBroadcast sent = captureBroadcast();
+            assertNotNull(sent.text, type + " must arrive with words on it");
+            assertFalse(sent.text.isBlank(), type + " must arrive with words on it");
+        }
     }
 
     @Test

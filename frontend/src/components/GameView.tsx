@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useStomp } from '../contexts/StompContext';
 import { useGameStore, ReactionEvent } from '../stores/gameStore';
 import { gameApi } from '../utils/api';
-import TableCanvas, { OpponentInfo, getCardImagePath } from './TableCanvas';
+import TableCanvas, { OpponentInfo, TableCanvasHandle, getCardImagePath } from './TableCanvas';
 import ScoreboardView from './ScoreboardView';
 import { playTurnChangeSound, playYourTurnSound, isSoundEnabled, setSoundEnabled, setupAudioUnlock } from '../utils/sound';
 import { isBgMusicEnabled, setBgMusicEnabled, setupBgMusicUnlock, preloadBgMusic } from '../utils/backgroundMusic';
@@ -35,9 +35,10 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
   const [startMessage, setStartMessage] = useState<string | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
   const [showRoundOver, setShowRoundOver] = useState(false);
-  // Emotes other players sent. Purely cosmetic, so they live here rather than in the
-  // game store: nothing else reads them and nothing should persist them.
-  const [reactions, setReactions] = useState<ReactionEvent[]>([]);
+  // Emotes are one-shot animations, so they are handed straight to the table as they
+  // arrive rather than held anywhere. Buffering them here meant a table mounting for a
+  // new round replayed everything the previous round had said.
+  const tableRef = useRef<TableCanvasHandle | null>(null);
   
   const [isMobile, setIsMobile] = useState(false);
   const [showScoreboard, setShowScoreboard] = useState(false);
@@ -250,9 +251,8 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
           try {
             const event = JSON.parse(message.body) as ReactionEvent;
             if (!event?.id) return;
-            // Bounded: an emote is done animating in well under a second, and a long
-            // list would only grow for as long as the round lasts.
-            setReactions((prev) => [...prev, event].slice(-12));
+            // No table mounted means no round in progress, so the emote is simply dropped.
+            tableRef.current?.playReaction(event);
           } catch (err) {
             console.error('Bad reaction payload:', err);
           }
@@ -542,6 +542,7 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
         <div className="game-play-layout">
           <div className="table-area-wrapper">
             <TableCanvas
+              ref={tableRef}
               hand={gameState.playerHand}
               topCard={gameState.topDiscardCard}
               topDiscardCards={gameState.topDiscardCards}
@@ -571,7 +572,6 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
               bonusDiscardActive={gameState.bonusDiscardActive}
               pendingBonusCard={gameState.pendingBonusCard}
               onBonusDiscard={handleBonusDiscard}
-              reactions={reactions}
               onSendReaction={handleSendReaction}
             />
           </div>

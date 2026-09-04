@@ -138,9 +138,9 @@ All game mechanics, state transitions, discard/pickup validations, and scoring p
 
 ```
 
-* `SEND /app/room/{roomId}/reaction` — Emote sent to the room: `{ "type": "LOVE" | "RAGE" | "TAUNT", "targetUserId": "usr_4412" }`. `targetUserId` is the seat the emote animates over, and defaults to the sender's own seat, which is what a `TAUNT` uses.
+* `SEND /app/room/{roomId}/reaction` — Emote sent to the room: `{ "type": "LOVE" | "RAGE" | "TAUNT", "targetUserId": "usr_4412" }`. The request names a type, never a message. `targetUserId` is the player the emote names, and defaults to the sender's own seat, which is what a `TAUNT` uses — a taunt addresses the whole table, so it names no recipient.
 
-* `SUBSCRIBE /topic/room/{roomId}/reactions` — Emotes, broadcast to everyone in the room. Cosmetic and never persisted, and the text is written server-side so no client can put its own words on another player's screen:
+* `SUBSCRIBE /topic/room/{roomId}/reactions` — Emotes, broadcast to everyone in the room. Cosmetic and never persisted. Every type carries words, and they are written server-side so no client can put its own text on another player's screen:
 
 ```json
 {

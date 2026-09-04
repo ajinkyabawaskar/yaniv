@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef, useImperativeHandle, forwardRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { soundEngine } from '../utils/soundEngine';
 import { hapticLightTick, hapticFirmSnap, hapticDoubleError } from '../utils/haptics';
@@ -58,21 +58,33 @@ interface TableCanvasProps {
   bonusDiscardActive?: boolean;
   pendingBonusCard?: Card | null;
   onBonusDiscard?: ((shouldDiscard: boolean) => void) | null;
-  /** Emotes broadcast to the room. Each one animates over the seat it names. */
-  reactions?: ReactionEvent[];
   onSendReaction?: (type: 'LOVE' | 'RAGE' | 'TAUNT', targetUserId: string) => void;
 }
 
-/** Long enough to outlast the 2.2s love/rage animations (--reaction-duration) in TableCanvas.css. */
-const REACTION_PARTICLE_LIFETIME_MS = 2300;
-/** Long enough to outlast the 2.4s taunt banner in TableCanvas.css. */
-const TAUNT_LIFETIME_MS = 2500;
-/** Shown if a taunt somehow arrives without the server's words on it. */
-const DEFAULT_TAUNT_TEXT = 'khali ho jao';
 /**
- * Roughly half an emoji's width, used to keep a particle off the felt's clipped edges.
+ * Emotes are events, not state. GameView owns the room subscription and hands each
+ * broadcast straight to the table as it arrives, so nothing is buffered anywhere and a
+ * table mounting into a new round starts silent instead of replaying the last one.
  */
-const REACTION_HALF_WIDTH_PX = 14;
+export interface TableCanvasHandle {
+  playReaction: (event: ReactionEvent) => void;
+}
+
+/** Long enough to outlast the 2.4s emote-rise animation in TableCanvas.css. */
+const EMOTE_BANNER_LIFETIME_MS = 2500;
+/** Emotes stack down the middle of the felt, so only the newest few stay legible. */
+const MAX_VISIBLE_EMOTES = 3;
+const EMOTE_ICON: Record<string, string> = { LOVE: '❤️', RAGE: '😡', TAUNT: '💀' };
+/**
+ * Shown only if an emote somehow arrives without the server's words on it. The server
+ * authors the real text (ReactionController.REACTION_TEXT) so that every screen in the
+ * room shows the same thing and no client can put its own words on someone else's felt.
+ */
+const EMOTE_FALLBACK_TEXT: Record<string, string> = {
+  LOVE: 'thanks for the card(s)',
+  RAGE: 'jaldi khel l***',
+  TAUNT: 'khali ho jao',
+};
 
 export const getCardImagePath = (rank: string, suit: string): string => {
   const rankMap: Record<string, string> = {
@@ -176,7 +188,7 @@ function SpectatorMeters({ reading }: { reading: SpectatorReading }) {
   );
 }
 
-export default function TableCanvas({
+function TableCanvas({
   hand,
   topCard,
   topDiscardCards = [],
@@ -212,9 +224,8 @@ export default function TableCanvas({
   pendingBonusCard = null,
   onBonusDiscard = null,
   // Emotes
-  reactions = [],
   onSendReaction,
-}: TableCanvasProps) {
+}: TableCanvasProps, ref: React.Ref<TableCanvasHandle>) {
   const [selectedCards, setSelectedCards] = useState<string[]>([]);
   const [statusFeedback, setStatusFeedback] = useState<string | null>(null);
   const [isFeedbackError, setIsFeedbackError] = useState<boolean>(false);
@@ -229,17 +240,13 @@ export default function TableCanvas({
   const [yanivContestTimerRemaining, setYanivContestTimerRemaining] = useState<number>(0);
   const [showYanivContestOverlay, setShowYanivContestOverlay] = useState(false);
 
-  // Two shapes, because the two emotes say different things. Love and rage are aimed at
-  // one seat and animate over it; a taunt is addressed to the whole room, so it reads as
-  // a banner across the felt with the sender's name on it rather than as a pill covering
-  // somebody's avatar.
-  const [reactionParticles, setReactionParticles] = useState<
-    Array<{ id: string; type: string; x: number; y: number }>
+  // One shape for all three. Every emote is words, so every emote reads as a banner
+  // across the felt rather than a symbol over an avatar: aimed ones name both players
+  // ("Ari -> Bob"), a taunt names only its sender because it is thrown at the table.
+  const [emoteBanners, setEmoteBanners] = useState<
+    Array<{ id: string; type: string; from: string; to: string | null; text: string }>
   >([]);
-  const [taunts, setTaunts] = useState<Array<{ id: string; from: string; text: string }>>([]);
-  const reactionLayerRef = useRef<HTMLDivElement | null>(null);
   const reactionTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
-  const seenReactionsRef = useRef<Set<string>>(new Set());
 
   // Emotes are sent, not drawn. The animation runs when the server echoes the emote back
   // on the room topic, so the sender sees exactly what everyone else sees and a dropped
@@ -573,74 +580,41 @@ export default function TableCanvas({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedCards]);
 
-  // Turn emotes the room has broadcast into particles over the seat each one names.
-  // The overlay is positioned inside .felt-surface rather than the viewport, so every
-  // avatar rect has to be translated into the overlay's own coordinates.
-  useEffect(() => {
-    const layer = reactionLayerRef.current;
-    if (!layer) return;
+  // Show one emote the room has broadcast. Called by GameView as each one arrives, so an
+  // emote is drawn exactly once, when it happens, and is never held anywhere.
+  const playReaction = useCallback(
+    (event: ReactionEvent) => {
+      if (!event?.id) return;
 
-    const fresh = reactions.filter((r) => r.id && !seenReactionsRef.current.has(r.id));
-    // GameView keeps only the most recent emotes, so rebuilding the seen set from the
-    // current list keeps it bounded instead of growing for the whole game.
-    seenReactionsRef.current = new Set(reactions.map((r) => r.id));
-    if (fresh.length === 0) return;
+      // The server aims a taunt at its own sender, which is how an emote addressed to the
+      // whole table is told apart from one aimed at a neighbour.
+      const isAimed = !!event.targetUserId && event.targetUserId !== event.fromUserId;
 
-    const layerRect = layer.getBoundingClientRect();
-    const spawned: Array<{ id: string; type: string; x: number; y: number }> = [];
-    const spawnedTaunts: Array<{ id: string; from: string; text: string }> = [];
+      setEmoteBanners((prev) =>
+        [
+          ...prev,
+          {
+            id: event.id,
+            type: event.type,
+            from: event.fromDisplayName || 'Someone',
+            to: isAimed ? playerNames[event.targetUserId] || 'a player' : null,
+            text: event.text || EMOTE_FALLBACK_TEXT[event.type] || '',
+          },
+        ].slice(-MAX_VISIBLE_EMOTES)
+      );
 
-    fresh.forEach((event) => {
       // Each emote clears itself once its own animation has finished; a single shared
       // timer would leave everything that arrived later on screen forever.
-      const expire = (lifetime: number) => {
-        const timer = setTimeout(() => {
-          reactionTimersRef.current.delete(timer);
-          setReactionParticles((prev) => prev.filter((p) => p.id !== event.id));
-          setTaunts((prev) => prev.filter((t) => t.id !== event.id));
-        }, lifetime);
-        reactionTimersRef.current.add(timer);
-      };
+      const timer = setTimeout(() => {
+        reactionTimersRef.current.delete(timer);
+        setEmoteBanners((prev) => prev.filter((b) => b.id !== event.id));
+      }, EMOTE_BANNER_LIFETIME_MS);
+      reactionTimersRef.current.add(timer);
+    },
+    [playerNames]
+  );
 
-      if (event.type === 'TAUNT') {
-        spawnedTaunts.push({
-          id: event.id,
-          from: event.fromDisplayName || 'Someone',
-          text: event.text || DEFAULT_TAUNT_TEXT,
-        });
-        expire(TAUNT_LIFETIME_MS);
-        return;
-      }
-
-      const avatar = document.querySelector(
-        `.opponent-seat[data-user-id="${CSS.escape(event.targetUserId)}"] .opponent-avatar`
-      );
-      if (!avatar) return;
-
-      const rect = avatar.getBoundingClientRect();
-      const rawX = rect.left + rect.width / 2 - layerRect.left;
-      // Keep the whole emoji inside the felt, which clips its overflow.
-      const x = Math.min(
-        Math.max(rawX, REACTION_HALF_WIDTH_PX + 4),
-        layerRect.width - REACTION_HALF_WIDTH_PX - 4
-      );
-
-      spawned.push({
-        id: event.id,
-        type: event.type,
-        x,
-        y: rect.top + rect.height / 2 - layerRect.top,
-      });
-      expire(REACTION_PARTICLE_LIFETIME_MS);
-    });
-
-    if (spawned.length > 0) {
-      setReactionParticles((prev) => [...prev, ...spawned]);
-    }
-    if (spawnedTaunts.length > 0) {
-      setTaunts((prev) => [...prev, ...spawnedTaunts]);
-    }
-  }, [reactions]);
+  useImperativeHandle(ref, () => ({ playReaction }), [playReaction]);
 
   // Drop any emote timers still pending when the table unmounts.
   useEffect(() => {
@@ -867,8 +841,8 @@ export default function TableCanvas({
                       type="button"
                       className="reaction-btn reaction-love"
                       onClick={() => sendReaction('LOVE', opponent.userId)}
-                      title={`Send love to ${displayName}`}
-                      aria-label={`Send love to ${displayName}`}
+                      title={`Tell ${displayName}: ${EMOTE_FALLBACK_TEXT.LOVE}`}
+                      aria-label={`Tell ${displayName}: ${EMOTE_FALLBACK_TEXT.LOVE}`}
                     >
                       ❤️
                     </button>
@@ -876,8 +850,8 @@ export default function TableCanvas({
                       type="button"
                       className="reaction-btn reaction-rage"
                       onClick={() => sendReaction('RAGE', opponent.userId)}
-                      title={`Send rage to ${displayName}`}
-                      aria-label={`Send rage to ${displayName}`}
+                      title={`Tell ${displayName}: ${EMOTE_FALLBACK_TEXT.RAGE}`}
+                      aria-label={`Tell ${displayName}: ${EMOTE_FALLBACK_TEXT.RAGE}`}
                     >
                       😡
                     </button>
@@ -890,8 +864,8 @@ export default function TableCanvas({
                       type="button"
                       className="reaction-btn reaction-taunt"
                       onClick={() => sendReaction('TAUNT', opponent.userId)}
-                      title="Taunt the table: khali ho jao"
-                      aria-label="Taunt the table: khali ho jao"
+                      title={`Tell the table: ${EMOTE_FALLBACK_TEXT.TAUNT}`}
+                      aria-label={`Tell the table: ${EMOTE_FALLBACK_TEXT.TAUNT}`}
                     >
                       💀
                     </button>
@@ -902,36 +876,25 @@ export default function TableCanvas({
           })}
         </div>
 
-        {/* 3. Reaction Animation Overlay */}
-        <div className="reaction-animation-container" ref={reactionLayerRef}>
-          {reactionParticles.map((particle) => {
-            // The wrapper holds the anchor and a static centring transform; the body
-            // carries the animation, so the two transforms never fight each other.
-            return (
-              <span
-                key={particle.id}
-                className="reaction-particle"
-                style={{ left: particle.x, top: particle.y }}
-              >
-                <span
-                  className={`reaction-particle-body ${particle.type.toLowerCase()}-particle`}
-                  aria-hidden="true"
-                >
-                  {particle.type === 'LOVE' ? '❤️' : '😡'}
-                </span>
-              </span>
-            );
-          })}
-
-          {/* A taunt is aimed at the room, so it reads across the felt rather than over
-              one seat -- and out here it can never be clipped by a seat near an edge. */}
-          <div className="taunt-banner-stack" role="status" aria-live="polite">
-            {taunts.map((taunt) => (
-              <div key={taunt.id} className="taunt-banner">
-                <span className="taunt-pill">
-                  <span className="taunt-skull">💀</span>
-                  <span className="taunt-from">{taunt.from}:</span>
-                  <span className="taunt-text">{taunt.text}</span>
+        {/* 3. Emote Overlay */}
+        {/* Out here rather than over a seat: an emote is a line of text now, and a pill
+            anchored to an avatar covered it and clipped at narrow widths. */}
+        <div className="reaction-animation-container">
+          <div className="emote-banner-stack" role="status" aria-live="polite">
+            {emoteBanners.map((banner) => (
+              <div key={banner.id} className="emote-banner">
+                <span className={`emote-pill emote-${banner.type.toLowerCase()}`}>
+                  <span className="emote-icon" aria-hidden="true">
+                    {EMOTE_ICON[banner.type] || '💬'}
+                  </span>
+                  <span className="emote-who">
+                    {banner.to ? `${banner.from} \u2192 ${banner.to}` : banner.from}
+                  </span>
+                  {/* Its own flex item so a long name truncates without eating it. */}
+                  <span className="emote-sep" aria-hidden="true">
+                    :
+                  </span>
+                  <span className="emote-text">{banner.text}</span>
                 </span>
               </div>
             ))}
@@ -1179,3 +1142,5 @@ export default function TableCanvas({
     </div>
   );
 }
+
+export default forwardRef(TableCanvas);

@@ -30,18 +30,21 @@ import java.util.concurrent.ConcurrentHashMap;
 public class ReactionController {
 
     /**
-     * The taunt an emote carries. Written server-side so every client shows the same
-     * words, and so a client cannot put its own text on another player's screen.
+     * The words each emote carries. Written server-side so every client shows the same
+     * thing, and so a client cannot put its own text on another player's screen -- the
+     * request names a type, never a message.
      */
     private static final Map<String, String> REACTION_TEXT = Map.of(
+            "LOVE", "thanks for the card",
+            "RAGE", "jaldi khel l***",
             "TAUNT", "khali ho jao"
     );
 
     private static final List<String> ALLOWED_TYPES = List.of("LOVE", "RAGE", "TAUNT");
 
     /**
-     * Minimum gap between one player's emotes. Emotes animate over a seat, so an
-     * unthrottled sender could paper the table for everyone else.
+     * Minimum gap between one player's emotes. Every emote puts a line of text on
+     * everyone's felt, so an unthrottled sender could paper the table for the room.
      */
     private static final long COOLDOWN_MS = 700;
 
@@ -65,9 +68,10 @@ public class ReactionController {
      *
      * Request: {@code { "type": "LOVE" | "RAGE" | "TAUNT", "targetUserId": "usr_1" }}
      *
-     * The target is the seat the emote animates over -- someone else for LOVE and RAGE,
-     * yourself for a TAUNT thrown at the table. Both sender and target must be players in
-     * this room, so an emote cannot be aimed at a seat that is not there.
+     * The target is the player the emote names -- someone else for LOVE and RAGE, which
+     * read as "Ari -> Bob", and yourself for a TAUNT, which is thrown at the whole table
+     * and so names no recipient. Both sender and target must be players in this room, so
+     * an emote cannot be aimed at a seat that is not there.
      */
     @MessageMapping("/room/{roomId}/reaction")
     public void handleReaction(@DestinationVariable String roomId,
@@ -138,7 +142,7 @@ public class ReactionController {
         public String fromUserId;
         public String fromDisplayName;
         public String targetUserId;
-        /** The words shown on every screen, or null for an emote that is just a symbol. */
+        /** The words shown on every screen. Server-authored; see REACTION_TEXT. */
         public String text;
     }
 }

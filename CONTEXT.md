@@ -77,12 +77,15 @@ without naming the exact sum a player is about to land on; the steps are wide en
 reachable scores share one reading. Not a probability — see **Language to avoid**.
 
 **Emote** — a cosmetic message a player sends to the room mid-round: love or rage aimed at another
-seat, or a **taunt** thrown from your own. Broadcast on a room topic by `ReactionController`, which
-writes the words itself so every screen shows the same thing. Nothing about an emote touches the
-rules engine, and none of it is persisted or snapshotted — a lost emote costs a player nothing.
+seat, or a **taunt** thrown from your own. All three carry words, and all three read the same way —
+a banner across the felt naming the sender, and, for an aimed one, its recipient ("Ari → Bob").
+Broadcast on a room topic by `ReactionController`, which writes the words itself so every screen
+shows the same thing and the request names only a type. Nothing about an emote touches the rules
+engine, and none of it is persisted or snapshotted — a lost emote costs a player nothing.
 
-**Taunt** — the emote a player throws at the whole table rather than at one seat. It carries
-server-written text and reads as a banner across the felt with the sender's name on it.
+**Taunt** — the emote a player throws at the whole table rather than at one seat. The server aims it
+back at its own sender, which is how an emote addressed to the room is told apart from one aimed at
+a neighbour: a taunt names no recipient.
 
 **Placement** — final standing: the winner first, then players in reverse elimination order.
 Outlasting someone ranks above them regardless of final points, because an eliminated player's

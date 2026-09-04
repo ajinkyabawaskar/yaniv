@@ -99,33 +99,10 @@
   overflow: visible;
 }
 
-/* Anchor only. The centring transform is static here so the animation on the body
-   below is free to use transform without the two overwriting each other. */
-.reaction-particle {
-  position: absolute;
-  transform: translate(-50%, -50%);
-  pointer-events: none;
-  user-select: none;
-  font-size: 22px;
-  line-height: 1;
-  /* How far a particle travels up. .felt-surface clips its overflow and the
-     seats sit closer to the top edge on small viewports, so the media queries
-     below shorten the rise rather than letting the emoji get cut in half. */
-  --reaction-rise: 44px;
-  /* Kept in step with REACTION_PARTICLE_LIFETIME_MS in TableCanvas.tsx, which is what
-     actually pulls the element: a shorter lifetime cuts the animation off mid-flight. */
-  --reaction-duration: 2.2s;
-}
-
-.reaction-particle-body {
-  display: inline-block;
-  white-space: nowrap;
-  will-change: transform, opacity;
-}
-
-/* Taunts stack down from the top of the felt, clear of the seats and of the play area,
-   so the words are readable at any viewport and never clipped by a seat near an edge. */
-.taunt-banner-stack {
+/* Every emote is a line of text, so they stack down from the top of the felt, clear of
+   the seats and of the play area. Anchoring a pill to an avatar covered the avatar and
+   clipped at narrow widths, which is why none of them live over a seat. */
+.emote-banner-stack {
   position: absolute;
   top: 34%;
   left: 0;
@@ -138,22 +115,27 @@
   pointer-events: none;
 }
 
-.taunt-banner {
-  animation: taunt-rise 2.4s ease-out forwards;
+.emote-banner {
+  animation: emote-rise 2.4s ease-out forwards;
   max-width: 100%;
 }
 
-/* A taunt is words, not a symbol, so it needs to stay readable while it drifts. */
-.taunt-pill {
+/* An emote is words, not a symbol, so it has to stay readable while it drifts. */
+.emote-pill {
+  --emote-bg: rgba(30, 41, 59, 0.92);
+  --emote-border: rgba(148, 163, 184, 0.7);
+  --emote-fg: #e2e8f0;
+  --emote-name: #cbd5e1;
+
   display: inline-flex;
   align-items: center;
   gap: 5px;
   padding: 4px 10px;
   border-radius: 999px;
-  background: rgba(76, 5, 25, 0.92);
-  border: 1px solid rgba(252, 165, 165, 0.7);
+  background: var(--emote-bg);
+  border: 1px solid var(--emote-border);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.55);
-  color: #fee2e2;
+  color: var(--emote-fg);
   font-family: 'DM Mono', monospace;
   font-size: 13px;
   font-weight: 700;
@@ -161,64 +143,67 @@
   max-width: 100%;
 }
 
-.taunt-pill .taunt-from {
-  color: #fca5a5;
+/* One tint per emote, so the three are told apart before the words are read. */
+.emote-pill.emote-love {
+  --emote-bg: rgba(83, 12, 42, 0.92);
+  --emote-border: rgba(251, 207, 232, 0.7);
+  --emote-fg: #fce7f3;
+  --emote-name: #f9a8d4;
+}
+
+.emote-pill.emote-rage {
+  --emote-bg: rgba(87, 30, 6, 0.92);
+  --emote-border: rgba(253, 186, 116, 0.7);
+  --emote-fg: #ffedd5;
+  --emote-name: #fdba74;
+}
+
+.emote-pill.emote-taunt {
+  --emote-bg: rgba(76, 5, 25, 0.92);
+  --emote-border: rgba(252, 165, 165, 0.7);
+  --emote-fg: #fee2e2;
+  --emote-name: #fca5a5;
+}
+
+/* The names give first: the words are the part everyone needs to read. */
+.emote-pill .emote-who {
+  color: var(--emote-name);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 90px;
+  /* 0, not auto: a flex item will not shrink below its content otherwise, and the
+     names have to give before the words do. */
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
-.taunt-pill .taunt-text {
+.emote-pill .emote-sep {
+  flex: none;
+  color: var(--emote-name);
+  margin-left: -3px;
+}
+
+.emote-pill .emote-text {
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 0 3 auto;
+  min-width: 0;
 }
 
-.taunt-pill .taunt-skull {
-  animation: taunt-skull-throb 0.6s ease-in-out 3;
+.emote-pill .emote-icon {
+  flex: none;
+  animation: emote-icon-throb 0.6s ease-in-out 3;
 }
 
-@keyframes taunt-skull-throb {
+@keyframes emote-icon-throb {
   0%, 100% { transform: rotate(-12deg) scale(1); }
   50%      { transform: rotate(12deg) scale(1.25); }
 }
 
-/* Same rhythm as the taunt banner: pop in, hold at full opacity long enough to be
-   seen, then rise away. The old curve started fading from the first frame with an
-   ease-out, so most of its 1.3s was spent already half transparent. */
-@keyframes love-float {
-  0%   { transform: translateY(0) scale(0.7); opacity: 0; }
-  12%  { transform: translateY(-4px) scale(1.2); opacity: 1; }
-  24%  { transform: translateY(-6px) scale(1); opacity: 1; }
-  70%  { transform: translateY(calc(-0.45 * var(--reaction-rise))) scale(1.05); opacity: 1; }
-  100% { transform: translateY(calc(-1 * var(--reaction-rise))) scale(1.3); opacity: 0; }
-}
-
-.love-particle {
-  animation: love-float var(--reaction-duration) ease-out forwards;
-}
-
-@keyframes rage-shake {
-  0%, 100% { transform: translateY(0) rotate(-22deg) scale(1); }
-  50%      { transform: translateY(calc(-0.5 * var(--reaction-rise))) rotate(22deg) scale(1.2); }
-}
-
-/* Holds, then goes. Shaking through a fade that started at frame one just looked
-   like the emoji was already leaving. */
-@keyframes rage-fade {
-  0%   { opacity: 0; }
-  8%   { opacity: 1; }
-  72%  { opacity: 1; }
-  100% { opacity: 0; }
-}
-
-.rage-particle {
-  /* Four shakes fill the same span the fade runs over: 4 x 0.55s = 2.2s. */
-  animation: rage-shake 0.55s ease-in-out 4, rage-fade var(--reaction-duration) linear forwards;
-}
-
-/* Slower than the emoji: the point is that everyone gets to read it. Pops in, holds
-   long enough to be read, then drifts up and out. */
-@keyframes taunt-rise {
+/* Pops in, holds long enough to be read, then drifts up and out. The point of an
+   emote is that everyone gets to read it, so the hold is most of the run. */
+@keyframes emote-rise {
   0%   { transform: translateY(10px) scale(0.9); opacity: 0; }
   10%  { transform: translateY(0) scale(1); opacity: 1; }
   75%  { transform: translateY(0) scale(1); opacity: 1; }
@@ -1291,9 +1276,12 @@
     font-size: 16px;
   }
 
-  .reaction-particle {
-    font-size: 20px;
-    --reaction-rise: 24px;
+  .emote-pill {
+    font-size: 12px;
+  }
+
+  .emote-pill .emote-who {
+    max-width: 120px;
   }
 
   .opponent-seat {
@@ -1613,9 +1601,15 @@
     font-size: 15px;
   }
 
-  .reaction-particle {
-    font-size: 19px;
-    --reaction-rise: 20px;
+  /* At 360px a full "Ari -> Bob: thanks for the card(s)" only fits if the type comes
+     down and the names give up room first. */
+  .emote-pill {
+    font-size: 11px;
+    padding: 4px 8px;
+  }
+
+  .emote-pill .emote-who {
+    max-width: 84px;
   }
 
   .opponent-seat {
