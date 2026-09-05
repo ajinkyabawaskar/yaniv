@@ -1417,9 +1417,9 @@ public class GameStateController {
     }
 
     private void finishMutation(YanivGameEngine engine, String roomId, String autoPlayedPlayerId) {
-        // Persist snapshot (best-effort: a Redis outage must not fail the action, but the
-        // room is then held in memory until a later write succeeds -- see evictIdleEngines)
-        persistSnapshot(roomId, engine);
+        // Persist snapshot async (best-effort: a Redis outage must not fail the action,
+        // and must not block the broadcast either -- see evictIdleEngines)
+        scheduler.execute(() -> persistSnapshot(roomId, engine));
 
         // The round that ends the game transitions straight to GAME_OVER, never
         // ROUND_OVER, so it must be persisted here too or round_histories is
