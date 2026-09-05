@@ -35,18 +35,23 @@ public class ReactionController {
      * request names a type, never a message.
      */
     private static final Map<String, String> REACTION_TEXT = Map.of(
-            "LOVE", "thanks for the card",
+            "LOVE", "thanks for the card(s)",
             "RAGE", "jaldi khel l***",
-            "TAUNT", "khali ho jao"
+            "TAUNT", "halke ho jao",
+            "MOCK", "lambe lag gaye",
+            "SHOCK", "Bhaisaab, yeh kya tha?",
+            "FLEX", "Mera toh dhandha chal raha hai"
     );
 
-    private static final List<String> ALLOWED_TYPES = List.of("LOVE", "RAGE", "TAUNT");
+    private static final List<String> ALLOWED_TYPES = List.of("LOVE", "RAGE", "TAUNT", "MOCK", "SHOCK", "FLEX");
 
     /**
      * Minimum gap between one player's emotes. Every emote puts a line of text on
-     * everyone's felt, so an unthrottled sender could paper the table for the room.
+     * everyone's felt, so an unthrottled sender could paper the table for the room --
+     * but the window has to stay short enough that a few taps a second still land,
+     * or the buttons feel dead.
      */
-    private static final long COOLDOWN_MS = 700;
+    private static final long COOLDOWN_MS = 250;
 
     private final GameService gameService;
     private final UserService userService;
@@ -66,12 +71,12 @@ public class ReactionController {
     /**
      * Send an emote to everyone in the room.
      *
-     * Request: {@code { "type": "LOVE" | "RAGE" | "TAUNT", "targetUserId": "usr_1" }}
+     * Request: {@code { "type": "LOVE" | "RAGE" | "TAUNT" | "MOCK" | "SHOCK" | "FLEX", "targetUserId": "usr_1" }}
      *
-     * The target is the player the emote names -- someone else for LOVE and RAGE, which
-     * read as "Ari -> Bob", and yourself for a TAUNT, which is thrown at the whole table
-     * and so names no recipient. Both sender and target must be players in this room, so
-     * an emote cannot be aimed at a seat that is not there.
+     * The target is the player the emote names -- someone else for LOVE, RAGE, MOCK,
+     * SHOCK and FLEX, which read as "Ari -> Bob", and yourself for a TAUNT, which is
+     * thrown at the whole table and so names no recipient. Both sender and target must
+     * be players in this room, so an emote cannot be aimed at a seat that is not there.
      */
     @MessageMapping("/room/{roomId}/reaction")
     public void handleReaction(@DestinationVariable String roomId,

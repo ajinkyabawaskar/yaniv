@@ -58,7 +58,7 @@ interface TableCanvasProps {
   bonusDiscardActive?: boolean;
   pendingBonusCard?: Card | null;
   onBonusDiscard?: ((shouldDiscard: boolean) => void) | null;
-  onSendReaction?: (type: 'LOVE' | 'RAGE' | 'TAUNT', targetUserId: string) => void;
+  onSendReaction?: (type: 'LOVE' | 'RAGE' | 'TAUNT' | 'MOCK' | 'SHOCK' | 'FLEX', targetUserId: string) => void;
 }
 
 /**
@@ -70,11 +70,9 @@ export interface TableCanvasHandle {
   playReaction: (event: ReactionEvent) => void;
 }
 
-/** Long enough to outlast the 2.4s emote-rise animation in TableCanvas.css. */
+/** Long enough to outlast the log row's slide-in animation in TableCanvas.css. */
 const EMOTE_BANNER_LIFETIME_MS = 2500;
-/** Emotes stack down the middle of the felt, so only the newest few stay legible. */
-const MAX_VISIBLE_EMOTES = 3;
-const EMOTE_ICON: Record<string, string> = { LOVE: '❤️', RAGE: '😡', TAUNT: '💀' };
+const EMOTE_ICON: Record<string, string> = { LOVE: '❤️', RAGE: '😡', TAUNT: '💀', MOCK: '💥', SHOCK: '😱', FLEX: '😎' };
 /**
  * Shown only if an emote somehow arrives without the server's words on it. The server
  * authors the real text (ReactionController.REACTION_TEXT) so that every screen in the
@@ -83,7 +81,10 @@ const EMOTE_ICON: Record<string, string> = { LOVE: '❤️', RAGE: '😡', TAUNT
 const EMOTE_FALLBACK_TEXT: Record<string, string> = {
   LOVE: 'thanks for the card(s)',
   RAGE: 'jaldi khel l***',
-  TAUNT: 'khali ho jao',
+  TAUNT: 'halke ho jao',
+  MOCK: 'lambe lag gaye',
+  SHOCK: 'Bhaisaab, yeh kya tha?',
+  FLEX: 'Mera toh dhandha chal raha hai',
 };
 
 export const getCardImagePath = (rank: string, suit: string): string => {
@@ -252,7 +253,7 @@ function TableCanvas({
   // on the room topic, so the sender sees exactly what everyone else sees and a dropped
   // frame shows nothing rather than showing it to one player alone.
   const sendReaction = useCallback(
-    (type: 'LOVE' | 'RAGE' | 'TAUNT', targetUserId: string) => {
+    (type: 'LOVE' | 'RAGE' | 'TAUNT' | 'MOCK' | 'SHOCK' | 'FLEX', targetUserId: string) => {
       if (!targetUserId) return;
       onSendReaction?.(type, targetUserId);
     },
@@ -367,6 +368,17 @@ function TableCanvas({
   }, [yanivCallerId, yanivCalledAt, yanivContestTimerSeconds]);
 
   const currentHandCards = localSortedHand;
+
+  // Central reaction strip aims at the turn holder: love/rage go to whoever is
+  // playing (when that is someone else still in the game); a taunt is thrown
+  // at the table. Same targeting the per-seat buttons had, one fixed place.
+  const turnHolder = useMemo(
+    () => opponents.find((o) => o.userId === currentTurnPlayerId) ?? null,
+    [opponents, currentTurnPlayerId]
+  );
+  const canAimAtTurnHolder =
+    !!turnHolder && !turnHolder.isCurrentPlayer && !turnHolder.isEliminated;
+  const meEliminated = opponents.some((o) => o.isCurrentPlayer && o.isEliminated);
 
   const handScore = useMemo(() => calculateHandScore(currentHandCards), [currentHandCards]);
   const isYanivEligible = handScore <= yanivThreshold;
@@ -590,18 +602,16 @@ function TableCanvas({
       // whole table is told apart from one aimed at a neighbour.
       const isAimed = !!event.targetUserId && event.targetUserId !== event.fromUserId;
 
-      setEmoteBanners((prev) =>
-        [
-          ...prev,
-          {
-            id: event.id,
-            type: event.type,
-            from: event.fromDisplayName || 'Someone',
-            to: isAimed ? playerNames[event.targetUserId] || 'a player' : null,
-            text: event.text || EMOTE_FALLBACK_TEXT[event.type] || '',
-          },
-        ].slice(-MAX_VISIBLE_EMOTES)
-      );
+      setEmoteBanners((prev) => [
+        ...prev,
+        {
+          id: event.id,
+          type: event.type,
+          from: event.fromDisplayName || 'Someone',
+          to: isAimed ? playerNames[event.targetUserId] || 'a player' : null,
+          text: event.text || EMOTE_FALLBACK_TEXT[event.type] || '',
+        },
+      ]);
 
       // Each emote clears itself once its own animation has finished; a single shared
       // timer would leave everything that arrived later on screen forever.
@@ -751,13 +761,6 @@ function TableCanvas({
 
             // Display name: "You" for current player, actual name for others
             const displayName = isCurrentPlayer ? 'You' : opponent.displayName;
-            // Avatar initials: first 2 letters for ALL players (including current player)
-            const avatarInitials = opponent.displayName.substring(0, 2).toUpperCase();
-            // Love and rage are aimed at someone else who is still playing; a taunt is
-            // thrown from your own seat at the table. Either way an eliminated seat is
-            // greyed out and no longer part of the round, so it gets no emote row.
-            const canReact = !isCurrentPlayer && !opponent.isEliminated;
-            const canTaunt = !!isCurrentPlayer && !opponent.isEliminated;
 
             return (
               <motion.div
@@ -770,150 +773,80 @@ function TableCanvas({
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: idx * 0.1 }}
               >
-                <div className="opponent-avatar-wrap">
-                  {isTurn && (
-                    <svg className={`turn-timer-ring ${isUrgentTimer ? 'urgent' : ''}`} viewBox="0 0 100 100">
-                      <circle cx="50" cy="50" r="46" className="timer-track" />
-                      <circle
-                        cx="50"
-                        cy="50"
-                        r="46"
-                        className="timer-fill"
-                        style={{
-                          strokeDasharray: 289,
-                          strokeDashoffset: 289 * (1 - timerProgress),
-                        }}
-                      />
-                    </svg>
-                  )}
-                  <div className={`opponent-avatar ${isDisconnected ? 'disconnected' : ''} ${isCurrentPlayer ? 'current-player-avatar' : ''}`}>
-                    {avatarInitials}
-                    {isDisconnected && <span className="disconnected-indicator" title="Disconnected">⚡</span>}
+                {/* Turn countdown: gutter + fill bar along the seat's top edge.
+                    Absolute, so it costs zero layout. */}
+                {isTurn && (
+                  <div className="turn-progress-track" aria-hidden="true">
+                    <div
+                      className={`turn-progress-fill ${isUrgentTimer ? 'urgent' : ''}`}
+                      style={{ width: `${Math.max(0, Math.min(100, timerProgress * 100))}%` }}
+                    />
                   </div>
-                  {opponent.isHost && <span className="host-badge" title="Host">👑</span>}
+                )}
+
+                {/* Identity is one inline row: the initials avatar only repeated
+                    what the name already says, so it was pure height. */}
+                <div className="opponent-identity">
+                  {isTurn && <span className="turn-dot" title="Current turn" />}
+                  <span className="opponent-name">{displayName}</span>
+                  {opponent.isHost && <span className="inline-badge" title="Host">👑</span>}
                   {isAutoPlayed && (
-                    <span className="autoplay-badge" title="Turn auto-played by server">
-                      🤖
-                    </span>
+                    <span className="inline-badge" title="Turn auto-played by server">🤖</span>
+                  )}
+                  {isDisconnected && (
+                    <span className="inline-badge" title="Disconnected — reconnecting…">⚡</span>
                   )}
                 </div>
 
                 <div className="opponent-meta">
-                  <span className="opponent-name">{displayName}</span>
-                  <div className="opponent-score-pill">
-                    <span className="score-val">{opponent.score} pts</span>
-                  </div>
                   {opponent.spectatorReading && (
                     <SpectatorMeters reading={opponent.spectatorReading} />
                   )}
-                  {/* Show YOUR TURN only when it's actually this player's turn AND it's the current user */}
-                  {isTurn && isCurrentPlayer && (
-                    <span className="current-player-turn-indicator-small">
-                      <span className="turn-label-small">YOUR TURN</span>
-                    </span>
-                  )}
-                  {isTurn && !isCurrentPlayer && (
-                    <span className="current-player-turn-indicator-small opponent-turn">
-                      <span className="turn-label-small">{displayName}'s Turn</span>
-                    </span>
-                  )}
-                  {isDisconnected && (
-                    <span className="disconnected-badge" title="Reconnecting...">🔄 Reconnecting</span>
-                  )}
                 </div>
 
-                <div className="opponent-card-stack" title={`${opponent.cardCount} cards in hand`}>
-                  {Array.from({ length: stackCount }).map((_, cIdx) => (
-                    <div
-                      key={cIdx}
-                      className="mini-card-back"
-                      style={{
-                        transform: `translateX(${(cIdx - stackCenter) * 4}px) rotate(${(cIdx - stackCenter) * 6}deg)`,
-                      }}
-                    />
-                  ))}
-                  <span className="card-count-badge">{opponent.cardCount}</span>
+                <div className="opponent-info-row">
+                  <div className="opponent-score-pill">
+                    <span className="score-val">{opponent.score} pts</span>
+                  </div>
+                  <div className="opponent-card-stack" title={`${opponent.cardCount} cards in hand`}>
+                    {Array.from({ length: stackCount }).map((_, cIdx) => (
+                      <div
+                        key={cIdx}
+                        className="mini-card-back"
+                        style={{
+                          transform: `translateX(${(cIdx - stackCenter) * 4}px) rotate(${(cIdx - stackCenter) * 6}deg)`,
+                        }}
+                      />
+                    ))}
+                    <span className="card-count-badge">{opponent.cardCount}</span>
+                  </div>
                 </div>
-
-                {canReact && (
-                  <div className="reaction-buttons">
-                    <button
-                      type="button"
-                      className="reaction-btn reaction-love"
-                      onClick={() => sendReaction('LOVE', opponent.userId)}
-                      title={`Tell ${displayName}: ${EMOTE_FALLBACK_TEXT.LOVE}`}
-                      aria-label={`Tell ${displayName}: ${EMOTE_FALLBACK_TEXT.LOVE}`}
-                    >
-                      ❤️
-                    </button>
-                    <button
-                      type="button"
-                      className="reaction-btn reaction-rage"
-                      onClick={() => sendReaction('RAGE', opponent.userId)}
-                      title={`Tell ${displayName}: ${EMOTE_FALLBACK_TEXT.RAGE}`}
-                      aria-label={`Tell ${displayName}: ${EMOTE_FALLBACK_TEXT.RAGE}`}
-                    >
-                      😡
-                    </button>
-                  </div>
-                )}
-
-                {canTaunt && (
-                  <div className="reaction-buttons">
-                    <button
-                      type="button"
-                      className="reaction-btn reaction-taunt"
-                      onClick={() => sendReaction('TAUNT', opponent.userId)}
-                      title={`Tell the table: ${EMOTE_FALLBACK_TEXT.TAUNT}`}
-                      aria-label={`Tell the table: ${EMOTE_FALLBACK_TEXT.TAUNT}`}
-                    >
-                      💀
-                    </button>
-                  </div>
-                )}
               </motion.div>
             );
           })}
         </div>
 
-        {/* 3. Emote Overlay */}
-        {/* Out here rather than over a seat: an emote is a line of text now, and a pill
-            anchored to an avatar covered it and clipped at narrow widths. */}
-        <div className="reaction-animation-container">
-          <div className="emote-banner-stack" role="status" aria-live="polite">
-            {emoteBanners.map((banner) => (
-              <div key={banner.id} className="emote-banner">
-                <span className={`emote-pill emote-${banner.type.toLowerCase()}`}>
-                  <span className="emote-icon" aria-hidden="true">
-                    {EMOTE_ICON[banner.type] || '💬'}
-                  </span>
-                  <span className="emote-who">
-                    {banner.to ? `${banner.from} \u2192 ${banner.to}` : banner.from}
-                  </span>
-                  {/* Its own flex item so a long name truncates without eating it. */}
-                  <span className="emote-sep" aria-hidden="true">
-                    :
-                  </span>
-                  <span className="emote-text">{banner.text}</span>
-                </span>
-              </div>
-            ))}
-          </div>
+        {/* Emote log: twitch-chat plain text below the player bar. Blank when
+            silent; every emote stays until its own TTL clears it. */}
+        <div className="emote-log-strip" role="status" aria-live="polite">
+          {emoteBanners.map((banner) => (
+            <div key={banner.id} className="emote-log-row" data-type={banner.type.toLowerCase()}>
+              <span className="emote-emoji" aria-hidden="true">
+                {EMOTE_ICON[banner.type] || '💬'}
+              </span>
+              <span className="emote-from">
+                {banner.to ? `${banner.from} \u2192 ${banner.to}` : banner.from}
+              </span>
+              <span className="emote-msg">{banner.text}</span>
+            </div>
+          ))}
         </div>
 
-        {/* 2. Center Play Area (2-Zone Layout) */}
+        {/* 2. Center Play Area - Natural Piles on Felt */}
         <div className="center-play-area">
-          {/* Zone 1: Draw Pile (Left) */}
-          <div
-            className={`zone-column draw-pile-zone ${selectedCards.length > 0 ? 'pulse-prompt' : ''}`}
-            onClick={handleDrawFromDeck}
-          >
-            <div className="zone-header">
-              <span className="zone-title">DRAW PILE</span>
-              <span className="deck-count-pill">{deckCount} left</span>
-            </div>
-
-            <div className="deck-stack-3d">
+          {/* Draw Pile (Left) */}
+          <div className="pile-column draw-pile-column" onClick={handleDrawFromDeck}>
+            <div className={`deck-stack-3d ${selectedCards.length > 0 ? 'pulse-prompt' : ''}`}>
               <div className="deck-layer layer-3" />
               <div className="deck-layer layer-2" />
               <div className="deck-layer layer-1">
@@ -923,29 +856,39 @@ function TableCanvas({
               </div>
             </div>
 
-            {isPlayerTurn && (
-              <motion.div
-                className="draw-prompt-badge"
-                initial={{ scale: 0.8, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-              >
-                Tap to Draw Deck
-              </motion.div>
-            )}
+            {/* Fixed slot: the badge appearing must not move the cards. */}
+            <div className="draw-prompt-slot">
+              {isPlayerTurn && (
+                <motion.div
+                  className="draw-prompt-badge"
+                  initial={{ scale: 0.8, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                >
+                  Tap to Draw Deck
+                </motion.div>
+              )}
+            </div>
+            <span className="pile-label">Draw</span>
+            <span className="pile-count">{deckCount} cards</span>
           </div>
 
-          {/* Zone 2: Discard Pile (Right) - Chinese Hand Fan Layout */}
-          <div className="zone-column discard-pile-zone">
-            <div className="zone-header">
-              <span className="zone-title">DISCARD PILE</span>
-              <span className="discard-count-pill">{discardDisplayCards.length} cards</span>
-            </div>
+          {/* Discard Pile (Right) - Chinese Hand Fan Layout */}
+          <div className="pile-column discard-pile-column">
 
             <div className="discard-fan-container">
               {discardDisplayCards.length === 0 ? (
                 <div className="discard-empty-box">Empty</div>
               ) : (
-                <div className="discard-cards-fan">
+                <>
+                  {/* Older discards tucked underneath the active fan. */}
+                  <div className="discard-depth" aria-hidden="true">
+                    <div className="discard-depth-layer depth-2" />
+                    <div className="discard-depth-layer depth-1" />
+                  </div>
+                <div
+                  className="discard-cards-fan"
+                  data-count={Math.min(discardDisplayCards.length, 5)}
+                >
                   {discardDisplayCards.map((card, idx) => {
                     const isDrawable = drawableDiscardCards.some((dc) => dc.id === card.id);
                     const isSequenceMiddleLocked =
@@ -954,12 +897,14 @@ function TableCanvas({
                       idx > 0 &&
                       idx < discardDisplayCards.length - 1;
 
-                    // Chinese hand fan: tight overlap with slight rotation
+                    // Tight fan capped at two card widths: overlap does the work,
+                    // so spread flattens out at 4+ cards instead of widening the box.
                     // Fan spread based on card count (max 5 cards)
                     const totalCards = Math.min(discardDisplayCards.length, 5);
                     const centerOffset = idx - (totalCards - 1) / 2;
-                    const rotationDeg = centerOffset * 3; // Gentle fan spread
-                    const translateY = Math.abs(centerOffset) * 2;
+                    const flatFan = totalCards >= 4;
+                    const rotationDeg = centerOffset * (flatFan ? 1 : 3); // Gentle fan spread
+                    const translateY = Math.abs(centerOffset) * (flatFan ? 1 : 2);
                     // Z-index: center card on top, edges behind
                     const zIndex = totalCards - Math.abs(centerOffset);
 
@@ -985,25 +930,31 @@ function TableCanvas({
                           className="card-img"
                         />
 
-                        {isSequenceMiddleLocked && (
+                        {isSequenceMiddleLocked && totalCards < 4 && (
                           <div className="locked-indicator" title="Middle sequence cards cannot be drawn">
                             🔒
                           </div>
                         )}
                       </motion.div>
                     );
-                  })}
+                    })}
                 </div>
+                </>
               )}
             </div>
 
-            {isPlayerTurn && (
-              <div className="discard-prompt-hint">
-                {drawableDiscardCards.length > 1
-                  ? 'Tap outer cards (ends only) to draw'
-                  : 'Tap top card to draw'}
-              </div>
-            )}
+            {/* Fixed slot: the hint appearing must not move the cards. */}
+            <div className="discard-prompt-slot">
+              {isPlayerTurn && (
+                <div className="discard-prompt-hint">
+                  {drawableDiscardCards.length > 1
+                    ? 'Tap outer cards (ends only) to draw'
+                    : 'Tap top card to draw'}
+                </div>
+              )}
+            </div>
+            <span className="pile-label">Discard</span>
+            <span className="pile-count">{discardDisplayCards.length} cards</span>
           </div>
         </div>
 
@@ -1057,6 +1008,110 @@ function TableCanvas({
 
         {/* 3. Main Player Dock (Bottom Center) */}
         <div className="main-player-dock">
+          {/* Reactions live here, above the sort/Yaniv strip, aimed at the
+              turn holder — not one set per seat. */}
+          <div className="reaction-strip" role="group" aria-label="Table reactions">
+            <button
+              type="button"
+              className="reaction-btn reaction-love"
+              onClick={() => turnHolder && sendReaction('LOVE', turnHolder.userId)}
+              disabled={!canAimAtTurnHolder}
+              title={
+                canAimAtTurnHolder && turnHolder
+                  ? `Tell ${turnHolder.isCurrentPlayer ? 'You' : turnHolder.displayName}: ${EMOTE_FALLBACK_TEXT.LOVE}`
+                  : 'Love is for the player whose turn it is'
+              }
+              aria-label={
+                canAimAtTurnHolder && turnHolder
+                  ? `Tell ${turnHolder.displayName}: ${EMOTE_FALLBACK_TEXT.LOVE}`
+                  : 'Love (waiting for another player’s turn)'
+              }
+            >
+              ❤️
+            </button>
+            <button
+              type="button"
+              className="reaction-btn reaction-rage"
+              onClick={() => turnHolder && sendReaction('RAGE', turnHolder.userId)}
+              disabled={!canAimAtTurnHolder}
+              title={
+                canAimAtTurnHolder && turnHolder
+                  ? `Tell ${turnHolder.displayName}: ${EMOTE_FALLBACK_TEXT.RAGE}`
+                  : 'Rage is for the player whose turn it is'
+              }
+              aria-label={
+                canAimAtTurnHolder && turnHolder
+                  ? `Tell ${turnHolder.displayName}: ${EMOTE_FALLBACK_TEXT.RAGE}`
+                  : 'Rage (waiting for another player’s turn)'
+              }
+            >
+              😡
+            </button>
+            <button
+              type="button"
+              className="reaction-btn reaction-mock"
+              onClick={() => turnHolder && sendReaction('MOCK', turnHolder.userId)}
+              disabled={!canAimAtTurnHolder}
+              title={
+                canAimAtTurnHolder && turnHolder
+                  ? `Tell ${turnHolder.displayName}: ${EMOTE_FALLBACK_TEXT.MOCK}`
+                  : 'Mock is for the player whose turn it is'
+              }
+              aria-label={
+                canAimAtTurnHolder && turnHolder
+                  ? `Tell ${turnHolder.displayName}: ${EMOTE_FALLBACK_TEXT.MOCK}`
+                  : 'Mock (waiting for another player’s turn)'
+              }
+            >
+              💥
+            </button>
+            <button
+              type="button"
+              className="reaction-btn reaction-shock"
+              onClick={() => turnHolder && sendReaction('SHOCK', turnHolder.userId)}
+              disabled={!canAimAtTurnHolder}
+              title={
+                canAimAtTurnHolder && turnHolder
+                  ? `Tell ${turnHolder.displayName}: ${EMOTE_FALLBACK_TEXT.SHOCK}`
+                  : 'Shock is for the player whose turn it is'
+              }
+              aria-label={
+                canAimAtTurnHolder && turnHolder
+                  ? `Tell ${turnHolder.displayName}: ${EMOTE_FALLBACK_TEXT.SHOCK}`
+                  : 'Shock (waiting for another player’s turn)'
+              }
+            >
+              😱
+            </button>
+            <button
+              type="button"
+              className="reaction-btn reaction-flex"
+              onClick={() => turnHolder && sendReaction('FLEX', turnHolder.userId)}
+              disabled={!canAimAtTurnHolder}
+              title={
+                canAimAtTurnHolder && turnHolder
+                  ? `Tell ${turnHolder.displayName}: ${EMOTE_FALLBACK_TEXT.FLEX}`
+                  : 'Flex is for the player whose turn it is'
+              }
+              aria-label={
+                canAimAtTurnHolder && turnHolder
+                  ? `Tell ${turnHolder.displayName}: ${EMOTE_FALLBACK_TEXT.FLEX}`
+                  : 'Flex (waiting for another player’s turn)'
+              }
+            >
+              😎
+            </button>
+            <button
+              type="button"
+              className="reaction-btn reaction-taunt"
+              onClick={() => currentUserId && sendReaction('TAUNT', currentUserId)}
+              disabled={meEliminated || !currentUserId}
+              title={`Tell the table: ${EMOTE_FALLBACK_TEXT.TAUNT}`}
+              aria-label={`Tell the table: ${EMOTE_FALLBACK_TEXT.TAUNT}`}
+            >
+              💀
+            </button>
+          </div>
           <div className="player-hud-bar">
             <div className={`hand-total-btn hud-btn outline-only ${isYanivEligible && isPlayerTurn ? 'ready-yaniv' : ''}`}>
               <span className="score-label">Hand Total:</span>
@@ -1065,10 +1120,10 @@ function TableCanvas({
 
             <div className="hand-sort-controls">
               <button className="sort-btn hud-btn interactive" onClick={handleSortByRank} title="Sort hand by rank">
-                ↕ Rank
+                ↕ Sort Ranks
               </button>
               <button className="sort-btn hud-btn interactive" onClick={handleSortBySuit} title="Sort hand by suit">
-                ♣ Suit
+                ♣ Sort Suites
               </button>
               <button
                 className={`sort-btn hud-btn interactive call-yaniv-btn-hud ${isYanivEligible && isPlayerTurn ? 'eligible' : ''}`}

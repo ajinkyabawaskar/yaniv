@@ -77,7 +77,7 @@ class ReactionControllerTest {
 
         ReactionController.ReactionBroadcast sent = captureBroadcast();
         assertEquals("TAUNT", sent.type);
-        assertEquals("khali ho jao", sent.text);
+        assertEquals("halke ho jao", sent.text);
         assertEquals(SENDER, sent.fromUserId);
         assertEquals(SENDER, sent.targetUserId, "a taunt is thrown from the seat you sit in");
         assertEquals("Alice", sent.fromDisplayName);
@@ -97,7 +97,7 @@ class ReactionControllerTest {
     @Test
     @DisplayName("Every emote the game offers carries server-authored words")
     void everyEmoteTypeCarriesText() {
-        for (String type : List.of("LOVE", "RAGE", "TAUNT")) {
+        for (String type : List.of("LOVE", "RAGE", "TAUNT", "MOCK", "SHOCK", "FLEX")) {
             // A fresh controller per type: the cooldown is per sender, and this sends
             // three emotes from one seat inside its window.
             reset(messagingTemplate);

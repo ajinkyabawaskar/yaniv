@@ -138,7 +138,7 @@ All game mechanics, state transitions, discard/pickup validations, and scoring p
 
 ```
 
-* `SEND /app/room/{roomId}/reaction` — Emote sent to the room: `{ "type": "LOVE" | "RAGE" | "TAUNT", "targetUserId": "usr_4412" }`. The request names a type, never a message. `targetUserId` is the player the emote names, and defaults to the sender's own seat, which is what a `TAUNT` uses — a taunt addresses the whole table, so it names no recipient.
+* `SEND /app/room/{roomId}/reaction` — Emote sent to the room: `{ "type": "LOVE" | "RAGE" | "TAUNT" | "MOCK" | "SHOCK" | "FLEX", "targetUserId": "usr_4412" }`. The request names a type, never a message. `targetUserId` is the player the emote names, and defaults to the sender's own seat, which is what a `TAUNT` uses — a taunt addresses the whole table, so it names no recipient.
 
 * `SUBSCRIBE /topic/room/{roomId}/reactions` — Emotes, broadcast to everyone in the room. Cosmetic and never persisted. Every type carries words, and they are written server-side so no client can put its own text on another player's screen:
 
@@ -149,7 +149,7 @@ All game mechanics, state transitions, discard/pickup validations, and scoring p
   "fromUserId": "usr_9921",
   "fromDisplayName": "Alice",
   "targetUserId": "usr_9921",
-  "text": "khali ho jao"
+  "text": "halke ho jao"
 }
 
 ```

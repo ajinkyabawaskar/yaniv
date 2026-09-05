@@ -41,7 +41,7 @@ export interface SpectatorReading {
  */
 export interface ReactionEvent {
   id: string;
-  type: 'LOVE' | 'RAGE' | 'TAUNT';
+  type: 'LOVE' | 'RAGE' | 'TAUNT' | 'MOCK' | 'SHOCK' | 'FLEX';
   fromUserId: string;
   fromDisplayName: string;
   targetUserId: string;

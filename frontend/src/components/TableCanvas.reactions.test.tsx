@@ -50,7 +50,7 @@ const taunt = (id: string): ReactionEvent => ({
   fromUserId: 'u1',
   fromDisplayName: 'Ari',
   targetUserId: 'u1',
-  text: 'khali ho jao',
+  text: 'halke ho jao',
 });
 
 const baseProps = {
@@ -85,13 +85,14 @@ const unmount = () => {
   act(() => root.unmount());
   container.remove();
 };
-const banners = () => Array.from(container.querySelectorAll('.emote-banner'));
+const banners = () => Array.from(container.querySelectorAll('.emote-log-row'));
 const readBanner = (i = 0) => {
-  const pill = banners()[i].querySelector('.emote-pill')!;
+  const row = banners()[i] as HTMLElement;
   return {
-    className: pill.className,
-    who: pill.querySelector('.emote-who')!.textContent,
-    text: pill.querySelector('.emote-text')!.textContent,
+    type: row.dataset.type,
+    emoji: row.querySelector('.emote-emoji')!.textContent,
+    who: row.querySelector('.emote-from')!.textContent,
+    text: row.querySelector('.emote-msg')!.textContent,
   };
 };
 
@@ -112,7 +113,8 @@ test('an aimed emote names both players so the room knows who it is for', () => 
   mount();
   play(aimed('a', 'RAGE', 'jaldi khel l***'));
   expect(readBanner().who).toBe('Ari → Bob');
-  expect(readBanner().className).toContain('emote-rage');
+  expect(readBanner().type).toBe('rage');
+  expect(readBanner().emoji).toBe('😡');
   unmount();
 });
 
@@ -120,7 +122,7 @@ test('a taunt names only its sender, because it is thrown at the whole table', (
   mount();
   play(taunt('a'));
   expect(readBanner().who).toBe('Ari');
-  expect(readBanner().className).toContain('emote-taunt');
+  expect(readBanner().type).toBe('taunt');
   unmount();
 });
 
@@ -149,11 +151,11 @@ test('an emote clears itself once its animation is over', () => {
   jest.useRealTimers();
 });
 
-test('a table-wide pile-on keeps the newest few rather than a wall of text', () => {
+test('a table-wide pile-on keeps every emote until its own TTL clears it', () => {
   mount();
   act(() => {
     ['a', 'b', 'c', 'd', 'e'].forEach((id) => ref.current!.playReaction(taunt(id)));
   });
-  expect(banners()).toHaveLength(3);
+  expect(banners()).toHaveLength(5);
   unmount();
 });

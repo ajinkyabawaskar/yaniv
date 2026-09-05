@@ -45,16 +45,56 @@
 
 /* ==========================================================================
    Emote Reactions
-   The two emote buttons get their own row at the foot of a seat. Absolutely
-   positioning them over .opponent-avatar-wrap covered the avatar initials and
-   left a 24px tap target, which is well under the 44px the rest of the HUD uses.
+   One central strip above the sort/Yaniv HUD, aimed at the turn holder: a
+   single segmented tray (not floating circles), speaking the same glass +
+   gold language as the HUD buttons below it.
    ========================================================================== */
-.reaction-buttons {
+.reaction-strip {
+  position: relative;
+  z-index: 12;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  margin-top: 8px;
+  gap: 2px;
+  width: max-content;
+  max-width: 100%;
+  margin: 0 auto 12px;
+  padding: 2px;
+  background: rgba(10, 32, 23, 0.85);
+  border: 1px solid rgba(212, 175, 55, 0.35);
+  border-radius: 10px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(8px);
+}
+
+.reaction-strip .reaction-btn {
+  width: 34px;
+  height: 26px;
+  font-size: 14px;
+  border-radius: 6px;
+  background: transparent;
+  border-color: transparent;
+}
+
+.reaction-strip .reaction-btn:hover:not(:disabled) {
+  background: rgba(212, 175, 55, 0.18);
+  border-color: rgba(212, 175, 55, 0.45);
+  transform: none;
+}
+
+.reaction-strip .reaction-btn:active:not(:disabled) {
+  transform: scale(0.94);
+}
+
+/* The tray is the chrome now, so the taunt keeps only a red-ish hover hint. */
+.reaction-strip .reaction-btn.reaction-taunt {
+  background: transparent;
+  border-color: transparent;
+}
+
+.reaction-strip .reaction-btn.reaction-taunt:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.18);
+  border-color: rgba(252, 165, 165, 0.45);
 }
 
 .reaction-btn {
@@ -85,129 +125,77 @@
   transform: scale(0.94);
 }
 
-/* ==========================================================================
-   Reaction Animation Overlay
-   Particles are absolutely positioned inside this layer, so triggerReaction
-   converts the target avatar's viewport rect into layer-local coordinates
-   before spawning one. pointer-events: none keeps the layer out of the way.
-   ========================================================================== */
-.reaction-animation-container {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 100;
-  overflow: visible;
+.reaction-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  transform: none;
 }
 
-/* Every emote is a line of text, so they stack down from the top of the felt, clear of
-   the seats and of the play area. Anchoring a pill to an avatar covered the avatar and
-   clipped at narrow widths, which is why none of them live over a seat. */
-.emote-banner-stack {
-  position: absolute;
-  top: 34%;
-  left: 0;
-  right: 0;
+.reaction-btn:disabled:hover {
+  background: rgba(0, 0, 0, 0.45);
+  border-color: rgba(212, 175, 55, 0.45);
+  transform: none;
+}
+
+/* ==========================================================================
+   Emote Log Strip
+   Twitch-chat plain text directly below the player bar. Blank when silent;
+   every emote stays until its own TTL clears it. min-height is only a floor
+   so an empty strip still holds the piles steady; the strip grows while a
+   burst overlaps, then settles back as rows expire.
+   ========================================================================== */
+.emote-log-strip {
+  position: relative;
+  z-index: 10;
+  width: 100%;
+  min-height: 46px;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 4px;
+  padding: 4px 12px 2px;
+}
+
+.emote-log-row {
+  display: flex;
+  align-items: baseline;
   gap: 6px;
-  padding: 0 12px;
-  pointer-events: none;
-}
-
-.emote-banner {
-  animation: emote-rise 2.4s ease-out forwards;
   max-width: 100%;
-}
-
-/* An emote is words, not a symbol, so it has to stay readable while it drifts. */
-.emote-pill {
-  --emote-bg: rgba(30, 41, 59, 0.92);
-  --emote-border: rgba(148, 163, 184, 0.7);
-  --emote-fg: #e2e8f0;
-  --emote-name: #cbd5e1;
-
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: var(--emote-bg);
-  border: 1px solid var(--emote-border);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.55);
-  color: var(--emote-fg);
-  font-family: 'DM Mono', monospace;
   font-size: 13px;
+  line-height: 1.35;
+  color: var(--ink-light);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  animation: emote-log-in 0.25s ease-out;
+}
+
+/* Rows slide in from the left and stay put until their own timer clears them. */
+@keyframes emote-log-in {
+  from { transform: translateX(-12px); opacity: 0; }
+  to   { transform: translateX(0); opacity: 1; }
+}
+
+.emote-log-row .emote-emoji {
+  flex: none;
+}
+
+.emote-log-row .emote-from {
+  flex: none;
   font-weight: 700;
-  letter-spacing: 0.02em;
-  max-width: 100%;
-}
-
-/* One tint per emote, so the three are told apart before the words are read. */
-.emote-pill.emote-love {
-  --emote-bg: rgba(83, 12, 42, 0.92);
-  --emote-border: rgba(251, 207, 232, 0.7);
-  --emote-fg: #fce7f3;
-  --emote-name: #f9a8d4;
-}
-
-.emote-pill.emote-rage {
-  --emote-bg: rgba(87, 30, 6, 0.92);
-  --emote-border: rgba(253, 186, 116, 0.7);
-  --emote-fg: #ffedd5;
-  --emote-name: #fdba74;
-}
-
-.emote-pill.emote-taunt {
-  --emote-bg: rgba(76, 5, 25, 0.92);
-  --emote-border: rgba(252, 165, 165, 0.7);
-  --emote-fg: #fee2e2;
-  --emote-name: #fca5a5;
-}
-
-/* The names give first: the words are the part everyone needs to read. */
-.emote-pill .emote-who {
-  color: var(--emote-name);
+  color: var(--card-cream);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  /* 0, not auto: a flex item will not shrink below its content otherwise, and the
-     names have to give before the words do. */
-  flex: 0 1 auto;
-  min-width: 0;
+  max-width: 40%;
 }
 
-.emote-pill .emote-sep {
-  flex: none;
-  color: var(--emote-name);
-  margin-left: -3px;
-}
-
-.emote-pill .emote-text {
-  white-space: nowrap;
+.emote-log-row .emote-msg {
   overflow: hidden;
   text-overflow: ellipsis;
-  flex: 0 3 auto;
+  white-space: nowrap;
   min-width: 0;
-}
-
-.emote-pill .emote-icon {
-  flex: none;
-  animation: emote-icon-throb 0.6s ease-in-out 3;
-}
-
-@keyframes emote-icon-throb {
-  0%, 100% { transform: rotate(-12deg) scale(1); }
-  50%      { transform: rotate(12deg) scale(1.25); }
-}
-
-/* Pops in, holds long enough to be read, then drifts up and out. The point of an
-   emote is that everyone gets to read it, so the hold is most of the run. */
-@keyframes emote-rise {
-  0%   { transform: translateY(10px) scale(0.9); opacity: 0; }
-  10%  { transform: translateY(0) scale(1); opacity: 1; }
-  75%  { transform: translateY(0) scale(1); opacity: 1; }
-  100% { transform: translateY(-26px) scale(1); opacity: 0; }
 }
 
 /* An emote button that speaks for the whole table, so it reads apart from the two
@@ -224,17 +212,18 @@
 
 /* ==========================================================================
    1. Opponents Arc (Top Semi-Circle)
+   Seats are horizontal pills that wrap: 5-6 players tile into rows instead
+   of squeezing, and rows share height via stretch.
    ========================================================================== */
 .opponents-radial-arc {
   position: relative;
   z-index: 10;
   display: flex;
   justify-content: center;
-  /* stretch, not center: a seat without an emote row (yours, or an eliminated
-     player's) is shorter than the rest, and centring leaves the cards ragged. */
   align-items: stretch;
-  gap: clamp(16px, 4vw, 48px);
-  padding: 8px 12px 14px;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 8px 12px 10px;
   width: 100%;
 }
 
@@ -243,22 +232,89 @@
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
+  gap: 0;
   padding: 10px 14px;
   background: var(--glass-bg);
   border: 1px solid rgba(212, 175, 55, 0.25);
   border-radius: 10px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
   backdrop-filter: blur(8px);
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: border-color 0.3s ease, box-shadow 0.3s ease, background 0.3s ease;
+  /* Fixed minimum width: with wrapping, 5-6 seats tile without reflowing,
+     and nothing in-flow changes size on turn change, so there are no shifts. */
+  flex: 0 1 auto;
   min-width: 110px;
-  min-height: 160px; /* Consistent height for all players */
-  justify-content: center; /* Center content vertically */
 }
 
+/* Active turn is border glow + progress bar + an inline dot by the name. All
+   paint-only or fixed-size, so the turn moving never resizes a seat. */
 .opponent-seat.active-turn {
   border-color: var(--gold-primary);
   box-shadow: 0 0 24px rgba(212, 175, 55, 0.5), inset 0 0 12px rgba(212, 175, 55, 0.2);
   background: rgba(18, 52, 38, 0.9);
+}
+
+/* Turn countdown: a visible gutter with a green fill, full-bleed along the
+   seat's top edge. Absolute, so it costs zero layout, and full-bleed so no
+   per-breakpoint padding math. The gutter means the bar reads even when time
+   is almost out. */
+.turn-progress-track {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  border-radius: 10px 10px 0 0;
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.turn-progress-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #10b981, #34d399);
+  box-shadow: 0 0 8px rgba(52, 211, 153, 0.8);
+  transition: width 0.25s linear;
+}
+
+.turn-progress-fill.urgent {
+  background: linear-gradient(90deg, #ef4444, #f87171);
+  box-shadow: 0 0 8px var(--crimson-light);
+  animation: timerHeartbeat 0.8s infinite;
+}
+
+/* Identity is one inline row: dot + name + status marks. The initials avatar
+   only repeated the name, so it was pure height. */
+.opponent-identity {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.turn-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--gold-gradient);
+  box-shadow: 0 0 6px rgba(212, 175, 55, 0.9);
+  animation: turnDotPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes turnDotPulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.3); opacity: 0.7; }
+}
+
+.inline-badge {
+  font-size: 12px;
+  line-height: 1;
 }
 
 /* Current player highlight in the arc */
@@ -272,36 +328,12 @@
   box-shadow: 0 0 32px rgba(212, 175, 55, 0.8), inset 0 0 20px rgba(212, 175, 55, 0.3);
 }
 
-/* Current player avatar highlight */
-.opponent-avatar.current-player-avatar {
-  border-color: var(--gold-primary);
-  box-shadow: 0 0 16px rgba(212, 175, 55, 0.6), 0 2px 8px rgba(0, 0, 0, 0.5);
-  background: linear-gradient(135deg, #1b4332 0%, #0d281e 100%);
-}
-
-/* Small turn indicator in arc for current player */
-.current-player-turn-indicator-small {
-  margin-top: 4px;
-  padding: 2px 8px;
-  background: var(--gold-gradient);
-  border-radius: 12px;
-  font-family: 'DM Mono', monospace;
-  font-size: 10px;
-  font-weight: 700;
-  color: #0a241a;
-  animation: turnLabelPulse 1.5s ease-in-out infinite;
-}
-
-/* Opponent's turn indicator - different style */
-.current-player-turn-indicator-small.opponent-turn {
-  background: rgba(59, 130, 246, 0.2);
-  border: 1px solid rgba(59, 130, 246, 0.4);
-  color: #93c5fd;
-  animation: none;
-}
-
-.turn-label-small {
-  letter-spacing: 0.05em;
+/* Name above, score + cards in one centered row below it. */
+.opponent-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
 }
 
 .opponent-seat.eliminated {
@@ -315,125 +347,25 @@
   background: rgba(50, 10, 10, 0.5);
 }
 
-/* Turn Timer SVG Ring - centered on avatar, wraps around it */
-.turn-timer-ring {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%) rotate(-90deg);
-  width: 54px;
-  height: 54px;
-  pointer-events: none;
-  z-index: 4;
-}
-
-.timer-track {
-  fill: none;
-  stroke: rgba(255, 255, 255, 0.15);
-  stroke-width: 8;
-}
-
-.timer-fill {
-  fill: none;
-  stroke: var(--status-online);
-  stroke-width: 8;
-  stroke-linecap: round;
-  transition: stroke-dashoffset 1s linear, stroke 0.3s ease;
-}
-
-.turn-timer-ring.urgent .timer-fill {
-  stroke: var(--crimson-light);
-  animation: timerHeartbeat 0.8s infinite;
-}
-
-.opponent-avatar-wrap {
-  position: relative;
-  margin-bottom: 4px;
-}
-
-.opponent-avatar {
-  width: 38px;
-  height: 38px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #1b4332 0%, #0d281e 100%);
-  border: 2px solid var(--gold-primary);
-  color: var(--gold-light);
-  font-weight: 700;
-  font-size: 13px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
-  position: relative;
-  z-index: 5; /* Above timer ring */
-}
-
-.opponent-avatar.disconnected {
-  border-color: var(--crimson-light);
-  background: linear-gradient(135deg, #4a1010 0%, #2a0808 100%);
-}
-
-.disconnected-indicator {
-  position: absolute;
-  top: -4px;
-  right: -4px;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: var(--crimson-light);
-  color: #fff;
-  font-size: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 0 8px var(--crimson-light);
-  animation: pulseRing 1s infinite;
-}
-
-@keyframes pulseRing {
-  0%, 100% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.2); opacity: 0.7; }
-}
-
-.host-badge {
-  position: absolute;
-  top: -8px;
-  right: -6px;
-  font-size: 14px;
-}
-
-.autoplay-badge {
-  position: absolute;
-  bottom: -6px;
-  right: -6px;
-  font-size: 13px;
-  background: rgba(59, 130, 246, 0.9);
-  border-radius: 50%;
-  padding: 3px;
-  box-shadow: 0 0 8px rgba(59, 130, 246, 0.7);
-  animation: autoplay-pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes autoplay-pulse {
-  0%, 100% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.15); opacity: 0.8; }
-}
-
-.opponent-meta {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-}
-
 .opponent-name {
   font-size: 13px;
   font-weight: 600;
   color: var(--card-cream);
   max-width: 90px;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Score above, cards below: name / pts / cards stack, all centered. */
+.opponent-info-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 4px;
 }
 
 .opponent-score-pill {
@@ -444,29 +376,18 @@
   padding: 2px 6px;
   border-radius: 4px;
   border: 1px solid rgba(212, 175, 55, 0.2);
+  white-space: nowrap;
+  margin: 4px 0;
 }
 
-.disconnected-badge {
-  font-family: 'DM Mono', monospace;
-  font-size: 9px;
-  font-weight: 700;
-  color: var(--crimson-light);
-  background: rgba(50, 10, 10, 0.8);
-  padding: 1px 6px;
-  border-radius: 3px;
-  border: 1px solid var(--crimson-light);
-  animation: pulseRing 1.5s infinite;
-  margin-top: 2px;
-}
-
-/* Opponent Hand Card Stack */
+/* Opponent Hand Card Stack — one mini back per card in hand (up to 5),
+   count badge riding on top. */
 .opponent-card-stack {
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   height: 28px;
-  margin-top: 6px;
   width: 50px;
 }
 
@@ -493,71 +414,69 @@
 }
 
 /* ==========================================================================
-   2. Center Play Area (2-Zone Layout)
+   2. Center Play Area - Natural Piles on Felt
+   Draw + discard form ONE centered group (max-content, fixed 32px gap) rather
+   than a 50/50 split: neither side stretches, so a multi-card discard can
+   never push the draw pile around.
    ========================================================================== */
 .center-play-area {
   position: relative;
   z-index: 15;
   flex: 1;
   display: flex;
-  align-items: center;
+  align-items: center; /* Center piles in the free area (mobile-first) */
   justify-content: center;
-  gap: clamp(20px, 5vw, 64px);
-  margin: 10px 0;
+  gap: 32px;
+  width: max-content;
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 8px 0 42px; /* Bottom reserve is for the absolute pile labels */
 }
 
-.zone-column {
+.pile-column {
   position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 14px;
-  border-radius: 12px;
-  background: rgba(6, 26, 18, 0.6);
-  border: 1px solid rgba(212, 175, 55, 0.2);
-  box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.5), 0 8px 24px rgba(0, 0, 0, 0.35);
-  min-width: 160px;
-  flex: 1;
-  transition: all 0.25s ease;
+  justify-content: flex-start;
+  flex: 0 0 auto;
+  /* No box, no border, no background - just cards on felt */
 }
 
-.zone-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  margin-bottom: 12px;
-  gap: 8px;
-}
-
-.zone-title {
+.pile-label {
+  position: absolute;
+  bottom: -22px;
+  left: 50%;
+  transform: translateX(-50%);
   font-family: 'DM Mono', monospace;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.08em;
   color: var(--gold-light);
   text-transform: uppercase;
+  white-space: nowrap;
+  pointer-events: none;
 }
 
-.deck-count-pill,
-.discard-count-pill {
+.pile-count {
+  position: absolute;
+  bottom: -36px;
+  left: 50%;
+  transform: translateX(-50%);
   font-family: 'DM Mono', monospace;
-  font-size: 10px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.4);
-  color: var(--ink-light);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 9px;
+  color: rgba(212, 175, 55, 0.7);
+  white-space: nowrap;
+  pointer-events: none;
 }
 
-/* Zone 1: Draw Pile 3D Deck Stack */
-.draw-pile-zone {
+/* Draw Pile Column */
+.draw-pile-column {
   cursor: pointer;
 }
 
-.draw-pile-zone.pulse-prompt {
+.draw-pile-column .deck-stack-3d.pulse-prompt {
   animation: goldPulse 2s infinite ease-in-out;
-  cursor: pointer;
 }
 
 .deck-stack-3d {
@@ -628,6 +547,20 @@
   text-align: center;
 }
 
+/* Reserved prompt slots: turn-only prompts appear inside fixed-height slots
+   so the cards above never shift when the turn changes. */
+.draw-prompt-slot {
+  min-height: 28px;
+  margin-top: 10px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.draw-prompt-slot .draw-prompt-badge {
+  margin-top: 0;
+}
+
 .card-img {
   width: 100%;
   height: 100%;
@@ -635,18 +568,21 @@
   display: block;
 }
 
-/* Zone 3: Discard Pile - Chinese Hand Fan Layout */
-.discard-pile-zone {
+/* Discard Pile Column — content-sized like the draw pile. The fan lives in a
+   FIXED-width box (exactly two card widths), so the group's total width is
+   constant for 0-5 cards and the draw pile stays anchored. */
+.discard-pile-column {
   min-width: 0;
-  flex: 1;
+  flex: 0 0 auto;
 }
 
 .discard-fan-container {
   position: relative;
   min-height: 140px;
   min-width: 0;
+  width: 176px;
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: center;
   padding-bottom: 8px;
   overflow: visible;
@@ -664,20 +600,67 @@
   color: rgba(255, 255, 255, 0.4);
 }
 
-/* Chinese hand fan: tight overlap with slight rotation */
+/* Chinese hand fan: tight overlap with slight rotation.
+   The fan never exceeds two card widths: overlap tightens per data-count so
+   5 x 88px cards fit in 176px (22px step), 4 in (29px step), 3 in (44px). */
 .discard-cards-fan {
+  position: relative;
+  z-index: 1;
   display: flex;
   justify-content: center;
-  align-items: flex-end;
+  align-items: center;
   min-height: 124px;
-  width: max-content;
+  width: auto;
   /* Center the fan within the zone */
-  margin: 0 auto;
+  margin: 0;
 }
 
 /* Negative margin creates the fan overlap - CSS gap cannot be negative */
 .discard-cards-fan .discard-fan-card + .discard-fan-card {
   margin-left: -24px;
+}
+
+.discard-cards-fan[data-count="3"] .discard-fan-card + .discard-fan-card {
+  margin-left: -44px;
+}
+
+.discard-cards-fan[data-count="4"] .discard-fan-card + .discard-fan-card {
+  margin-left: -59px;
+}
+
+.discard-cards-fan[data-count="5"] .discard-fan-card + .discard-fan-card {
+  margin-left: -66px;
+}
+
+/* Older discards tucked underneath: two offset backing layers behind the fan,
+   reusing the deck-stack visual language. */
+.discard-depth {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 88px;
+  height: 124px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.discard-depth-layer {
+  position: absolute;
+  inset: 0;
+  border-radius: 6px;
+  background-color: #4a4f5a;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 2px 4px 10px rgba(0, 0, 0, 0.5);
+}
+
+.discard-depth-layer.depth-2 {
+  transform: translate(-7px, 5px) rotate(-4deg);
+  background-color: #3a3f4a;
+}
+
+.discard-depth-layer.depth-1 {
+  transform: translate(7px, 5px) rotate(4deg);
+  background-color: #434956;
 }
 
 .discard-fan-card {
@@ -735,6 +718,18 @@
   text-align: center;
 }
 
+.discard-prompt-slot {
+  min-height: 24px;
+  margin-top: 8px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.discard-prompt-slot .discard-prompt-hint {
+  margin-top: 0;
+}
+
 /* ==========================================================================
    3. Main Player Dock (Bottom Center)
    ========================================================================== */
@@ -762,13 +757,13 @@
   font-family: 'DM Mono', monospace;
   font-size: 11px;
   font-weight: 600;
-  padding: 6px 12px;
+  padding: 2px 12px;
   border-radius: 8px;
   background: rgba(10, 32, 23, 0.85);
   border: 1px solid rgba(212, 175, 55, 0.35);
   color: var(--gold-light);
   line-height: 1.2;
-  min-height: 44px;
+  min-height: 28px;
   min-width: 100px;
   width: 130px; /* Fixed width to prevent expansion */
   transition: all 0.2s ease;
@@ -863,7 +858,7 @@
   justify-content: center;
   align-items: flex-end;
   width: 100%;
-  padding-bottom: 4px;
+  padding-bottom: 10px;
 }
 
 .player-hand-fanned {
@@ -1193,6 +1188,7 @@
   .opponents-radial-arc {
     gap: 8px;
     padding: 4px 8px;
+    flex-wrap: nowrap;
     overflow-x: auto;
     overflow-y: hidden;
     justify-content: flex-start;
@@ -1208,13 +1204,7 @@
   .opponent-seat {
     min-width: 72px;
     padding: 8px 10px;
-    flex-shrink: 0;
-  }
-
-  .opponent-avatar {
-    width: 36px;
-    height: 36px;
-    font-size: 12px;
+    flex: 0 0 auto;
   }
 
   .opponent-name {
@@ -1225,6 +1215,12 @@
   .opponent-score-pill {
     font-size: 10px;
     padding: 2px 5px;
+    margin: 3px 0;
+  }
+
+  .opponent-info-row {
+    gap: 3px;
+    margin-top: 3px;
   }
 
   .opponent-card-stack {
@@ -1242,105 +1238,62 @@
     padding: 1px 3px;
   }
 
-  .disconnected-indicator {
-    width: 14px;
-    height: 14px;
-    font-size: 8px;
-    top: -3px;
-    right: -3px;
+  .reaction-strip {
+    margin: 0 auto 8px;
+    padding: 2px;
   }
 
-  .disconnected-badge {
-    font-size: 8px;
-    padding: 1px 4px;
+  .reaction-strip .reaction-btn {
+    width: 32px;
+    height: 26px;
+    font-size: 14px;
   }
 
-  .current-player-turn-indicator-small {
-    font-size: 9px;
-    padding: 2px 6px;
-  }
-
-  .turn-timer-ring {
-    width: 50px;
-    height: 50px;
-  }
-
-  .reaction-buttons {
-    gap: 6px;
-    margin-top: 6px;
-  }
-
-  .reaction-btn {
-    width: 34px;
-    height: 34px;
-    font-size: 16px;
-  }
-
-  .emote-pill {
+  .emote-log-row {
     font-size: 12px;
   }
 
-  .emote-pill .emote-who {
+  .emote-log-strip {
+    min-height: 44px;
+  }
+
+  .emote-log-row .emote-from {
     max-width: 120px;
   }
 
-  .opponent-seat {
-    min-width: 72px;
-    padding: 8px 10px;
-    flex-shrink: 0;
-    min-height: 140px;
-  }
-
-  .opponent-avatar {
-    width: 36px;
-    height: 36px;
-    font-size: 12px;
-  }
-
-  /* Center Play Area - 2-Zone horizontal layout on mobile */
+  /* Center Play Area - Natural Piles horizontal layout on mobile */
   .center-play-area {
     flex-direction: row;
-    gap: 8px;
-    margin: 6px 0;
+    gap: 32px;
+    margin: 0 auto;
     flex: 1;
-    align-items: stretch;
+    align-items: center;
     justify-content: center;
     min-height: 0;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
-    -ms-overflow-style: none;
     padding: 0 4px;
+    padding-bottom: 40px; /* Space for pile labels */
   }
 
-  .center-play-area::-webkit-scrollbar {
-    display: none;
-  }
-
-  .zone-column {
-    width: 50%;
-    min-width: 140px;
+  .pile-column {
+    width: auto;
+    min-width: 0;
     flex: 0 0 auto;
-    padding: 8px;
     display: flex;
     flex-direction: column;
+    align-items: center;
   }
 
-  .zone-header {
-    margin-bottom: 8px;
-  }
-
-  .zone-title {
-    font-size: 10px;
-  }
-
-  .deck-count-pill,
-  .discard-count-pill {
+  .pile-label {
     font-size: 9px;
-    padding: 2px 5px;
+    bottom: -18px;
   }
 
-  /* Zone 1: Draw Pile - compact */
+  .pile-count {
+    font-size: 8px;
+    bottom: -30px;
+  }
+
+  /* Draw Pile - compact */
   .deck-stack-3d {
     width: 72px;
     height: 100px;
@@ -1360,35 +1313,61 @@
     padding: 3px 8px;
   }
 
-  /* Zone 2: Discard Pile - Chinese hand fan, all 5 cards visible within zone width */
-  .discard-pile-zone {
+  .draw-prompt-slot {
+    min-height: 26px;
+  }
+
+  .discard-prompt-slot {
+    min-height: 22px;
+  }
+
+  /* Discard Pile - Chinese hand fan */
+  .discard-pile-column {
     min-width: 0;
-    flex: 1;
+    flex: 0 0 auto;
   }
 
   .discard-fan-container {
     min-height: 110px;
     min-width: 0;
+    width: 144px;
     overflow: visible;
     padding: 4px 0;
     display: flex;
-    align-items: flex-end;
+    align-items: center;
     justify-content: center;
+  }
+
+  .discard-depth {
+    width: 72px;
+    height: 100px;
   }
 
   .discard-cards-fan {
-    width: max-content;
+    width: auto;
     height: 100px;
-    min-width: 100%;
+    min-width: 0;
     display: flex;
-    align-items: flex-end;
+    align-items: center;
     justify-content: center;
-    margin: 0 auto;
+    margin: 0;
   }
 
-  /* Tight negative margin for mobile - all 5 cards fit within draw pile width */
+  /* Fan capped at two card widths: 5 x 72px in 144px (18px step). */
   .discard-cards-fan .discard-fan-card + .discard-fan-card {
     margin-left: -18px;
+  }
+
+  .discard-cards-fan[data-count="3"] .discard-fan-card + .discard-fan-card {
+    margin-left: -36px;
+  }
+
+  .discard-cards-fan[data-count="4"] .discard-fan-card + .discard-fan-card {
+    margin-left: -48px;
+  }
+
+  .discard-cards-fan[data-count="5"] .discard-fan-card + .discard-fan-card {
+    margin-left: -54px;
   }
 
   .discard-fan-card {
@@ -1415,10 +1394,14 @@
     margin-top: 6px;
   }
 
+  .discard-prompt-slot .discard-prompt-hint {
+    margin-top: 0;
+  }
+
   /* Player HUD Bar - single row on mobile */
   .player-hud-bar {
     gap: 4px;
-    margin-bottom: 8px;
+    margin-bottom: 10px;
     flex-wrap: nowrap;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
@@ -1433,8 +1416,8 @@
   }
 
   .hud-btn {
-    padding: 6px 10px;
-    min-height: 42px;
+    padding: 2px 10px;
+    min-height: 28px;
     min-width: 74px;
     font-size: 11px;
     flex-shrink: 1;
@@ -1450,12 +1433,12 @@
 
   .sort-btn {
     min-width: 60px;
-    padding: 6px 8px;
+    padding: 2px 8px;
   }
 
   .call-yaniv-btn-hud {
     min-width: 78px;
-    padding: 6px 8px;
+    padding: 2px 8px;
     font-size: 11px;
   }
 
@@ -1463,7 +1446,7 @@
      Overlap via negative margin (CSS gap cannot be negative);
      stacking comes from inline z-index in TableCanvas.tsx. */
   .player-hand-container {
-    padding-bottom: 8px;
+    padding-bottom: 12px;
   }
 
   .player-hand-fanned {
@@ -1556,72 +1539,23 @@
     padding: 6px 8px;
   }
 
-  .opponent-avatar {
-    width: 32px;
-    height: 32px;
-    font-size: 10px;
-  }
-
   .opponent-name {
     font-size: 10px;
     max-width: 60px;
   }
 
-  .disconnected-indicator {
-    width: 12px;
-    height: 12px;
-    font-size: 7px;
-    top: -2px;
-    right: -2px;
-  }
-
-  .disconnected-badge {
-    font-size: 7px;
-    padding: 1px 3px;
-  }
-
-  .current-player-turn-indicator-small {
-    font-size: 8px;
-    padding: 1px 5px;
-  }
-
-  .turn-timer-ring {
-    width: 46px;
-    height: 46px;
-  }
-
-  .reaction-buttons {
-    gap: 5px;
-    margin-top: 5px;
-  }
-
-  .reaction-btn {
-    width: 32px;
-    height: 32px;
-    font-size: 15px;
-  }
-
   /* At 360px a full "Ari -> Bob: thanks for the card(s)" only fits if the type comes
      down and the names give up room first. */
-  .emote-pill {
+  .emote-log-row {
     font-size: 11px;
-    padding: 4px 8px;
   }
 
-  .emote-pill .emote-who {
+  .emote-log-strip {
+    min-height: 40px;
+  }
+
+  .emote-log-row .emote-from {
     max-width: 84px;
-  }
-
-  .opponent-seat {
-    min-width: 64px;
-    padding: 6px 8px;
-    min-height: 120px;
-  }
-
-  .opponent-avatar {
-    width: 32px;
-    height: 32px;
-    font-size: 10px;
   }
 
   .deck-stack-3d {
@@ -1667,15 +1601,15 @@
   }
 
   .sort-btn {
-    padding: 5px 6px;
+    padding: 2px 6px;
     font-size: 10px;
-    min-height: 40px;
+    min-height: 26px;
     min-width: 54px;
   }
 
   .hud-btn {
-    padding: 5px 8px;
-    min-height: 40px;
+    padding: 2px 8px;
+    min-height: 26px;
     min-width: 64px;
     font-size: 10px;
     flex-shrink: 1;
@@ -1684,13 +1618,34 @@
 
   .call-yaniv-btn-hud {
     min-width: 70px;
-    padding: 5px 6px;
+    padding: 2px 6px;
     font-size: 10px;
   }
 
-  /* 480px - even tighter fan for discard pile */
+  /* 480px - fan capped at two card widths: 5 x 60px in 120px (15px step). */
   .discard-cards-fan .discard-fan-card + .discard-fan-card {
     margin-left: -16px;
+  }
+
+  .discard-cards-fan[data-count="3"] .discard-fan-card + .discard-fan-card {
+    margin-left: -30px;
+  }
+
+  .discard-cards-fan[data-count="4"] .discard-fan-card + .discard-fan-card {
+    margin-left: -40px;
+  }
+
+  .discard-cards-fan[data-count="5"] .discard-fan-card + .discard-fan-card {
+    margin-left: -45px;
+  }
+
+  .discard-depth {
+    width: 60px;
+    height: 84px;
+  }
+
+  .discard-fan-container {
+    width: 120px;
   }
 }
 
@@ -1715,14 +1670,22 @@
     flex: 1;
     flex-direction: row;
     flex-wrap: wrap;
-    align-items: flex-start;
+    align-items: center;
+    justify-content: safe center;
     min-height: 0;
+    padding-bottom: 40px;
   }
 
-  .zone-column {
-    flex: 1;
-    min-width: 140px;
+  .pile-column {
+    flex: 0 0 auto;
+    min-width: 0;
     min-height: 180px;
+    align-items: center;
+    justify-content: flex-start;
+  }
+
+  .pile-column.discard-pile-column {
+    flex: 0 0 auto;
   }
 
   .main-player-dock {

@@ -345,7 +345,7 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
    * when the broadcast comes back, so the sender sees exactly what the room sees, and a
    * dropped frame shows nothing rather than showing it to one player only.
    */
-  const handleSendReaction = (type: 'LOVE' | 'RAGE' | 'TAUNT', targetUserId: string) => {
+  const handleSendReaction = (type: 'LOVE' | 'RAGE' | 'TAUNT' | 'MOCK' | 'SHOCK' | 'FLEX', targetUserId: string) => {
     // Deliberately not queued while offline the way actions are. send() holds a frame
     // back until the socket returns, which is right for a turn -- it still has to land --
     // and wrong for an emote, which would arrive as a taunt fired at a round that has
