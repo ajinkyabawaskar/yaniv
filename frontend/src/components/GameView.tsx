@@ -5,7 +5,7 @@ import { gameApi } from '../utils/api';
 import TableCanvas, { OpponentInfo, TableCanvasHandle, getCardImagePath } from './TableCanvas';
 import ScoreboardView from './ScoreboardView';
 import { playTurnChangeSound, playYourTurnSound, isSoundEnabled, setSoundEnabled, setupAudioUnlock } from '../utils/sound';
-import { isBgMusicEnabled, setBgMusicEnabled, setupBgMusicUnlock, preloadBgMusic } from '../utils/backgroundMusic';
+import { setupBgMusicUnlock, preloadBgMusic } from '../utils/backgroundMusic';
 import { SCORE_LIMITS, DEFAULT_SCORE_LIMIT, canChooseScoreLimit } from '../utils/scoreLimits';
 import './GameView.css';
 
@@ -47,7 +47,6 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
 
   const currentUserId = localStorage.getItem('userId') || '';
   const [soundEnabled, setSoundEnabledState] = useState(() => isSoundEnabled());
-  const [bgMusicEnabled, setBgMusicEnabledState] = useState(() => isBgMusicEnabled());
   const prevTurnRef = useRef<string | null>(null);
   const hasStartedRef = useRef(false);
 
@@ -57,12 +56,9 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
     setupBgMusicUnlock();
     preloadBgMusic();
     const handler = (e: Event) => setSoundEnabledState((e as CustomEvent).detail);
-    const bgHandler = (e: Event) => setBgMusicEnabledState((e as CustomEvent).detail);
     window.addEventListener('yanif:sound-toggled', handler as EventListener);
-    window.addEventListener('yanif:bg-music-toggled', bgHandler as EventListener);
     return () => {
       window.removeEventListener('yanif:sound-toggled', handler as EventListener);
-      window.removeEventListener('yanif:bg-music-toggled', bgHandler as EventListener);
     };
   }, []);
 
@@ -421,18 +417,6 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
         </div>
 
         <div className="header-actions">
-          <button
-            className="header-btn sound-toggle-btn"
-            onClick={() => {
-              const next = !bgMusicEnabled;
-              setBgMusicEnabled(next);
-              setBgMusicEnabledState(next);
-            }}
-            aria-label={bgMusicEnabled ? 'Mute background music' : 'Unmute background music'}
-            title={bgMusicEnabled ? 'Mute background music' : 'Unmute background music'}
-          >
-            <span>{bgMusicEnabled ? '🎵' : '🔇'}</span>
-          </button>
           <button
             className="header-btn sound-toggle-btn"
             onClick={() => {

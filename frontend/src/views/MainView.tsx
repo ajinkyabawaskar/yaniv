@@ -278,7 +278,6 @@ export default function MainView({ initialRoomCode }: MainViewProps) {
             <LobbyView
               onCreateGame={handleCreateGame}
               onJoinGame={handleJoinGame}
-              friendCode={user?.friendCode || ''}
             />
           ) : (
             <GameView gameId={currentGameId!} roomCode={currentRoomCode!} onExit={handleExitGame} />

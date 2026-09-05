@@ -746,73 +746,6 @@
     font-size: 13px;
   }
 
-  .lobby-actions-grid {
-    gap: 12px;
-  }
-
-  .action-card {
-    padding: 20px 16px;
-  }
-
-  .action-card h3 {
-    font-size: 16px;
-  }
-
-  .action-card p {
-    font-size: 12px;
-  }
-
-  .lobby-primary-btn,
-  .lobby-secondary-btn {
-    padding: 14px;
-    font-size: 14px;
-    min-height: 48px;
-  }
-
-  .join-input-group input {
-    padding: 14px;
-    font-size: 16px; /* Prevents zoom on iOS */
-    min-height: 48px;
-  }
-
-  .join-btn-row {
-    gap: 8px;
-  }
-
-  .submit-join-btn,
-  .cancel-join-btn {
-    padding: 12px;
-    font-size: 13px;
-    min-height: 48px;
-  }
-
-  .friend-code-strip {
-    flex-direction: column;
-    gap: 12px;
-    align-items: stretch;
-    padding: 14px 16px;
-  }
-
-  .strip-left {
-    justify-content: center;
-  }
-
-  .copy-code-btn {
-    padding: 12px;
-    font-size: 13px;
-    min-height: 48px;
-  }
-
-  .rules-grid {
-    grid-template-columns: 1fr;
-    gap: 8px;
-  }
-
-  .rule-item {
-    font-size: 12px;
-    line-height: 1.5;
-  }
-
   /* Round Over Modal Mobile */
   .round-over-overlay {
     padding: 12px;
@@ -926,46 +859,5 @@
 
   .lobby-title {
     font-size: 20px;
-  }
-
-  .action-card {
-    padding: 16px 12px;
-  }
-
-  .action-card h3 {
-    font-size: 15px;
-  }
-
-  .lobby-primary-btn,
-  .lobby-secondary-btn {
-    padding: 12px;
-    font-size: 13px;
-  }
-
-  .join-input-group input {
-    padding: 12px;
-    font-size: 15px;
-  }
-
-  .submit-join-btn,
-  .cancel-join-btn {
-    padding: 10px;
-    font-size: 12px.
-  }
-
-  .friend-code-strip {
-    padding: 12px 14px.
-  }
-
-  .strip-label {
-    font-size: 10px;
-  }
-
-  .code-display {
-    font-size: 14px;
-  }
-
-  .rule-item {
-    font-size: 11px;
   }
 }

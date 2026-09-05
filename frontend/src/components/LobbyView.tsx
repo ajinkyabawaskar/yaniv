@@ -18,35 +18,23 @@ interface OpenLobby {
 interface LobbyViewProps {
   onCreateGame: () => void;
   onJoinGame: (roomCode: string) => void;
-  friendCode: string;
 }
 
-export default function LobbyView({ onCreateGame, onJoinGame, friendCode }: LobbyViewProps) {
+export default function LobbyView({ onCreateGame, onJoinGame }: LobbyViewProps) {
   const [joinCode, setJoinCode] = useState('');
-  const [showJoinForm, setShowJoinForm] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [copiedCode, setCopiedCode] = useState(false);
-  const [cardsPreloaded, setCardsPreloaded] = useState(false);
   const [openLobbies, setOpenLobbies] = useState<OpenLobby[]>([]);
   const [loadingLobbies, setLoadingLobbies] = useState(true);
 
-  // Preload all card SVGs when lobby mounts - happens in background while user waits
+  // Preload all card SVGs when lobby mounts - happens silently in background
   useEffect(() => {
-    let mounted = true;
-
-    preloadAllCards().then(() => {
-      if (mounted) {
-        setCardsPreloaded(true);
+    preloadAllCards()
+      .then(() => {
         console.log('[CardPreload] All 54 card SVGs preloaded successfully');
-      }
-    }).catch((err) => {
-      console.warn('[CardPreload] Preload completed with some errors:', err);
-      if (mounted) setCardsPreloaded(true);
-    });
-
-    return () => {
-      mounted = false;
-    };
+      })
+      .catch((err) => {
+        console.warn('[CardPreload] Preload completed with some errors:', err);
+      });
   }, []);
 
   // Fetch open lobbies (uses authenticated apiClient; endpoint is also public as fallback)
@@ -95,7 +83,6 @@ export default function LobbyView({ onCreateGame, onJoinGame, friendCode }: Lobb
     } finally {
       setIsLoading(false);
       setJoinCode('');
-      setShowJoinForm(false);
     }
   };
 
@@ -106,13 +93,6 @@ export default function LobbyView({ onCreateGame, onJoinGame, friendCode }: Lobb
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const handleCopyFriendCode = () => {
-    if (!friendCode) return;
-    navigator.clipboard.writeText(friendCode);
-    setCopiedCode(true);
-    setTimeout(() => setCopiedCode(false), 2000);
   };
 
   const formatTimeAgo = (isoString: string) => {
@@ -133,65 +113,11 @@ export default function LobbyView({ onCreateGame, onJoinGame, friendCode }: Lobb
         <h1 className="lobby-main-title">Yaniv Table Lounge</h1>
         <p className="lobby-subtitle">Zero-friction real-time multiplayer card action</p>
 
-        {/* Action Cards Grid */}
-        <div className="lobby-actions-grid">
-          {/* Card 1: Create Game */}
-          <div className="action-card create-card">
-            <div className="card-top-icon">🎲</div>
-            <h3>Host a Table</h3>
-            <p>Create a table, set target score (100 pts), and invite your friends or share your table code.</p>
-            <button className="lobby-primary-btn" onClick={onCreateGame}>
-              Create Table
-            </button>
-          </div>
-
-          {/* Card 2: Join by Table Code */}
-          <div className="action-card join-card">
-            <div className="card-top-icon">🔑</div>
-            <h3>Join a Table</h3>
-            <p>Enter a 6-character table code or open an invite link shared by the host.</p>
-
-            {!showJoinForm ? (
-              <button className="lobby-secondary-btn" onClick={() => setShowJoinForm(true)}>
-                Enter Table Code
-              </button>
-            ) : (
-              <div className="join-input-group">
-                <input
-                  type="text"
-                  placeholder="e.g. RMX92A"
-                  value={joinCode}
-                  onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-                  maxLength={6}
-                  disabled={isLoading}
-                  autoFocus
-                />
-                <div className="join-btn-row">
-                  <button
-                    className="submit-join-btn"
-                    onClick={handleJoinGame}
-                    disabled={!joinCode.trim() || isLoading}
-                  >
-                    {isLoading ? 'Joining...' : 'Join'}
-                  </button>
-                  <button className="cancel-join-btn" onClick={() => setShowJoinForm(false)}>
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Open Tables Section */}
+        {/* Primary: open tables first — the fastest path to playing. */}
         <div className="open-tables-section">
           <div className="section-header">
-            <h3 className="section-title">🟢 Open Tables</h3>
-            {loadingLobbies ? (
-              <span className="refresh-indicator">⟳</span>
-            ) : (
-              <span className="refresh-indicator" title="Auto-refreshes every 5s">⟳</span>
-            )}
+            <h3 className="section-title">Open Tables</h3>
+            <span className="refresh-indicator" title="Auto-refreshes every 5s" aria-hidden="true" />
           </div>
           
           {loadingLobbies ? (
@@ -205,28 +131,20 @@ export default function LobbyView({ onCreateGame, onJoinGame, friendCode }: Lobb
             <div className="open-tables-grid">
               {openLobbies.map((lobby) => (
                 <div key={lobby.gameId} className="open-table-card">
-                  <div className="table-card-header">
-                    <span className="table-code">{lobby.roomCode}</span>
-                    <span className="table-status">
-                      {lobby.playerCount}/{lobby.maxPlayers}
-                    </span>
-                  </div>
-                  <div className="table-card-body">
-                    <div className="table-host">
-                      <span className="host-label">Host:</span>
-                      <span className="host-name">{lobby.hostDisplayName || 'Unknown'}</span>
-                    </div>
-                    <div className="table-meta">
-                      <span className="meta-item">Target: {lobby.targetScore}</span>
-                      <span className="meta-item">{formatTimeAgo(lobby.createdAt)}</span>
-                    </div>
-                  </div>
+                  <span className="table-code">{lobby.roomCode}</span>
+                  <span className="table-status">
+                    {lobby.playerCount}/{lobby.maxPlayers} seated
+                  </span>
+                  <span className="host-name">{lobby.hostDisplayName || 'Unknown'}</span>
+                  <span className="meta-sub">
+                    Target {lobby.targetScore} • {formatTimeAgo(lobby.createdAt)}
+                  </span>
                   <button
                     className="join-table-btn"
                     onClick={() => handleJoinOpenLobby(lobby.roomCode)}
                     disabled={lobby.playerCount >= lobby.maxPlayers || isLoading}
                   >
-                    {lobby.playerCount >= lobby.maxPlayers ? 'Full' : 'Join Table'}
+                    {lobby.playerCount >= lobby.maxPlayers ? 'Full' : 'Join'}
                   </button>
                 </div>
               ))}
@@ -234,46 +152,35 @@ export default function LobbyView({ onCreateGame, onJoinGame, friendCode }: Lobb
           )}
         </div>
 
-        {/* Share Friend Code Strip */}
-        <div className="friend-code-strip">
-          <div className="strip-left">
-            <span className="strip-label">YOUR FRIEND CODE:</span>
-            <code className="code-display">{friendCode || '--------'}</code>
-          </div>
-          <button className="copy-code-btn" onClick={handleCopyFriendCode} title="Copy friend code">
-            {copiedCode ? '✓ Copied!' : '📋 Copy Code'}
+        {/* Secondary: host first, then an always-visible code entry. */}
+        <div className="lobby-quick-actions">
+          <button className="lobby-primary-btn" onClick={onCreateGame}>
+            🎲 Host a Table
           </button>
-        </div>
-
-        {/* Yaniv Rules Summary */}
-        <div className="rules-summary-box">
-          <h4>Quick Rules Reference</h4>
-          <div className="rules-grid">
-            <div className="rule-item">
-              <span className="rule-badge">1</span>
-              <span><strong>Discard</strong> any single card, matching rank sets (2–4), or consecutive runs (2+).</span>
-            </div>
-            <div className="rule-item">
-              <span className="rule-badge">2</span>
-              <span><strong>Draw</strong> 1 card from Draw Pile or outer eligible cards of Discard Pile.</span>
-            </div>
-            <div className="rule-item">
-              <span className="rule-badge">3</span>
-              <span><strong>Call Yaniv</strong> when hand score ≤ 7 to win the round with 0 penalty!</span>
-            </div>
-            <div className="rule-item">
-              <span className="rule-badge">4</span>
-              <span><strong>Asaf Penalty:</strong> If another player has ≤ your score, they get 0 and you take +30 penalty!</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Card Assets Preload Status */}
-        <div className="preload-status-bar">
-          <span className={`preload-indicator ${cardsPreloaded ? 'complete' : 'loading'}`}>
-            {cardsPreloaded ? '✓ Card assets ready' : '⟳ Loading card assets...'}
-          </span>
-          <span className="preload-hint">Instant card draws in-game</span>
+          <form
+            className="join-inline-row"
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleJoinGame();
+            }}
+          >
+            <input
+              type="text"
+              placeholder="Table code — e.g. RMX92A"
+              aria-label="Table code"
+              value={joinCode}
+              onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+              maxLength={6}
+              disabled={isLoading}
+            />
+            <button
+              type="submit"
+              className="submit-join-btn"
+              disabled={!joinCode.trim() || isLoading}
+            >
+              {isLoading ? 'Joining...' : 'Join'}
+            </button>
+          </form>
         </div>
       </div>
     </div>
