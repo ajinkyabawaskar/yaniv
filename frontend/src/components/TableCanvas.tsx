@@ -826,24 +826,24 @@ function TableCanvas({
           })}
         </div>
 
-        {/* Emote log: twitch-chat plain text below the player bar. Blank when
-            silent; every emote stays until its own TTL clears it. */}
-        <div className="emote-log-strip" role="status" aria-live="polite">
-          {emoteBanners.map((banner) => (
-            <div key={banner.id} className="emote-log-row" data-type={banner.type.toLowerCase()}>
-              <span className="emote-emoji" aria-hidden="true">
-                {EMOTE_ICON[banner.type] || '💬'}
-              </span>
-              <span className="emote-from">
-                {banner.to ? `${banner.from} \u2192 ${banner.to}` : banner.from}
-              </span>
-              <span className="emote-msg">{banner.text}</span>
-            </div>
-          ))}
-        </div>
-
         {/* 2. Center Play Area - Natural Piles on Felt */}
         <div className="center-play-area">
+          {/* Emote log: twitch-chat plain text floating over the top of the free
+              area. Absolute + click-through, so arrivals/expiries never move the
+              piles underneath. */}
+          <div className="emote-log-strip" role="status" aria-live="polite">
+            {emoteBanners.map((banner) => (
+              <div key={banner.id} className="emote-log-row" data-type={banner.type.toLowerCase()}>
+                <span className="emote-emoji" aria-hidden="true">
+                  {EMOTE_ICON[banner.type] || '💬'}
+                </span>
+                <span className="emote-from">
+                  {banner.to ? `${banner.from} \u2192 ${banner.to}` : banner.from}
+                </span>
+                <span className="emote-msg">{banner.text}</span>
+              </div>
+            ))}
+          </div>
           {/* Draw Pile (Left) */}
           <div className="pile-column draw-pile-column" onClick={handleDrawFromDeck}>
             <div className={`deck-stack-3d ${selectedCards.length > 0 ? 'pulse-prompt' : ''}`}>
@@ -857,6 +857,8 @@ function TableCanvas({
             </div>
 
             {/* Fixed slot: the badge appearing must not move the cards. */}
+            <span className="pile-label">Draw</span>
+            <span className="pile-count">{deckCount} cards</span>
             <div className="draw-prompt-slot">
               {isPlayerTurn && (
                 <motion.div
@@ -864,12 +866,10 @@ function TableCanvas({
                   initial={{ scale: 0.8, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
                 >
-                  Tap to Draw Deck
+                  Tap to draw deck
                 </motion.div>
               )}
             </div>
-            <span className="pile-label">Draw</span>
-            <span className="pile-count">{deckCount} cards</span>
           </div>
 
           {/* Discard Pile (Right) - Chinese Hand Fan Layout */}
@@ -904,9 +904,13 @@ function TableCanvas({
                     const centerOffset = idx - (totalCards - 1) / 2;
                     const flatFan = totalCards >= 4;
                     const rotationDeg = centerOffset * (flatFan ? 1 : 3); // Gentle fan spread
-                    const translateY = Math.abs(centerOffset) * (flatFan ? 1 : 2);
-                    // Z-index: center card on top, edges behind
-                    const zIndex = totalCards - Math.abs(centerOffset);
+                    // No downward spread at 4+: edge cards would overhang the box and
+                    // sit the fan visually lower than the draw pile.
+                    const translateY = flatFan ? 0 : Math.abs(centerOffset) * 2;
+                    // Ascending: each card sits above the previous, so the last card
+                    // is fully visible and the first keeps its widened touch strip.
+                    // Center-on-top buried the playable ends under the locked middles.
+                    const zIndex = idx + 1;
 
                     return (
                       <motion.div
@@ -944,6 +948,8 @@ function TableCanvas({
             </div>
 
             {/* Fixed slot: the hint appearing must not move the cards. */}
+            <span className="pile-label">Discard</span>
+            <span className="pile-count">{discardDisplayCards.length} cards</span>
             <div className="discard-prompt-slot">
               {isPlayerTurn && (
                 <div className="discard-prompt-hint">
@@ -953,8 +959,6 @@ function TableCanvas({
                 </div>
               )}
             </div>
-            <span className="pile-label">Discard</span>
-            <span className="pile-count">{discardDisplayCards.length} cards</span>
           </div>
         </div>
 

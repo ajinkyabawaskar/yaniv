@@ -139,22 +139,23 @@
 
 /* ==========================================================================
    Emote Log Strip
-   Twitch-chat plain text directly below the player bar. Blank when silent;
-   every emote stays until its own TTL clears it. min-height is only a floor
-   so an empty strip still holds the piles steady; the strip grows while a
-   burst overlaps, then settles back as rows expire.
+   Twitch-chat plain text floating over the top of the free area. Absolute +
+   click-through, so arrivals and expiries never shift the piles underneath.
+   Blank when silent; every emote stays until its own TTL clears it.
    ========================================================================== */
 .emote-log-strip {
-  position: relative;
-  z-index: 10;
-  width: 100%;
-  min-height: 46px;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 30;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   justify-content: flex-start;
   gap: 4px;
   padding: 4px 12px 2px;
+  pointer-events: none;
 }
 
 .emote-log-row {
@@ -424,13 +425,13 @@
   z-index: 15;
   flex: 1;
   display: flex;
-  align-items: center; /* Center piles in the free area (mobile-first) */
+  align-items: center; /* Content-sized columns, centered as a group */
   justify-content: center;
   gap: 32px;
   width: max-content;
   max-width: 100%;
   margin: 0 auto;
-  padding: 8px 0 42px; /* Bottom reserve is for the absolute pile labels */
+  padding: 8px 0 10px;
 }
 
 .pile-column {
@@ -444,10 +445,8 @@
 }
 
 .pile-label {
-  position: absolute;
-  bottom: -22px;
-  left: 50%;
-  transform: translateX(-50%);
+  display: block;
+  margin-top: 14px;
   font-family: 'DM Mono', monospace;
   font-size: 10px;
   font-weight: 700;
@@ -455,19 +454,15 @@
   color: var(--gold-light);
   text-transform: uppercase;
   white-space: nowrap;
-  pointer-events: none;
 }
 
 .pile-count {
-  position: absolute;
-  bottom: -36px;
-  left: 50%;
-  transform: translateX(-50%);
+  display: block;
+  margin-top: 2px;
   font-family: 'DM Mono', monospace;
   font-size: 9px;
   color: rgba(212, 175, 55, 0.7);
   white-space: nowrap;
-  pointer-events: none;
 }
 
 /* Draw Pile Column */
@@ -535,15 +530,19 @@
   text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
 }
 
-.draw-prompt-badge {
-  margin-top: 10px;
-  font-size: 11px;
+/* Turn prompts speak the same language as the pile labels: plain mono text,
+   no pill, no badge chrome. They live in reserved slots below the counts. */
+.draw-prompt-badge,
+.discard-prompt-hint {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
   font-weight: 700;
-  color: #102e21;
-  background: var(--gold-gradient);
-  padding: 4px 10px;
-  border-radius: 20px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  letter-spacing: 0.08em;
+  color: var(--gold-light);
+  background: none;
+  border: none;
+  box-shadow: none;
+  padding: 0;
   text-align: center;
 }
 
@@ -578,13 +577,12 @@
 
 .discard-fan-container {
   position: relative;
-  min-height: 140px;
+  min-height: 124px;
   min-width: 0;
   width: 176px;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding-bottom: 8px;
   overflow: visible;
 }
 
@@ -625,11 +623,22 @@
 }
 
 .discard-cards-fan[data-count="4"] .discard-fan-card + .discard-fan-card {
-  margin-left: -59px;
+  margin-left: -64px;
 }
 
 .discard-cards-fan[data-count="5"] .discard-fan-card + .discard-fan-card {
-  margin-left: -66px;
+  margin-left: -71px;
+}
+
+/* Playable ends get the room: only the outer cards are drawable, so the first
+   card's touch strip is widened at the locked middles' expense. Total fan
+   width stays capped at two cards. */
+.discard-cards-fan[data-count="4"] .discard-fan-card:nth-child(2) {
+  margin-left: -48px;
+}
+
+.discard-cards-fan[data-count="5"] .discard-fan-card:nth-child(2) {
+  margin-left: -52px;
 }
 
 /* Older discards tucked underneath: two offset backing layers behind the fan,
@@ -711,15 +720,8 @@
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
 }
 
-.discard-prompt-hint {
-  margin-top: 8px;
-  font-size: 10px;
-  color: var(--gold-light);
-  text-align: center;
-}
-
 .discard-prompt-slot {
-  min-height: 24px;
+  min-height: 28px;
   margin-top: 8px;
   display: flex;
   align-items: flex-start;
@@ -781,10 +783,14 @@
   cursor: pointer;
 }
 
-.hud-btn.interactive:hover {
-  background: rgba(212, 175, 55, 0.25);
-  border-color: var(--gold-primary);
-  transform: translateY(-1px);
+/* Hover affordances only where hover exists: on touch screens a tap leaves
+   :hover stuck, so the button looks highlighted long after the tap. */
+@media (hover: hover) {
+  .hud-btn.interactive:hover {
+    background: rgba(212, 175, 55, 0.25);
+    border-color: var(--gold-primary);
+    transform: translateY(-1px);
+  }
 }
 
 .hud-btn.interactive:active {
@@ -1253,10 +1259,6 @@
     font-size: 12px;
   }
 
-  .emote-log-strip {
-    min-height: 44px;
-  }
-
   .emote-log-row .emote-from {
     max-width: 120px;
   }
@@ -1271,7 +1273,7 @@
     justify-content: center;
     min-height: 0;
     padding: 0 4px;
-    padding-bottom: 40px; /* Space for pile labels */
+    padding-bottom: 10px;
   }
 
   .pile-column {
@@ -1281,16 +1283,15 @@
     display: flex;
     flex-direction: column;
     align-items: center;
+    justify-content: flex-start;
   }
 
   .pile-label {
     font-size: 9px;
-    bottom: -18px;
   }
 
   .pile-count {
     font-size: 8px;
-    bottom: -30px;
   }
 
   /* Draw Pile - compact */
@@ -1308,9 +1309,10 @@
     font-size: 22px;
   }
 
-  .draw-prompt-badge {
-    font-size: 10px;
-    padding: 3px 8px;
+  .draw-prompt-badge,
+  .discard-prompt-hint {
+    font-size: 9px;
+    padding: 0;
   }
 
   .draw-prompt-slot {
@@ -1318,7 +1320,7 @@
   }
 
   .discard-prompt-slot {
-    min-height: 22px;
+    min-height: 26px;
   }
 
   /* Discard Pile - Chinese hand fan */
@@ -1328,11 +1330,10 @@
   }
 
   .discard-fan-container {
-    min-height: 110px;
+    min-height: 100px;
     min-width: 0;
     width: 144px;
     overflow: visible;
-    padding: 4px 0;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1363,11 +1364,19 @@
   }
 
   .discard-cards-fan[data-count="4"] .discard-fan-card + .discard-fan-card {
-    margin-left: -48px;
+    margin-left: -58px;
   }
 
   .discard-cards-fan[data-count="5"] .discard-fan-card + .discard-fan-card {
-    margin-left: -54px;
+    margin-left: -58px;
+  }
+
+  .discard-cards-fan[data-count="4"] .discard-fan-card:nth-child(2) {
+    margin-left: -42px;
+  }
+
+  .discard-cards-fan[data-count="5"] .discard-fan-card:nth-child(2) {
+    margin-left: -44px;
   }
 
   .discard-fan-card {
@@ -1387,11 +1396,6 @@
     width: 20px;
     height: 20px;
     font-size: 12px;
-  }
-
-  .discard-prompt-hint {
-    font-size: 11px;
-    margin-top: 6px;
   }
 
   .discard-prompt-slot .discard-prompt-hint {
@@ -1550,10 +1554,6 @@
     font-size: 11px;
   }
 
-  .emote-log-strip {
-    min-height: 40px;
-  }
-
   .emote-log-row .emote-from {
     max-width: 84px;
   }
@@ -1580,6 +1580,11 @@
   .discard-empty-box {
     width: 60px;
     height: 84px;
+    flex-shrink: 0;
+  }
+
+  .discard-fan-container {
+    min-height: 84px;
   }
 
   /* Overlapping fan for 480px */
@@ -1632,11 +1637,19 @@
   }
 
   .discard-cards-fan[data-count="4"] .discard-fan-card + .discard-fan-card {
-    margin-left: -40px;
+    margin-left: -49px;
   }
 
   .discard-cards-fan[data-count="5"] .discard-fan-card + .discard-fan-card {
-    margin-left: -45px;
+    margin-left: -48px;
+  }
+
+  .discard-cards-fan[data-count="4"] .discard-fan-card:nth-child(2) {
+    margin-left: -34px;
+  }
+
+  .discard-cards-fan[data-count="5"] .discard-fan-card:nth-child(2) {
+    margin-left: -36px;
   }
 
   .discard-depth {
@@ -1673,7 +1686,7 @@
     align-items: center;
     justify-content: safe center;
     min-height: 0;
-    padding-bottom: 40px;
+    padding-bottom: 10px;
   }
 
   .pile-column {
