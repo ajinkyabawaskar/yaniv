@@ -61,7 +61,6 @@ const baseProps = {
   deckCount: 30,
   onDiscard: () => {},
   onCallYaniv: () => {},
-  onContestYaniv: () => {},
   currentUserId: 'u1',
   playerNames: { u1: 'Ari', u2: 'Bob' },
 };
@@ -109,10 +108,10 @@ test('an emote handed to the table is shown with its words', () => {
   unmount();
 });
 
-test('an aimed emote names both players so the room knows who it is for', () => {
+test('an aimed emote names only its sender — no target arrow', () => {
   mount();
   play(aimed('a', 'RAGE', 'jaldi khel l***'));
-  expect(readBanner().who).toBe('Ari → Bob');
+  expect(readBanner().who).toBe('Ari');
   expect(readBanner().type).toBe('rage');
   expect(readBanner().emoji).toBe('😡');
   unmount();

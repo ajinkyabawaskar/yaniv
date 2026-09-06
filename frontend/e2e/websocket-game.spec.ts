@@ -198,22 +198,16 @@ test.describe('Yaniv Contest Timer', () => {
       await waitForGameState(p, 'YANIV_CALLED');
       const state = await getState(p);
       expect(state.yanivCallerId).toBeTruthy();
-      expect(state.yanivContestTimerSeconds).toBe(15);
+      expect(state.yanivContestTimerSeconds).toBe(5);
       expect(state.yanivCalledAt).toBeGreaterThan(0);
     }
     void callerPage;
   });
 
-  test('Contest (Asaf) resolves the round immediately', async () => {
-    // The non-caller contests through the overlay button
-    const callerId = (await getState(page1)).yanivCallerId;
-    const me1 = await page1.evaluate(() => (window as any).__CURRENT_USER_ID__);
-    const contestPage = callerId === me1 ? page2 : page1;
-
-    await contestPage.locator('.contest-btn').click();
-
+  test('Yaniv auto-reveals after the 5-second window', async () => {
+    // No contest action exists in the UI; the server auto-resolves at expiry.
     for (const p of [page1, page2]) {
-      await waitForGameState(p, 'ROUND_OVER', 10000);
+      await waitForGameState(p, 'ROUND_OVER', 15000);
       expect((await getState(p)).roundScores).toBeDefined();
     }
   });

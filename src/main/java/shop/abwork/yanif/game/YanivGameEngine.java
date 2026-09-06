@@ -40,7 +40,7 @@ public class YanivGameEngine {
     private String asafByUserId; // Who caused the Asaf
     private String winnerId; // Final winner
     private long yanivCalledTimestamp; // When Yaniv was called (epoch ms)
-    private int yanivContestTimerSeconds = 15; // Configurable via game.yaniv-contest-timer-seconds
+    private int yanivContestTimerSeconds = 5; // Configurable via game.yaniv-contest-timer-seconds
 
     // Bonus discard: track the rank of the card that was just discarded
     // and the drawn card that could be bonus discarded
@@ -66,7 +66,7 @@ public class YanivGameEngine {
         this.yanivThreshold = snapshot.yanivThreshold;
         this.targetScore = snapshot.targetScore;
         this.yanivContestTimerSeconds =
-                snapshot.yanivContestTimerSeconds > 0 ? snapshot.yanivContestTimerSeconds : 15;
+                snapshot.yanivContestTimerSeconds > 0 ? snapshot.yanivContestTimerSeconds : 5;
 
         this.playerHands = new HashMap<>();
         for (Map.Entry<String, List<GameSnapshot.CardDto>> entry : snapshot.playerHands.entrySet()) {

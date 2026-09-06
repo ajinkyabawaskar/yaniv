@@ -134,14 +134,11 @@ export async function tryCallYaniv(page: Page): Promise<boolean> {
 }
 
 /**
- * Contest Yaniv (Asaf) if possible
+ * No contest action exists in the UI anymore (the reveal window simply
+ * auto-resolves), so this is a permanent no-op kept for call-site compat.
  */
 export async function tryContestYaniv(page: Page): Promise<boolean> {
-  const contestBtn = page.locator('button:has-text("Asaf"):visible, button:has-text("Contest"):visible');
-  if (await contestBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
-    await contestBtn.click();
-    return true;
-  }
+  void page;
   return false;
 }
 

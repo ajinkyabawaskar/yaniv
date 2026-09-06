@@ -79,7 +79,7 @@ export interface GameState {
   yanivCallerId: string | null;
   yanivCallerName: string | null;
   yanivCalledAt: number | null; // Server epoch ms
-  yanivContestTimerSeconds: number; // Total allowed seconds (e.g., 15)
+  yanivContestTimerSeconds: number; // Total allowed seconds (e.g., 5)
   allPlayerHands: Record<string, GameCard[]>; // Revealed hands on ROUND_OVER
 
   // Turn timer / auto-play fields
@@ -135,7 +135,7 @@ export const useGameStore = create<GameState>((set) => ({
   yanivCallerId: null,
   yanivCallerName: null,
   yanivCalledAt: null,
-  yanivContestTimerSeconds: 15,
+  yanivContestTimerSeconds: 5,
   allPlayerHands: {},
 
   // Turn timer / auto-play initial values
@@ -190,7 +190,7 @@ export const useGameStore = create<GameState>((set) => ({
       yanivCallerId: null,
       yanivCallerName: null,
       yanivCalledAt: null,
-      yanivContestTimerSeconds: 15,
+      yanivContestTimerSeconds: 5,
       allPlayerHands: {},
       turnEndsAt: null,
       turnTimerSeconds: 45,

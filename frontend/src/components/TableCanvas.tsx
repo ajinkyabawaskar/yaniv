@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef, useImperative
 import { motion, AnimatePresence } from 'framer-motion';
 import { soundEngine } from '../utils/soundEngine';
 import { hapticLightTick, hapticFirmSnap, hapticDoubleError } from '../utils/haptics';
+import CardFlightLayer, { CardFlightSpec, FlightPoint } from './CardFlightLayer';
 import './TableCanvas.css';
 import { Card, isValidCombination, calculateHandScore, getRankValueLow } from '../utils/yanivRules';
 
@@ -34,7 +35,6 @@ interface TableCanvasProps {
   roundNumber?: number;
   onDiscard: (cardIds: string[], drawSource: string, drawnCardId?: string) => void;
   onCallYaniv: () => void;
-  onContestYaniv: () => void;
   drawableDiscardCards?: Card[];
   isAsaf?: boolean;
   asafByUserId?: string | null;
@@ -83,8 +83,8 @@ const EMOTE_FALLBACK_TEXT: Record<string, string> = {
   RAGE: 'jaldi khel l***',
   TAUNT: 'halke ho jao',
   MOCK: 'lambe lag gaye',
-  SHOCK: 'Bhaisaab, yeh kya tha?',
-  FLEX: 'Mera toh dhandha chal raha hai',
+  SHOCK: 'oh no!',
+  FLEX: 'oh yes!',
 };
 
 export const getCardImagePath = (rank: string, suit: string): string => {
@@ -137,6 +137,42 @@ export const getSuitColor = (suit: string) => {
 // Discard rules live in utils/yanivRules so they can be unit tested without React,
 // and so the shared contract test can run the same cases the server runs.
 export { getRankValueLow, getRankValueHigh, calculateHandScore, isValidCombination } from '../utils/yanivRules';
+
+/**
+ * Flight anchors, measured as card-shaped boxes — never raw element rects.
+ *
+ * Raw rects carry whatever the element happens to be: the discard container
+ * is two card-widths wide, a selected hand card carries a scale transform, a
+ * fanned card carries rotation. Flying those boxes verbatim stretches the
+ * card mid-motion (and `object-fit: cover` then crops the face into the
+ * wrong shape). Every endpoint is instead a true card-aspect box in a single
+ * measured size, centered on the anchor's visual center — so the flying card
+ * keeps its exact shape for the whole flight at every breakpoint.
+ * Returns null when the anchor is missing or unlaid-out (zero rect), in
+ * which case callers fall back to applying the state change at once.
+ */
+export const FALLBACK_CARD_SIZE = { width: 88, height: 124 };
+
+export const anchorCenter = (el: HTMLElement | null): { x: number; y: number } | null => {
+  if (!el) return null;
+  const rect = el.getBoundingClientRect();
+  if (rect.width === 0 && rect.height === 0) return null;
+  return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+};
+
+export const cardFlightBox = (
+  el: HTMLElement | null,
+  size: { width: number; height: number }
+): FlightPoint | null => {
+  const center = anchorCenter(el);
+  if (!center) return null;
+  return {
+    x: center.x - size.width / 2,
+    y: center.y - size.height / 2,
+    width: size.width,
+    height: size.height,
+  };
+};
 
 /**
  * What a knocked-out player is shown about someone still in the game.
@@ -200,7 +236,6 @@ function TableCanvas({
   roundNumber = 1,
   onDiscard,
   onCallYaniv,
-  onContestYaniv,
   drawableDiscardCards = [],
   isAsaf = false,
   asafByUserId = null,
@@ -212,7 +247,7 @@ function TableCanvas({
   yanivCallerId = null,
   yanivCallerName = null,
   yanivCalledAt = null,
-  yanivContestTimerSeconds = 15,
+  yanivContestTimerSeconds = 5,
   allPlayerHands = {},
   // Current user ID for Yaniv contest UI
   currentUserId = null,
@@ -241,32 +276,354 @@ function TableCanvas({
   const [yanivContestTimerRemaining, setYanivContestTimerRemaining] = useState<number>(0);
   const [showYanivContestOverlay, setShowYanivContestOverlay] = useState(false);
 
-  // One shape for all three. Every emote is words, so every emote reads as a banner
-  // across the felt rather than a symbol over an avatar: aimed ones name both players
-  // ("Ari -> Bob"), a taunt names only its sender because it is thrown at the table.
+  // ---- Card flight animations (discard out, draw in) ----
+  // Flights are a cosmetic overlay measured in viewport coordinates; the real
+  // hand/pile arrays only change when a flight lands (outgoing discards hold
+  // the server send until landing; incoming draws withhold the new card from
+  // the rendered hand until landing). Nothing here reflows the table.
+  const [outgoingFlights, setOutgoingFlights] = useState<CardFlightSpec[]>([]);
+  const [incomingFlight, setIncomingFlight] = useState<CardFlightSpec | null>(null);
+  // Drawn cards withheld from the rendered hand until their flight lands.
+  // A ref (not state): only the completion handler reads it, and nothing
+  // renders from it directly — localSortedHand is the rendered state.
+  const withheldRef = useRef<Card[]>([]);
+  const pendingActionRef = useRef<{
+    cardIds: string[];
+    drawSource: 'DECK' | 'DISCARD_PILE';
+    drawnCardId?: string;
+    discardedCards: Card[];
+  } | null>(null);
+  // Remembered when our own discard is sent so the next server push can be
+  // recognised as its result — and flown in from the right pile.
+  const pendingDrawRef = useRef<{
+    drawSource: 'DECK' | 'DISCARD_PILE';
+    drawnCardId?: string;
+  } | null>(null);
+  const prevHandRef = useRef<Card[]>(hand);
+  const drawPileRef = useRef<HTMLDivElement | null>(null);
+  const discardPileRef = useRef<HTMLDivElement | null>(null);
+  const handRowRef = useRef<HTMLDivElement | null>(null);
+  const handCardEls = useRef(new Map<string, HTMLDivElement>());
+  // Root for seat lookups. Seats are found imperatively at flight time via
+  // their data-user-id attribute — always fresh, with no ref lifecycle to
+  // go stale between the commit and the passive effects that measure them.
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  // Flights driven by other players' actions, recognised from server-push
+  // diffs (the push carries no actor/draw-source fields). Discard flights
+  // gate the pile render via pileOverride; draw flights gate nothing (seat
+  // counts are aggregates, not card identities).
+  const [opponentDiscardFlights, setOpponentDiscardFlights] = useState<CardFlightSpec[]>([]);
+  const [opponentDrawFlights, setOpponentDrawFlights] = useState<CardFlightSpec[]>([]);
+  // While set, the pile renders this instead of the live props — the new
+  // discards only appear when their flights land.
+  const [pileOverride, setPileOverride] = useState<Card[] | null>(null);
+  // Diff baselines for the push-driven path. Null until the first push.
+  const prevPileRef = useRef<{ top: Card[]; drawable: Card[] } | null>(null);
+  const prevTurnRef = useRef<string | null>(null);
+  const prevDeckRef = useRef<number | null>(null);
+  const prevRoundRef = useRef<number | null>(null);
+  const isFlightAnimating =
+    outgoingFlights.length > 0 ||
+    incomingFlight !== null ||
+    opponentDiscardFlights.length > 0 ||
+    opponentDrawFlights.length > 0;
+
+  // One shape for all three. Every emote is words, so every emote reads as a
+  // banner in the left corner below the opponent cards naming only its
+  // sender — no target arrow, just emoji + sender + words.
   const [emoteBanners, setEmoteBanners] = useState<
-    Array<{ id: string; type: string; from: string; to: string | null; text: string }>
+    Array<{ id: string; type: string; from: string; text: string }>
   >([]);
   const reactionTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
 
   // Emotes are sent, not drawn. The animation runs when the server echoes the emote back
   // on the room topic, so the sender sees exactly what everyone else sees and a dropped
-  // frame shows nothing rather than showing it to one player alone.
+  // frame shows nothing rather than showing it to one player alone. The light tick
+  // is the tap's only local feedback — the button itself has no background state.
   const sendReaction = useCallback(
     (type: 'LOVE' | 'RAGE' | 'TAUNT' | 'MOCK' | 'SHOCK' | 'FLEX', targetUserId: string) => {
       if (!targetUserId) return;
+      hapticLightTick();
       onSendReaction?.(type, targetUserId);
     },
     [onSendReaction]
   );
 
-  // Preserve user custom card reordering when hand state updates from server
+  // Latest onDiscard without retriggering flight callbacks.
+  const onDiscardRef = useRef(onDiscard);
   useEffect(() => {
-    setLocalSortedHand((prev) => {
+    onDiscardRef.current = onDiscard;
+  }, [onDiscard]);
+
+  // Outgoing discard flights gate the server send: the real piles/hands only
+  // change after the cards visually land on the discard pile.
+  const handleOutgoingFlightComplete = useCallback((key: string) => {
+    setOutgoingFlights((prev) => {
+      const next = prev.filter((f) => f.key !== key);
+      if (next.length === 0) {
+        const pending = pendingActionRef.current;
+        pendingActionRef.current = null;
+        if (pending) {
+          pendingDrawRef.current = { drawSource: pending.drawSource, drawnCardId: pending.drawnCardId };
+          onDiscardRef.current(pending.cardIds, pending.drawSource, pending.drawnCardId);
+          setSelectedCards([]);
+          setStatusFeedback(null);
+          setIsFeedbackError(false);
+        }
+      }
+      return next;
+    });
+  }, []);
+
+  // Incoming draw flights gate the render: the new card is withheld from the
+  // sorted hand until the flight lands, so it never pops in early or doubles
+  // up with the flying copy.
+  const handleIncomingFlightComplete = useCallback((key: string) => {
+    setIncomingFlight((prev) => {
+      if (!prev || prev.key !== key) return prev;
+      const withheld = withheldRef.current;
+      withheldRef.current = [];
+      if (withheld.length > 0) {
+        setLocalSortedHand((sorted) => {
+          const sortedIds = new Set(sorted.map((c) => c.id));
+          const fresh = withheld.filter((c) => !sortedIds.has(c.id));
+          return fresh.length > 0 ? [...sorted, ...fresh] : sorted;
+        });
+      }
+      return null;
+    });
+  }, []);
+
+  // The one true card size for flights: a rendered hand card's layout box
+  // (offsetWidth/Height — transform-free, so fan rotation and the selected
+  // lift never leak in), exact at every breakpoint. Falls back to the
+  // desktop card size when no hand card is rendered (or under test).
+  const measuredCardSize = (): { width: number; height: number } => {
+    for (const el of handCardEls.current.values()) {
+      if (el.offsetWidth > 0 && el.offsetHeight > 0) {
+        return { width: el.offsetWidth, height: el.offsetHeight };
+      }
+    }
+    return FALLBACK_CARD_SIZE;
+  };
+
+  // Opponent flights share one completion path: draws just clear, and the
+  // pile snaps to the live props once the last discard flight lands.
+  const handleOpponentFlightComplete = useCallback((key: string) => {
+    setOpponentDrawFlights((prev) => prev.filter((f) => f.key !== key));
+    setOpponentDiscardFlights((prev) => {
+      const next = prev.filter((f) => f.key !== key);
+      if (next.length === 0) setPileOverride(null);
+      return next;
+    });
+  }, []);
+
+  // Opponent actions, recognised from server-push diffs. The push carries no
+  // actor or draw-source fields, so this reconstructs the turn:
+  // - actor = whoever held the turn before this push;
+  // - fresh top-combination cards = their discards → seat-to-pile, face-up,
+  //   with the pile held on its previous render until they land;
+  // - deckCount -1 = drew from the deck → card-back deck-to-seat;
+  // - deckCount unchanged + exactly one previously drawable card gone = picked
+  //   that exact card from the pile → pile-to-seat, face-up (revealed), the
+  //   way every player at a real table watches it happen.
+  // Coverage caveat: when the new combo buries a multi-drawable top (a set,
+  // or sequence ends) the push cannot say which of the vanished drawables
+  // was picked up and which were merely covered — so those turns fly the
+  // discards but no draw flight. A missing flight beats a lying face.
+  // Our own pushes are owned by the actor path above (pending refs set, or
+  // actor is us), so they never double-animate here.
+  useEffect(() => {
+    const curTop = topDiscardCards ?? [];
+    const curDrawable = drawableDiscardCards ?? [];
+    const prev = prevPileRef.current;
+    const prevTurn = prevTurnRef.current;
+    const prevDeck = prevDeckRef.current;
+    const prevRound = prevRoundRef.current;
+    prevPileRef.current = { top: curTop, drawable: curDrawable };
+    prevTurnRef.current = currentTurnPlayerId;
+    prevDeckRef.current = deckCount;
+    prevRoundRef.current = roundNumber;
+
+    // First push, new deal, or unmeasurable round boundary: sync silently.
+    if (!prev || prevRound === null || prevRound !== roundNumber) return;
+    // Our own action in flight, or our own result: the actor path owns it.
+    if (pendingActionRef.current || pendingDrawRef.current) return;
+    if (!prevTurn || prevTurn === currentUserId) return;
+
+    const prevTopIds = new Set(prev.top.map((c) => c.id));
+    const prevDrawableIds = new Set(prev.drawable.map((c) => c.id));
+    const curTopIds = new Set(curTop.map((c) => c.id));
+    const curDrawableIds = new Set(curDrawable.map((c) => c.id));
+    const topChanged =
+      curTop.length !== prev.top.length || curTop.some((c) => !prevTopIds.has(c.id));
+    // Fresh discards: the new top combination. Ids are unique per deal, so a
+    // changed top is wholly the actor's discard set.
+    const discarded = topChanged ? curTop : [];
+    // Picked-up card: drawable before, visible nowhere now. Locked middles
+    // are excluded by construction — they were never drawable, so a covered
+    // (not picked) combination yields nothing here.
+    const picked =
+      prevDeck !== null && deckCount === prevDeck
+        ? prev.drawable.filter((c) => !curTopIds.has(c.id) && !curDrawableIds.has(c.id))
+        : [];
+    const deckDrawn = prevDeck !== null && deckCount === prevDeck - 1;
+
+    // Sanity gates: a single turn discards at most a hand (5). Anything else
+    // is a recycle, a reveal, or a state we do not understand — sync silently
+    // rather than invent motion. Note the draw flight is NOT gated on pickup
+    // ambiguity: when the new combo buries a multi-drawable top, several
+    // vanished drawables are candidates but exactly one was picked up. The
+    // discards are unambiguous and always fly; the draw flight runs only
+    // when its source is certain (deck, or a single candidate).
+    if (discarded.length > 5) return;
+    if (discarded.length === 0 && picked.length === 0 && !deckDrawn) return;
+
+    const size = measuredCardSize();
+    // Seat anchor, looked up live: an opponent's discards fly from their
+    // seat, their draws fly back to it.
+    const seatBox = (userId: string) => {
+      const seats = rootRef.current?.querySelectorAll('[data-user-id]');
+      let seat: Element | null = null;
+      seats?.forEach((el) => {
+        if (el.getAttribute('data-user-id') === userId) seat = el;
+      });
+      return cardFlightBox(seat as HTMLElement | null, size);
+    };
+    const actorBox = seatBox(prevTurn);
+    if (!actorBox) return;
+
+    const now = Date.now();
+    const drawSource =
+      deckDrawn ? 'DECK' : picked.length === 1 ? ('DISCARD_PILE' as const) : null;
+
+    if (discarded.length > 0) {
+      const pileBox = cardFlightBox(discardPileRef.current, size);
+      if (!pileBox) return;
+      // Hold the pile on its previous render; the discards appear as they land.
+      const prevDisplay = prev.top.length > 0 ? prev.top : prev.drawable;
+      setPileOverride(prevDisplay);
+      setOpponentDiscardFlights(
+        discarded.map((card, i) => ({
+          key: `opp-discard-${card.id}-${now}`,
+          from: actorBox,
+          to: pileBox,
+          faceUp: true,
+          faceImageSrc: getCardImagePath(card.rank, card.suit),
+          faceAlt: `${card.rank} of ${card.suit}`,
+          rotation: (i - (discarded.length - 1) / 2) * 8,
+          delay: i * 0.06,
+        }))
+      );
+    }
+
+    if (drawSource === 'DECK') {
+      const deckBox = cardFlightBox(drawPileRef.current, size);
+      if (!deckBox) return;
+      setOpponentDrawFlights([
+        {
+          key: `opp-draw-${prevTurn}-${now}`,
+          from: deckBox,
+          to: actorBox,
+          faceUp: false,
+        },
+      ]);
+    } else if (drawSource === 'DISCARD_PILE') {
+      const pileBox = cardFlightBox(discardPileRef.current, size);
+      if (!pileBox) return;
+      const card = picked[0];
+      setOpponentDrawFlights([
+        {
+          key: `opp-pickup-${card.id}-${now}`,
+          from: pileBox,
+          to: actorBox,
+          faceUp: true,
+          faceImageSrc: getCardImagePath(card.rank, card.suit),
+          faceAlt: `${card.rank} of ${card.suit}`,
+        },
+      ]);
+    }
+
+    if (discarded.length > 0 || drawSource) soundEngine.playDealerFlick();
+  }, [topDiscardCards, drawableDiscardCards, deckCount, currentTurnPlayerId, opponents, roundNumber, currentUserId]);
+
+  // Preserve user custom card reordering when hand state updates from server.
+  // When the push is the result of our own discard-and-draw, the drawn card
+  // is withheld and flown in from the pile it came from instead of popping
+  // into the hand: deck draws fly card-back-down, discard pickups fly
+  // face-up (revealed).
+  useEffect(() => {
+    const prev = prevHandRef.current;
+    prevHandRef.current = hand;
+    const prevIds = new Set(prev.map((c) => c.id));
+    const added = hand.filter((c) => !prevIds.has(c.id));
+    const pendingDraw = pendingDrawRef.current;
+
+    if (pendingDraw && added.length > 0) {
+      pendingDrawRef.current = null;
+      const drawn = pendingDraw.drawnCardId
+        ? added.find((c) => c.id === pendingDraw.drawnCardId) ?? added[0]
+        : added[0];
+      const rest = hand.filter((c) => c.id !== drawn.id);
+      withheldRef.current = [drawn];
+      setLocalSortedHand((sorted) => {
+        const restIds = new Set(rest.map((c) => c.id));
+        const retained = sorted.filter((c) => restIds.has(c.id));
+        const retainedIds = new Set(retained.map((c) => c.id));
+        const newlyDrawn = rest.filter((c) => !retainedIds.has(c.id));
+        return [...retained, ...newlyDrawn];
+      });
+      const fromEl =
+        pendingDraw.drawSource === 'DECK' ? drawPileRef.current : discardPileRef.current;
+      const size = measuredCardSize();
+      const from = cardFlightBox(fromEl, size);
+      const handEl = handRowRef.current;
+      const handRect = handEl?.getBoundingClientRect();
+      const to: FlightPoint =
+        handRect && handRect.width > 0
+          ? {
+              x: handRect.left + handRect.width / 2 - size.width / 2,
+              y: handRect.bottom - size.height - 6,
+              width: size.width,
+              height: size.height,
+            }
+          : {
+              x: window.innerWidth / 2 - size.width / 2,
+              y: window.innerHeight - size.height - 36,
+              width: size.width,
+              height: size.height,
+            };
+      if (from) {
+        const faceUp = pendingDraw.drawSource === 'DISCARD_PILE';
+        setIncomingFlight({
+          key: `draw-${drawn.id}-${Date.now()}`,
+          from,
+          to,
+          faceUp,
+          faceImageSrc: faceUp ? getCardImagePath(drawn.rank, drawn.suit) : undefined,
+          faceAlt: `${drawn.rank} of ${drawn.suit}`,
+        });
+        soundEngine.playDealerFlick();
+      } else {
+        // No measurable anchor (hidden tab, unmounted pile): render at once.
+        withheldRef.current = [];
+        setLocalSortedHand((sorted) => {
+          const restIds = new Set(rest.map((c) => c.id));
+          const retained = sorted.filter((c) => restIds.has(c.id));
+          return [...retained, drawn];
+        });
+      }
+      return;
+    }
+
+    pendingDrawRef.current = null;
+    setLocalSortedHand((prevSorted) => {
       const incomingIds = new Set(hand.map((c) => c.id));
-      const retained = prev.filter((c) => incomingIds.has(c.id));
+      const retained = prevSorted.filter((c) => incomingIds.has(c.id));
       const retainedIds = new Set(retained.map((c) => c.id));
-      const newlyDrawn = hand.filter((c) => !retainedIds.has(c.id));
+      // Cards withheld for an in-progress draw flight join only when it lands.
+      const heldIds = new Set(withheldRef.current.map((c) => c.id));
+      const newlyDrawn = hand.filter((c) => !retainedIds.has(c.id) && !heldIds.has(c.id));
       return [...retained, ...newlyDrawn];
     });
   }, [hand]);
@@ -369,9 +726,11 @@ function TableCanvas({
 
   const currentHandCards = localSortedHand;
 
-  // Central reaction strip aims at the turn holder: love/rage go to whoever is
-  // playing (when that is someone else still in the game); a taunt is thrown
-  // at the table. Same targeting the per-seat buttons had, one fixed place.
+  // Central reaction strip: every emote stays fireable while you are still in
+  // the game. Aimed at whoever holds the turn when that is someone else still
+  // playing; otherwise thrown at the table (self-target, the way a taunt has
+  // always gone out), so your own turn never locks the strip to one emoji.
+  // Same targeting the per-seat buttons had, one fixed place.
   const turnHolder = useMemo(
     () => opponents.find((o) => o.userId === currentTurnPlayerId) ?? null,
     [opponents, currentTurnPlayerId]
@@ -379,6 +738,17 @@ function TableCanvas({
   const canAimAtTurnHolder =
     !!turnHolder && !turnHolder.isCurrentPlayer && !turnHolder.isEliminated;
   const meEliminated = opponents.some((o) => o.isCurrentPlayer && o.isEliminated);
+  // Nobody to aim at — your own turn, or the turn holder is gone — means the
+  // table, not a disabled strip. The server already accepts a self-target for
+  // every type (that is what a TAUNT is), and only the sender is ever drawn.
+  const emoteTargetUserId =
+    canAimAtTurnHolder && turnHolder ? turnHolder.userId : currentUserId ?? null;
+  const canSendEmote = !meEliminated && !!emoteTargetUserId;
+  const emoteHint = (text: string) => {
+    if (!canSendEmote) return 'Reactions are unavailable while you are out of the game';
+    if (canAimAtTurnHolder && turnHolder) return `Tell ${turnHolder.displayName}: ${text}`;
+    return `Tell the table: ${text}`;
+  };
 
   const handScore = useMemo(() => calculateHandScore(currentHandCards), [currentHandCards]);
   const isYanivEligible = handScore <= yanivThreshold;
@@ -405,8 +775,32 @@ function TableCanvas({
     return [];
   }, [topDiscardCards, drawableDiscardCards, topCard]);
 
+  // What the pile renders: the live props, unless an opponent's discards are
+  // still flying in — then the previous render, so the new cards appear as
+  // their flights land instead of popping in underneath them.
+  const renderDiscardCards = pileOverride ?? discardDisplayCards;
+
+  // A new deal invalidates everything in flight: drops, timers and pending
+  // sends belong to the previous round's layout. (Push-diff baselines are
+  // NOT reset here: the diff effect runs before this one and re-baselines
+  // itself when it sees the round change. Resetting them here would wipe a
+  // baseline the diff effect just established on mount, blinding it to the
+  // next push.)
+  useEffect(() => {
+    pendingActionRef.current = null;
+    pendingDrawRef.current = null;
+    withheldRef.current = [];
+    setOutgoingFlights([]);
+    setIncomingFlight(null);
+    setOpponentDiscardFlights([]);
+    setOpponentDrawFlights([]);
+    setPileOverride(null);
+    handCardEls.current.clear();
+  }, [roundNumber]);
+
   // Card click: Single-tap toggle or double-tap multi-select
   const handleCardClick = (card: Card) => {
+    if (isFlightAnimating) return;
     const now = Date.now();
     const lastTap = lastTapTime[card.id] || 0;
     const isDoubleTap = now - lastTap < 300;
@@ -483,6 +877,7 @@ function TableCanvas({
     drawSource: 'DECK' | 'DISCARD_PILE',
     drawnCardId?: string
   ) => {
+    if (isFlightAnimating) return;
     if (selectedCards.length === 0) {
       setStatusFeedback('Select cards to discard from your hand first!');
       setIsFeedbackError(true);
@@ -499,12 +894,48 @@ function TableCanvas({
       hapticDoubleError();
       return;
     }
+    // Fly the discards from the hand to the discard pile first; the server
+    // send (and with it every real state change) waits until they land.
+    // Both ends are card-shaped boxes in one measured size, so the flight
+    // never stretches or crops the card.
+    const size = measuredCardSize();
+    const target = cardFlightBox(discardPileRef.current, size);
+    const now = Date.now();
+    const flights: CardFlightSpec[] = [];
+    cardsObjects.forEach((card, i) => {
+      const el = handCardEls.current.get(card.id);
+      const from = cardFlightBox(el ?? handRowRef.current, size);
+      if (from && target) {
+        flights.push({
+          key: `discard-${card.id}-${now}`,
+          from,
+          to: target,
+          faceUp: true,
+          faceImageSrc: getCardImagePath(card.rank, card.suit),
+          faceAlt: `${card.rank} of ${card.suit}`,
+          rotation: (i - (cardsObjects.length - 1) / 2) * 8,
+          delay: i * 0.06,
+        });
+      }
+    });
     soundEngine.playDealerFlick();
-    onDiscard(selectedCards, drawSource, drawnCardId);
-    setSelectedCards([]);
-    setStatusFeedback(null);
-    setIsFeedbackError(false);
-  }, [selectedCards, localSortedHand, onDiscard]);
+    if (flights.length === 0) {
+      // No measurable anchors (hidden tab, tiny viewport): send at once.
+      pendingDrawRef.current = { drawSource, drawnCardId };
+      onDiscardRef.current(selectedCards, drawSource, drawnCardId);
+      setSelectedCards([]);
+      setStatusFeedback(null);
+      setIsFeedbackError(false);
+      return;
+    }
+    pendingActionRef.current = {
+      cardIds: [...selectedCards],
+      drawSource,
+      drawnCardId,
+      discardedCards: cardsObjects,
+    };
+    setOutgoingFlights(flights);
+  }, [selectedCards, localSortedHand, isFlightAnimating]);
 
   const handleDrawFromDeck = () => {
     if (!isPlayerTurn) return;
@@ -594,13 +1025,11 @@ function TableCanvas({
 
   // Show one emote the room has broadcast. Called by GameView as each one arrives, so an
   // emote is drawn exactly once, when it happens, and is never held anywhere.
+  // Only the sender is named: the target stays on the wire (the strip still aims
+  // at the turn holder) but is never drawn, so no "Ari -> Bob" arrow.
   const playReaction = useCallback(
     (event: ReactionEvent) => {
       if (!event?.id) return;
-
-      // The server aims a taunt at its own sender, which is how an emote addressed to the
-      // whole table is told apart from one aimed at a neighbour.
-      const isAimed = !!event.targetUserId && event.targetUserId !== event.fromUserId;
 
       setEmoteBanners((prev) => [
         ...prev,
@@ -608,7 +1037,6 @@ function TableCanvas({
           id: event.id,
           type: event.type,
           from: event.fromDisplayName || 'Someone',
-          to: isAimed ? playerNames[event.targetUserId] || 'a player' : null,
           text: event.text || EMOTE_FALLBACK_TEXT[event.type] || '',
         },
       ]);
@@ -621,7 +1049,7 @@ function TableCanvas({
       }, EMOTE_BANNER_LIFETIME_MS);
       reactionTimersRef.current.add(timer);
     },
-    [playerNames]
+    []
   );
 
   useImperativeHandle(ref, () => ({ playReaction }), [playReaction]);
@@ -642,10 +1070,18 @@ function TableCanvas({
     return -1;
   }, [selectedCards, localSortedHand]);
 
+  // Single stable callback for the flight layer: reads the current incoming
+  // flight, so it only changes identity when that flight does.
+  const handleAnyFlightComplete = useCallback((key: string) => {
+    if (incomingFlight?.key === key) handleIncomingFlightComplete(key);
+    else if (key.startsWith('opp-')) handleOpponentFlightComplete(key);
+    else handleOutgoingFlightComplete(key);
+  }, [incomingFlight, handleIncomingFlightComplete, handleOpponentFlightComplete, handleOutgoingFlightComplete]);
+
   // Note: Keyboard reordering (ArrowLeft/ArrowRight) still works for selected cards
 
   return (
-    <div className="table-canvas-root">
+    <div className="table-canvas-root" ref={rootRef}>
       <div className="felt-surface">
         {/* Yaniv Contest Overlay */}
         <AnimatePresence>
@@ -664,8 +1100,7 @@ function TableCanvas({
                 <div className="contest-pulse-ring" style={{ animationDelay: '1s' }} />
                 
                 <div className="contest-header">
-                  <div className="contest-icon">⚡</div>
-                  <h1 className="contest-title">YANIV CALLED</h1>
+                  <h1 className="contest-title">YANIV!</h1>
                 </div>
                 
                 <div className="contest-caller-info">
@@ -674,8 +1109,8 @@ function TableCanvas({
                 </div>
                 
                 <div className="contest-timer">
-                  <span className="contest-timer-value">{yanivContestTimerRemaining}s</span>
-                  <span className="contest-timer-label">to Contest (Asaf)</span>
+                  <span className={`contest-timer-value ${yanivContestTimerRemaining <= 2 ? 'urgent' : ''}`}>{yanivContestTimerRemaining}s</span>
+                  <span className="contest-timer-label">until reveal</span>
                 </div>
                 
                 <div className="contest-progress-bar">
@@ -687,30 +1122,12 @@ function TableCanvas({
                   />
                 </div>
                 
-                {yanivCallerId !== currentUserId && (
-                  <motion.button
-                    className="contest-btn"
-                    onClick={onContestYaniv}
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    animate={{
-                      boxShadow: [
-                        '0 0 20px rgba(239, 68, 68, 0.4)',
-                        '0 0 40px rgba(239, 68, 68, 0.8)',
-                        '0 0 20px rgba(239, 68, 68, 0.4)',
-                      ],
-                    }}
-                    transition={{ repeat: Infinity, duration: 1.2 }}
-                  >
-                    🛡️ CONTEST (ASAF)
-                  </motion.button>
-                )}
-                
-                {yanivCallerId === currentUserId && (
-                  <div className="contest-waiting-message">
-                    Waiting for other players to decide...
-                  </div>
-                )}
+                {/* One shared popup for every seat — caller included. There is
+                    no contest action anymore; the window simply auto-reveals,
+                    so nothing here is gated on who called. */}
+                <div className="contest-waiting-message">
+                  Revealing result…
+                </div>
               </div>
             </motion.div>
           )}
@@ -828,25 +1245,24 @@ function TableCanvas({
 
         {/* 2. Center Play Area - Natural Piles on Felt */}
         <div className="center-play-area">
-          {/* Emote log: twitch-chat plain text floating over the top of the free
-              area. Absolute + click-through, so arrivals/expiries never move the
-              piles underneath. */}
+          {/* Emote log: left-corner banners below the opponent cards, confined
+              to this area and painted behind the piles. Absolute +
+              click-through, so arrivals/expiries never move the piles
+              underneath. */}
           <div className="emote-log-strip" role="status" aria-live="polite">
             {emoteBanners.map((banner) => (
               <div key={banner.id} className="emote-log-row" data-type={banner.type.toLowerCase()}>
                 <span className="emote-emoji" aria-hidden="true">
                   {EMOTE_ICON[banner.type] || '💬'}
                 </span>
-                <span className="emote-from">
-                  {banner.to ? `${banner.from} \u2192 ${banner.to}` : banner.from}
-                </span>
+                <span className="emote-from">{banner.from}</span>
                 <span className="emote-msg">{banner.text}</span>
               </div>
             ))}
           </div>
           {/* Draw Pile (Left) */}
           <div className="pile-column draw-pile-column" onClick={handleDrawFromDeck}>
-            <div className={`deck-stack-3d ${selectedCards.length > 0 ? 'pulse-prompt' : ''}`}>
+            <div ref={drawPileRef} className={`deck-stack-3d ${selectedCards.length > 0 ? 'pulse-prompt' : ''}`}>
               <div className="deck-layer layer-3" />
               <div className="deck-layer layer-2" />
               <div className="deck-layer layer-1">
@@ -875,8 +1291,8 @@ function TableCanvas({
           {/* Discard Pile (Right) - Chinese Hand Fan Layout */}
           <div className="pile-column discard-pile-column">
 
-            <div className="discard-fan-container">
-              {discardDisplayCards.length === 0 ? (
+            <div ref={discardPileRef} className="discard-fan-container">
+              {renderDiscardCards.length === 0 ? (
                 <div className="discard-empty-box">Empty</div>
               ) : (
                 <>
@@ -887,20 +1303,20 @@ function TableCanvas({
                   </div>
                 <div
                   className="discard-cards-fan"
-                  data-count={Math.min(discardDisplayCards.length, 5)}
+                  data-count={Math.min(renderDiscardCards.length, 5)}
                 >
-                  {discardDisplayCards.map((card, idx) => {
+                  {renderDiscardCards.map((card, idx) => {
                     const isDrawable = drawableDiscardCards.some((dc) => dc.id === card.id);
                     const isSequenceMiddleLocked =
-                      discardDisplayCards.length >= 3 &&
+                      renderDiscardCards.length >= 3 &&
                       !isDrawable &&
                       idx > 0 &&
-                      idx < discardDisplayCards.length - 1;
+                      idx < renderDiscardCards.length - 1;
 
                     // Tight fan capped at two card widths: overlap does the work,
                     // so spread flattens out at 4+ cards instead of widening the box.
                     // Fan spread based on card count (max 5 cards)
-                    const totalCards = Math.min(discardDisplayCards.length, 5);
+                    const totalCards = Math.min(renderDiscardCards.length, 5);
                     const centerOffset = idx - (totalCards - 1) / 2;
                     const flatFan = totalCards >= 4;
                     const rotationDeg = centerOffset * (flatFan ? 1 : 3); // Gentle fan spread
@@ -949,7 +1365,7 @@ function TableCanvas({
 
             {/* Fixed slot: the hint appearing must not move the cards. */}
             <span className="pile-label">Discard</span>
-            <span className="pile-count">{discardDisplayCards.length} cards</span>
+            <span className="pile-count">{renderDiscardCards.length} cards</span>
             <div className="discard-prompt-slot">
               {isPlayerTurn && (
                 <div className="discard-prompt-hint">
@@ -1012,96 +1428,57 @@ function TableCanvas({
 
         {/* 3. Main Player Dock (Bottom Center) */}
         <div className="main-player-dock">
-          {/* Reactions live here, above the sort/Yaniv strip, aimed at the
-              turn holder — not one set per seat. */}
+          {/* Reactions live here, above the sort/Yaniv strip: aimed at the turn
+              holder when there is one, otherwise thrown at the table — never
+              a set per seat, and never locked to a single emoji. */}
           <div className="reaction-strip" role="group" aria-label="Table reactions">
             <button
               type="button"
               className="reaction-btn reaction-love"
-              onClick={() => turnHolder && sendReaction('LOVE', turnHolder.userId)}
-              disabled={!canAimAtTurnHolder}
-              title={
-                canAimAtTurnHolder && turnHolder
-                  ? `Tell ${turnHolder.isCurrentPlayer ? 'You' : turnHolder.displayName}: ${EMOTE_FALLBACK_TEXT.LOVE}`
-                  : 'Love is for the player whose turn it is'
-              }
-              aria-label={
-                canAimAtTurnHolder && turnHolder
-                  ? `Tell ${turnHolder.displayName}: ${EMOTE_FALLBACK_TEXT.LOVE}`
-                  : 'Love (waiting for another player’s turn)'
-              }
+              onClick={() => emoteTargetUserId && sendReaction('LOVE', emoteTargetUserId)}
+              disabled={!canSendEmote}
+              title={emoteHint(EMOTE_FALLBACK_TEXT.LOVE)}
+              aria-label={emoteHint(EMOTE_FALLBACK_TEXT.LOVE)}
             >
               ❤️
             </button>
             <button
               type="button"
               className="reaction-btn reaction-rage"
-              onClick={() => turnHolder && sendReaction('RAGE', turnHolder.userId)}
-              disabled={!canAimAtTurnHolder}
-              title={
-                canAimAtTurnHolder && turnHolder
-                  ? `Tell ${turnHolder.displayName}: ${EMOTE_FALLBACK_TEXT.RAGE}`
-                  : 'Rage is for the player whose turn it is'
-              }
-              aria-label={
-                canAimAtTurnHolder && turnHolder
-                  ? `Tell ${turnHolder.displayName}: ${EMOTE_FALLBACK_TEXT.RAGE}`
-                  : 'Rage (waiting for another player’s turn)'
-              }
+              onClick={() => emoteTargetUserId && sendReaction('RAGE', emoteTargetUserId)}
+              disabled={!canSendEmote}
+              title={emoteHint(EMOTE_FALLBACK_TEXT.RAGE)}
+              aria-label={emoteHint(EMOTE_FALLBACK_TEXT.RAGE)}
             >
               😡
             </button>
             <button
               type="button"
               className="reaction-btn reaction-mock"
-              onClick={() => turnHolder && sendReaction('MOCK', turnHolder.userId)}
-              disabled={!canAimAtTurnHolder}
-              title={
-                canAimAtTurnHolder && turnHolder
-                  ? `Tell ${turnHolder.displayName}: ${EMOTE_FALLBACK_TEXT.MOCK}`
-                  : 'Mock is for the player whose turn it is'
-              }
-              aria-label={
-                canAimAtTurnHolder && turnHolder
-                  ? `Tell ${turnHolder.displayName}: ${EMOTE_FALLBACK_TEXT.MOCK}`
-                  : 'Mock (waiting for another player’s turn)'
-              }
+              onClick={() => emoteTargetUserId && sendReaction('MOCK', emoteTargetUserId)}
+              disabled={!canSendEmote}
+              title={emoteHint(EMOTE_FALLBACK_TEXT.MOCK)}
+              aria-label={emoteHint(EMOTE_FALLBACK_TEXT.MOCK)}
             >
               💥
             </button>
             <button
               type="button"
               className="reaction-btn reaction-shock"
-              onClick={() => turnHolder && sendReaction('SHOCK', turnHolder.userId)}
-              disabled={!canAimAtTurnHolder}
-              title={
-                canAimAtTurnHolder && turnHolder
-                  ? `Tell ${turnHolder.displayName}: ${EMOTE_FALLBACK_TEXT.SHOCK}`
-                  : 'Shock is for the player whose turn it is'
-              }
-              aria-label={
-                canAimAtTurnHolder && turnHolder
-                  ? `Tell ${turnHolder.displayName}: ${EMOTE_FALLBACK_TEXT.SHOCK}`
-                  : 'Shock (waiting for another player’s turn)'
-              }
+              onClick={() => emoteTargetUserId && sendReaction('SHOCK', emoteTargetUserId)}
+              disabled={!canSendEmote}
+              title={emoteHint(EMOTE_FALLBACK_TEXT.SHOCK)}
+              aria-label={emoteHint(EMOTE_FALLBACK_TEXT.SHOCK)}
             >
               😱
             </button>
             <button
               type="button"
               className="reaction-btn reaction-flex"
-              onClick={() => turnHolder && sendReaction('FLEX', turnHolder.userId)}
-              disabled={!canAimAtTurnHolder}
-              title={
-                canAimAtTurnHolder && turnHolder
-                  ? `Tell ${turnHolder.displayName}: ${EMOTE_FALLBACK_TEXT.FLEX}`
-                  : 'Flex is for the player whose turn it is'
-              }
-              aria-label={
-                canAimAtTurnHolder && turnHolder
-                  ? `Tell ${turnHolder.displayName}: ${EMOTE_FALLBACK_TEXT.FLEX}`
-                  : 'Flex (waiting for another player’s turn)'
-              }
+              onClick={() => emoteTargetUserId && sendReaction('FLEX', emoteTargetUserId)}
+              disabled={!canSendEmote}
+              title={emoteHint(EMOTE_FALLBACK_TEXT.FLEX)}
+              aria-label={emoteHint(EMOTE_FALLBACK_TEXT.FLEX)}
             >
               😎
             </button>
@@ -1109,7 +1486,7 @@ function TableCanvas({
               type="button"
               className="reaction-btn reaction-taunt"
               onClick={() => currentUserId && sendReaction('TAUNT', currentUserId)}
-              disabled={meEliminated || !currentUserId}
+              disabled={!canSendEmote}
               title={`Tell the table: ${EMOTE_FALLBACK_TEXT.TAUNT}`}
               aria-label={`Tell the table: ${EMOTE_FALLBACK_TEXT.TAUNT}`}
             >
@@ -1117,17 +1494,17 @@ function TableCanvas({
             </button>
           </div>
           <div className="player-hud-bar">
-            <div className={`hand-total-btn hud-btn outline-only ${isYanivEligible && isPlayerTurn ? 'ready-yaniv' : ''}`}>
+            <div className={`hand-total-btn hud-btn ${isYanivEligible && isPlayerTurn ? 'ready-yaniv' : ''}`}>
               <span className="score-label">Hand Total:</span>
               <span className="score-digits">{handScore}</span>
             </div>
 
             <div className="hand-sort-controls">
               <button className="sort-btn hud-btn interactive" onClick={handleSortByRank} title="Sort hand by rank">
-                ↕ Sort Ranks
+                Sort Ranks
               </button>
               <button className="sort-btn hud-btn interactive" onClick={handleSortBySuit} title="Sort hand by suit">
-                ♣ Sort Suites
+                Sort Suites
               </button>
               <button
                 className={`sort-btn hud-btn interactive call-yaniv-btn-hud ${isYanivEligible && isPlayerTurn ? 'eligible' : ''}`}
@@ -1141,7 +1518,7 @@ function TableCanvas({
           </div>
 
           <div className="player-hand-container">
-            <div className="player-hand-fanned">
+            <div ref={handRowRef} className="player-hand-fanned">
               <AnimatePresence>
                 {localSortedHand.map((card, idx) => {
                   const isSelected = selectedCards.includes(card.id);
@@ -1156,6 +1533,10 @@ function TableCanvas({
                   return (
                     <motion.div
                       key={card.id}
+                      ref={(el) => {
+                        if (el) handCardEls.current.set(card.id, el as HTMLDivElement);
+                        else handCardEls.current.delete(card.id);
+                      }}
                       className={`hand-card ${isSelected ? 'selected-lift' : ''} ${
                         isDraggingThis ? 'is-being-dragged' : ''
                       } ${isDragTarget ? 'drag-over-target' : ''} interactive`}
@@ -1198,6 +1579,19 @@ function TableCanvas({
           </div>
         </div>
       </div>
+      {/* Card flights paint above everything in a fixed overlay: discards fly
+          hand → discard pile, deck draws fly card-back-down pile → hand, and
+          discard pickups fly face-up (revealed) pile → hand. Opponent turns
+          fly the same paths from every seat, driven by server-push diffs. */}
+      <CardFlightLayer
+        flights={[
+          ...outgoingFlights,
+          ...(incomingFlight ? [incomingFlight] : []),
+          ...opponentDiscardFlights,
+          ...opponentDrawFlights,
+        ]}
+        onFlightComplete={handleAnyFlightComplete}
+      />
     </div>
   );
 }

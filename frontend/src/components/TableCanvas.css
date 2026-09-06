@@ -45,9 +45,10 @@
 
 /* ==========================================================================
    Emote Reactions
-   One central strip above the sort/Yaniv HUD, aimed at the turn holder: a
-   single segmented tray (not floating circles), speaking the same glass +
-   gold language as the HUD buttons below it.
+   Floating emoji over the felt: no tray, no panel, no chrome behind them.
+   Feedback is motion-only (a quick scale pop), never a background, so taps
+   leave no pill, flash or stuck hover wash behind — including on touch
+   screens, where :hover rules are gated behind (hover: hover).
    ========================================================================== */
 .reaction-strip {
   position: relative;
@@ -59,70 +60,47 @@
   width: max-content;
   max-width: 100%;
   margin: 0 auto 12px;
-  padding: 2px;
-  background: rgba(10, 32, 23, 0.85);
-  border: 1px solid rgba(212, 175, 55, 0.35);
-  border-radius: 10px;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(8px);
-}
-
-.reaction-strip .reaction-btn {
-  width: 34px;
-  height: 26px;
-  font-size: 14px;
-  border-radius: 6px;
-  background: transparent;
-  border-color: transparent;
-}
-
-.reaction-strip .reaction-btn:hover:not(:disabled) {
-  background: rgba(212, 175, 55, 0.18);
-  border-color: rgba(212, 175, 55, 0.45);
-  transform: none;
-}
-
-.reaction-strip .reaction-btn:active:not(:disabled) {
-  transform: scale(0.94);
-}
-
-/* The tray is the chrome now, so the taunt keeps only a red-ish hover hint. */
-.reaction-strip .reaction-btn.reaction-taunt {
-  background: transparent;
-  border-color: transparent;
-}
-
-.reaction-strip .reaction-btn.reaction-taunt:hover:not(:disabled) {
-  background: rgba(239, 68, 68, 0.18);
-  border-color: rgba(252, 165, 165, 0.45);
+  padding: 0;
+  background: none;
+  border: none;
+  box-shadow: none;
 }
 
 .reaction-btn {
-  width: 36px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
   padding: 0;
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.45);
-  border: 1px solid rgba(212, 175, 55, 0.45);
-  color: var(--gold-light);
-  font-size: 17px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  font-size: 24px;
   line-height: 1;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+  /* Mobile: no tap highlight, no double-tap-zoom delay, no text selection
+     on rapid taps; the press pop below is the entire feedback. */
+  touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: transform 0.12s ease-out;
+  will-change: transform;
 }
 
-.reaction-btn:hover {
-  background: rgba(212, 175, 55, 0.2);
-  border-color: var(--gold-primary);
-  transform: scale(1.12);
+/* Grow on hover, but only where hover exists: on touch a tap leaves :hover
+   stuck, which would freeze the emoji mid-pop. */
+@media (hover: hover) {
+  .reaction-btn:hover:not(:disabled) {
+    transform: scale(1.18);
+  }
 }
 
-.reaction-btn:active {
-  transform: scale(0.94);
+/* Press pop: quick grow that springs back on release via the transition. */
+.reaction-btn:active:not(:disabled) {
+  transform: scale(1.3);
+  transition-duration: 0.06s;
 }
 
 .reaction-btn:disabled {
@@ -131,24 +109,29 @@
   transform: none;
 }
 
-.reaction-btn:disabled:hover {
-  background: rgba(0, 0, 0, 0.45);
-  border-color: rgba(212, 175, 55, 0.45);
-  transform: none;
+/* Keyboard users still get a visible target; never shown for touch taps. */
+.reaction-btn:focus-visible {
+  outline: 2px solid rgba(212, 175, 55, 0.7);
+  outline-offset: 2px;
+  border-radius: 8px;
 }
 
 /* ==========================================================================
    Emote Log Strip
-   Twitch-chat plain text floating over the top of the free area. Absolute +
-   click-through, so arrivals and expiries never shift the piles underneath.
-   Blank when silent; every emote stays until its own TTL clears it.
+   Left-corner banners below the opponent cards, wrapping instead of
+   truncating. Confined to the center play area (max-height 100% + hidden
+   overflow) so a pile-on never spills onto the hand cards, and painted
+   behind the piles/cards (z-index 0: first in DOM, so z-auto piles and the
+   positive-z fan paint above it). Absolute + click-through, so arrivals and
+   expiries never shift the piles underneath. Blank when silent; every emote
+   stays until its own TTL clears it.
    ========================================================================== */
 .emote-log-strip {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
-  z-index: 30;
+  z-index: 0;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -156,26 +139,30 @@
   gap: 4px;
   padding: 4px 12px 2px;
   pointer-events: none;
+  max-height: 100%;
+  overflow: hidden;
+  text-align: left;
 }
 
 .emote-log-row {
   display: flex;
   align-items: baseline;
+  justify-content: flex-start;
+  flex-wrap: wrap;
   gap: 6px;
   max-width: 100%;
   font-size: 13px;
   line-height: 1.35;
   color: var(--ink-light);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  text-align: left;
+  overflow-wrap: anywhere;
   animation: emote-log-in 0.25s ease-out;
 }
 
-/* Rows slide in from the left and stay put until their own timer clears them. */
+/* Rows drop in from above and stay put until their own timer clears them. */
 @keyframes emote-log-in {
-  from { transform: translateX(-12px); opacity: 0; }
-  to   { transform: translateX(0); opacity: 1; }
+  from { transform: translateY(-6px); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
 }
 
 .emote-log-row .emote-emoji {
@@ -183,33 +170,20 @@
 }
 
 .emote-log-row .emote-from {
-  flex: none;
   font-weight: 700;
   color: var(--card-cream);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 40%;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .emote-log-row .emote-msg {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
-/* An emote button that speaks for the whole table, so it reads apart from the two
-   that are aimed at a neighbour. */
-.reaction-btn.reaction-taunt {
-  background: rgba(76, 5, 25, 0.55);
-  border-color: rgba(252, 165, 165, 0.5);
-}
-
-.reaction-btn.reaction-taunt:hover {
-  background: rgba(127, 29, 29, 0.75);
-  border-color: rgba(252, 165, 165, 0.9);
-}
+/* The taunt fires at the whole table but looks like every other floating
+   emoji: no red panel, no hover wash — motion-only like the rest. */
 
 /* ==========================================================================
    1. Opponents Arc (Top Semi-Circle)
@@ -416,9 +390,12 @@
 
 /* ==========================================================================
    2. Center Play Area - Natural Piles on Felt
-   Draw + discard form ONE centered group (max-content, fixed 32px gap) rather
-   than a 50/50 split: neither side stretches, so a multi-card discard can
-   never push the draw pile around.
+   Draw + discard form ONE centered group (fixed 32px gap) rather than a
+   50/50 split: the group stays centered via justify-content while the area
+   itself spans the full felt width, so a multi-card discard can never push
+   the draw pile around — and the absolutely-positioned emote strip spans the
+   same full width, anchoring messages to the felt's left corner below the
+   opponent cards instead of the narrow pile group.
    ========================================================================== */
 .center-play-area {
   position: relative;
@@ -428,7 +405,7 @@
   align-items: center; /* Content-sized columns, centered as a group */
   justify-content: center;
   gap: 32px;
-  width: max-content;
+  width: 100%;
   max-width: 100%;
   margin: 0 auto;
   padding: 8px 0 10px;
@@ -797,13 +774,6 @@
   transform: translateY(0);
 }
 
-.hand-total-btn.outline-only {
-  background: transparent;
-  border: 2px solid rgba(212, 175, 55, 0.5);
-  color: var(--gold-light);
-  cursor: default;
-}
-
 /* Static readout - no hover affordance unless Yaniv is ready */
 .hand-total-btn.ready-yaniv,
 .hand-total-btn.ready-yaniv:hover {
@@ -991,7 +961,7 @@
 .contest-overlay-bg {
   position: absolute;
   inset: 0;
-  background: radial-gradient(ellipse at center, rgba(180, 30, 30, 0.25) 0%, rgba(20, 10, 10, 0.85) 70%);
+  background: radial-gradient(ellipse at center, rgba(18, 52, 38, 0.35) 0%, rgba(5, 20, 14, 0.85) 70%);
   animation: contestPulse 2s ease-in-out infinite;
 }
 
@@ -1002,9 +972,9 @@
 
 .contest-pulse-ring {
   position: absolute;
-  width: 300px;
-  height: 300px;
-  border: 2px solid rgba(239, 68, 68, 0.4);
+  width: 200px;
+  height: 200px;
+  border: 2px solid rgba(212, 175, 55, 0.35);
   border-radius: 50%;
   animation: pulseRingExpand 2s ease-out infinite;
 }
@@ -1023,148 +993,114 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 32px 48px;
-  background: radial-gradient(circle, rgba(40, 15, 15, 0.98) 0%, rgba(15, 5, 5, 0.99) 100%);
-  border: 2px solid var(--crimson-primary);
-  border-radius: 24px;
-  box-shadow: 
-    0 0 80px rgba(239, 68, 68, 0.6),
-    0 0 160px rgba(239, 68, 68, 0.3),
-    0 20px 60px rgba(0, 0, 0, 0.9),
-    inset 0 0 40px rgba(239, 68, 68, 0.1);
+  gap: 10px;
+  padding: 24px 32px;
+  max-width: min(400px, calc(100% - 32px));
+  background: radial-gradient(circle, rgba(24, 60, 46, 0.98) 0%, rgba(7, 25, 18, 0.99) 100%);
+  border: 2px solid var(--gold-primary);
+  border-radius: 20px;
+  box-shadow:
+    0 0 40px rgba(212, 175, 55, 0.25),
+    0 16px 40px rgba(0, 0, 0, 0.85),
+    inset 0 0 30px rgba(212, 175, 55, 0.08);
   text-align: center;
   backdrop-filter: blur(20px);
   pointer-events: auto;
 }
 
-.contest-icon {
-  font-size: 48px;
-  margin-bottom: 8px;
-  animation: contestIconPulse 1s ease-in-out infinite;
-}
-
-@keyframes contestIconPulse {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.15); }
-}
-
 .contest-title {
   font-family: 'Cinzel', serif;
-  font-size: 42px;
+  font-size: 34px;
   font-weight: 900;
   letter-spacing: 0.08em;
-  background: linear-gradient(135deg, #fca5a5 0%, #ef4444 50%, #fca5a5 100%);
+  background: var(--gold-gradient);
+  background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
-  text-shadow: 0 4px 30px rgba(239, 68, 68, 0.5);
   margin: 0;
 }
 
 .contest-caller-info {
-  margin: 16px 0 8px;
+  margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 
 .contest-caller-label {
   font-family: 'DM Mono', monospace;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
-  color: #fca5a5;
+  color: var(--gold-light);
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
 .contest-caller-name {
   font-family: 'Cinzel', serif;
-  font-size: 28px;
+  font-size: 22px;
   font-weight: 700;
   color: #fff;
-  text-shadow: 0 2px 10px rgba(239, 68, 68, 0.5);
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
 }
 
 .contest-timer {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  margin: 16px 0;
+  gap: 2px;
+  margin: 0;
 }
 
 .contest-timer-value {
   font-family: 'DM Mono', monospace;
-  font-size: 56px;
+  font-size: 44px;
   font-weight: 900;
-  color: #fff;
-  text-shadow: 0 0 30px rgba(239, 68, 68, 0.8);
+  color: var(--gold-light);
+  text-shadow: 0 0 20px rgba(212, 175, 55, 0.5);
   line-height: 1;
+}
+
+/* The one warm cue left: final 5 seconds burn orange-red, so the stakes —
+   not the chrome — carry the sense of loss. */
+.contest-timer-value.urgent {
+  color: #fca5a5;
+  text-shadow: 0 0 20px rgba(239, 68, 68, 0.7);
+  animation: waitingPulse 1s ease-in-out infinite;
 }
 
 .contest-timer-label {
   font-family: 'DM Mono', monospace;
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 600;
-  color: #fca5a5;
+  color: var(--gold-light);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .contest-progress-bar {
-  width: 280px;
-  height: 8px;
+  width: 260px;
+  height: 6px;
   background: rgba(0, 0, 0, 0.5);
   border-radius: 4px;
   overflow: hidden;
-  margin: 16px 0;
-  border: 1px solid rgba(239, 68, 68, 0.3);
+  margin: 4px 0;
+  border: 1px solid rgba(212, 175, 55, 0.3);
 }
 
 .contest-progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, #ef4444 0%, #f87171 50%, #ef4444 100%);
+  background: var(--gold-gradient);
   border-radius: 4px;
   transition: width 0.1s linear;
-  box-shadow: 0 0 15px rgba(239, 68, 68, 0.6);
-}
-
-.contest-btn {
-  margin-top: 20px;
-  padding: 16px 40px;
-  font-family: 'Cinzel', serif;
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  color: #fff;
-  background: linear-gradient(135deg, #dc2626 0%, #ef4444 50%, #dc2626 100%);
-  border: 2px solid #fca5a5;
-  border-radius: 12px;
-  cursor: pointer;
-  box-shadow: 
-    0 0 20px rgba(239, 68, 68, 0.4),
-    0 8px 25px rgba(0, 0, 0, 0.5),
-    inset 0 1px 0 rgba(255, 255, 255, 0.2);
-  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
-  transition: all 0.2s ease;
-}
-
-.contest-btn:hover {
-  transform: scale(1.05);
-  box-shadow: 
-    0 0 30px rgba(239, 68, 68, 0.6),
-    0 12px 35px rgba(0, 0, 0, 0.6),
-    inset 0 1px 0 rgba(255, 255, 255, 0.3);
-}
-
-.contest-btn:active {
-  transform: scale(0.95);
+  box-shadow: 0 0 12px rgba(212, 175, 55, 0.5);
 }
 
 .contest-waiting-message {
-  margin-top: 20px;
+  margin-top: 8px;
   font-family: 'DM Mono', monospace;
-  font-size: 14px;
-  color: #fca5a5;
+  font-size: 13px;
+  color: var(--gold-light);
   letter-spacing: 0.05em;
   animation: waitingPulse 1.5s ease-in-out infinite;
 }
@@ -1246,21 +1182,16 @@
 
   .reaction-strip {
     margin: 0 auto 8px;
-    padding: 2px;
   }
 
   .reaction-strip .reaction-btn {
-    width: 32px;
-    height: 26px;
-    font-size: 14px;
+    width: 44px;
+    height: 44px;
+    font-size: 24px;
   }
 
   .emote-log-row {
     font-size: 12px;
-  }
-
-  .emote-log-row .emote-from {
-    max-width: 120px;
   }
 
   /* Center Play Area - Natural Piles horizontal layout on mobile */
@@ -1499,31 +1430,26 @@
 
   /* Yaniv Contest Overlay - responsive */
   .contest-overlay-content {
-    padding: 24px 20px;
+    padding: 18px 22px;
     margin: 0 12px;
+    gap: 8px;
   }
 
   .contest-title {
-    font-size: 28px;
+    font-size: 26px;
   }
 
   .contest-caller-name {
-    font-size: 22px;
+    font-size: 19px;
   }
 
   .contest-timer-value {
-    font-size: 40px;
+    font-size: 34px;
   }
 
   .contest-progress-bar {
     width: 100%;
     max-width: 280px;
-  }
-
-  .contest-btn {
-    padding: 14px 28px;
-    font-size: 16px;
-    min-height: 48px;
   }
 }
 
@@ -1548,14 +1474,8 @@
     max-width: 60px;
   }
 
-  /* At 360px a full "Ari -> Bob: thanks for the card(s)" only fits if the type comes
-     down and the names give up room first. */
   .emote-log-row {
     font-size: 11px;
-  }
-
-  .emote-log-row .emote-from {
-    max-width: 84px;
   }
 
   .deck-stack-3d {

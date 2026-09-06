@@ -105,8 +105,9 @@ with the sequence ladder or vice versa.)*
 ### Calling Yaniv
 
 * Legal on your turn, **before discarding**, when your hand totals **7 or less** (inclusive).
-* A Yaniv call opens a **15-second contest window**. Any other player still in the game may contest
-  it, which resolves the round immediately.
+* A Yaniv call opens a **5-second reveal window**, after which the round
+  auto-resolves. There is no contest action: every seat watches the same
+  countdown popup and the server reveals all hands at expiry.
 
 ### Asaf
 

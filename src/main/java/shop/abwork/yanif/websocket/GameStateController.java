@@ -147,7 +147,7 @@ public class GameStateController {
                               Presence presence,
                               @Value("${game.turn-timer-seconds:45}") int turnTimerSeconds,
                               @Value("${game.auto-play-enabled:true}") boolean autoPlayEnabled,
-                              @Value("${game.yaniv-contest-timer-seconds:15}") int yanivContestTimerSeconds,
+                              @Value("${game.yaniv-contest-timer-seconds:5}") int yanivContestTimerSeconds,
                               @Value("${game.yaniv-threshold:7}") int yanivThreshold,
                               @Value("${game.absence-grace-seconds:45}") long absenceGraceSeconds,
                               @Value("${game.bonus-discard-timeout-seconds:30}") int bonusDiscardTimeoutSeconds,
@@ -1760,7 +1760,7 @@ public class GameStateController {
         public String yanivCallerId;
         public String yanivCallerName;
         public long yanivCalledAt;          // Server epoch ms
-        public int yanivContestTimerSeconds; // Total allowed seconds (15)
+        public int yanivContestTimerSeconds; // Total allowed seconds (5)
 
         // Max players in room
         public Integer maxPlayers;

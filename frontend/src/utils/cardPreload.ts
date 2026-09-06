@@ -3,6 +3,7 @@
  * Preloads all 52 standard playing card SVGs into browser cache
  * so they render instantly during gameplay.
  */
+import { useState, useCallback } from 'react';
 
 // All 13 ranks × 4 suits = 52 cards
 const RANKS = ['ace', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'jack', 'queen', 'king'] as const;
@@ -97,8 +98,6 @@ export function preloadCardSubset(cardIds: string[]): Promise<void> {
 /**
  * React hook for preloading cards with loading state
  */
-import { useEffect, useState, useCallback } from 'react';
-
 export function useCardPreload() {
   const [isPreloading, setIsPreloading] = useState(false);
   const [isPreloaded, setIsPreloaded] = useState(false);

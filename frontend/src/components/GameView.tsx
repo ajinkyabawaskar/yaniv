@@ -207,7 +207,7 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
             yanivCallerId: gameData.yanivCallerId || null,
             yanivCallerName: gameData.yanivCallerName || null,
             yanivCalledAt: gameData.yanivCalledAt || null,
-            yanivContestTimerSeconds: gameData.yanivContestTimerSeconds || 15,
+            yanivContestTimerSeconds: gameData.yanivContestTimerSeconds || 5,
             allPlayerHands: gameData.allPlayerHands || {},
             // Only ever populated for a player who has been knocked out; the server
             // omits it entirely for anyone still in the game, so this stays null there.
@@ -353,13 +353,6 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
   const handleCallYaniv = () => {
     const userId = localStorage.getItem('userId');
     send('/app/room/' + gameId + '/call-yaniv', {
-      playerId: userId,
-    });
-  };
-
-  const handleContestYaniv = () => {
-    const userId = localStorage.getItem('userId');
-    send('/app/room/' + gameId + '/contest-yaniv', {
       playerId: userId,
     });
   };
@@ -537,7 +530,6 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
               roundNumber={gameState.roundNumber}
               onDiscard={handleDiscard}
               onCallYaniv={handleCallYaniv}
-              onContestYaniv={handleContestYaniv}
               drawableDiscardCards={gameState.drawableDiscardCards}
               isAsaf={gameState.isAsaf}
               asafByUserId={gameState.asafByUserId}

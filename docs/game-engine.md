@@ -273,9 +273,10 @@ the engine for both checks.
 
 ## Asaf
 
-After a Yaniv call the round sits in `YANIV_CALLED` for a **15-second contest window**
+After a Yaniv call the round sits in `YANIV_CALLED` for a **5-second reveal window**
 (`game.yaniv-contest-timer-seconds`, `application.properties:50`), enforced by a scheduled task in
-the controller (`:1079-1101`), not the engine.
+the controller (`:1079-1101`), not the engine. The UI offers no contest action — every seat
+watches the same countdown popup and the timer auto-resolves.
 
 `contestYaniv(playerId)` resolves **immediately** (`:355-367`). It rejects a contest when there is
 no active call, from the caller themselves, or from an eliminated player.
@@ -286,8 +287,8 @@ no active call, from the caller themselves, or from an eliminated player.
 2. scans all **non-caller** players for the single lowest hand;
 3. declares Asaf **iff `minOpponentScore < callerScore` — strictly less** (`:470-474`).
 
-So a **tie means no Asaf** — the caller keeps their 0. And contesting costs nothing: a player whose
-hand is nowhere near lowest can contest to skip the wait, and the Asaf credit still goes to whoever
+So a **tie means no Asaf** — the caller keeps their 0. The `contest-yaniv` endpoint still
+resolves early when called, but no client offers it; the Asaf credit always goes to whoever
 actually holds the lowest hand.
 
 **`contestYaniv` checks membership** against `playerIds`, so an authenticated stranger who knows
@@ -909,7 +910,7 @@ else.
 | Key | Ships as | Effect |
 |---|---|---|
 | `game.yaniv-threshold` | `7` | Highest hand that may call Yaniv. **Server-wide, not per-room.** |
-| `game.yaniv-contest-timer-seconds` | `15` | Asaf window. Captured at engine construction, so changes don't reach in-flight games. |
+| `game.yaniv-contest-timer-seconds` | `5` | Reveal window. Captured at engine construction, so changes don't reach in-flight games. |
 | `game.turn-timer-seconds` | `45` | Display field and the round-over auto-advance delay. **Not the auto-play delay.** |
 | `game.auto-play-enabled` | `false` (`@Value` default now also `false`) | Gates every turn timer and the round-over self-advance. **Deliberately off** while presence status is unreliable. |
 | `game.absence-grace-seconds` | `45` | How long an absent player's turn is held before the server plays it for them. Once per absence, counted only during their turn. |

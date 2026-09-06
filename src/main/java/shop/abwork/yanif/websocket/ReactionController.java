@@ -39,8 +39,8 @@ public class ReactionController {
             "RAGE", "jaldi khel l***",
             "TAUNT", "halke ho jao",
             "MOCK", "lambe lag gaye",
-            "SHOCK", "Bhaisaab, yeh kya tha?",
-            "FLEX", "Mera toh dhandha chal raha hai"
+            "SHOCK", "oh no!",
+            "FLEX", "oh yes!"
     );
 
     private static final List<String> ALLOWED_TYPES = List.of("LOVE", "RAGE", "TAUNT", "MOCK", "SHOCK", "FLEX");

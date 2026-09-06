@@ -19,7 +19,7 @@ if [ ! -f "$ROOT/.mvn/wrapper/maven-wrapper.properties" ] && ! command -v mvn >/
   exit 1
 fi
 command -v mvn >/dev/null 2>&1 && ! grep -q "distributionUrl" "$ROOT/.mvn/wrapper/maven-wrapper.properties" 2>/dev/null && MVN_CMD="mvn"
-(cd "$ROOT" && $MVN_CMD spring-boot:run -q -Dspring-boot.run.arguments="--game.yaniv-threshold=200 --game.auto-play-enabled=false --game.turn-timer-seconds=60 --game.yaniv-contest-timer-seconds=15") &
+(cd "$ROOT" && $MVN_CMD spring-boot:run -q -Dspring-boot.run.arguments="--game.yaniv-threshold=200 --game.auto-play-enabled=false --game.turn-timer-seconds=60 --game.yaniv-contest-timer-seconds=5") &
 BACK_PID=$!
 trap 'kill $BACK_PID 2>/dev/null' EXIT
 

@@ -165,6 +165,27 @@ test('a broadcast on the room topic draws a banner on the table', async () => {
   act(() => root.unmount());
 });
 
+test('on your own turn every emote stays enabled and goes to the table', async () => {
+  await mountView();
+  pushGameState({ currentTurnPlayerId: 'u1' });
+
+  // No locked strip: all six fire, none disabled.
+  expect(container.querySelectorAll('.reaction-strip .reaction-btn:disabled')).toHaveLength(0);
+
+  const love = container.querySelector('.reaction-strip .reaction-love') as HTMLButtonElement;
+  act(() => {
+    love.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+
+  // Nobody to aim at, so it goes out self-targeted — the table-wide fallback
+  // the server already accepts for every type.
+  expect(sent).toContainEqual({
+    destination: '/app/room/g1/reaction',
+    body: { type: 'LOVE', targetUserId: 'u1' },
+  });
+  act(() => root.unmount());
+});
+
 test('the strip sends love at the turn holder over the socket', async () => {
   await mountView();
   pushGameState({ currentTurnPlayerId: 'u2' });

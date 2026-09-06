@@ -185,15 +185,10 @@ test.describe('Yaniv Full Game Flow', () => {
     }
   });
 
-  test('Asaf contest works when opponent contests', async () => {
-    const callerId = (await getState(page1)).yanivCallerId;
-    const seats = await seatOrder([page1, page2, page3]);
-    const contestSeat = seats.find((s) => s.userId !== callerId)!;
-
-    await contestSeat.page.locator('.contest-btn').click();
-
+  test('Yaniv auto-reveals after the 5-second window', async () => {
+    // No contest action exists in the UI; the server auto-resolves at expiry.
     for (const p of [page1, page2, page3]) {
-      await waitForGameState(p, 'ROUND_OVER', 10000);
+      await waitForGameState(p, 'ROUND_OVER', 15000);
     }
   });
 

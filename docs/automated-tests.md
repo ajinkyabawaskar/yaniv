@@ -177,7 +177,7 @@ Turn 1: draw        ✓                   ✓
 - ✅ Discard pile visibility
 - ✅ Card combination selection
 - ✅ Yaniv button appears when score ≤ 7
-- ✅ Asaf contest button for opponents
+- ✅ Shared Yaniv reveal popup on every seat (no contest button)
 - ✅ Round over: scores + revealed hands
 - ✅ Next round button
 - ✅ Disconnection handling
@@ -198,8 +198,8 @@ Tests REST endpoints directly:
 Tests real-time synchronization via STOMP/WebSocket:
 
 - Multiple browser contexts connect to same game
-- `call-yaniv` → all see `YANIV_CALLED` + 15s timer
-- `contest-yaniv` → immediate `ROUND_OVER` (timer cancelled)
+- `call-yaniv` → all see `YANIV_CALLED` + 5s timer
+- Reveal window expiry → `ROUND_OVER` (auto-resolve)
 - State sync: discard pile, turn, scores, hands
 - Disconnect → reconnect restores current state
 
