@@ -530,6 +530,32 @@ would be handed pre-mutation state. Timers before broadcast, because `scheduleTu
 writes `turnDeadlines`, which the broadcast reads to fill `turnEndsAt` (`:778`) — swap them and every
 client gets the *previous* turn's countdown.
 
+**Some broadcasts carry a one-shot event flag.** `autoPlayedPlayerId` marks a move the bot made for
+an absent player; `allCardsDiscardedByUserId` marks a discard that threw the player's **whole hand**
+(discard size equals hand size before the discard, `:341`, and the same check on the auto-play path,
+`:1720`); `acePickedByUserId` marks an **ace drawn from the discard pile**. All three are per-mutation
+parameters threaded `finishMutation` → `broadcastGameState` → `buildGameStateForPlayers` (`:1475`,
+`:1090`, `:847`), set on the message only for that one broadcast (`:1005-1013`), and null on every other
+push — so each table plays the moment exactly once. The client must
+read them the same way: `GameStateMessageContractTest` fails the build if a field the server sends is
+never read from the payload in `GameView.tsx`.
+
+The ace flag fires **only on pile draws, never deck draws** — and that is a privacy rule, not a
+product choice. The drawable pile cards ride on every state push (`drawableDiscardCards`), so naming
+an ace taken from them leaks nothing; a deck draw is hidden information, and announcing its rank
+would reveal the card to the whole table. The check sits where the pile card is resolved
+(`:329-342`), before `processDraw` runs, and the deck branch is deliberately left silent.
+
+**Performance shape of the hook (no behaviour change).** The snapshot write runs on a
+dedicated single-thread `persistExecutor`, never on the 2-thread `scheduler` that owns the
+turn/contest/round-over timers — a slow Redis therefore delays persistence, never a deadline
+(`GameStateController.java:finishMutation`). The broadcast converts the table cards that are
+identical for every seat (top/drawables/revealed hands via `sharedTableCards`) exactly once per
+broadcast instead of once per recipient; only `hand`, `opponentCounts`, the bonus prompt and the
+spectator meters are still built per player, and the bytes on the wire are unchanged. The
+action-dedup sweep runs at most once per 100 deduped actions rather than on every one. None of
+this touches the mutation order above.
+
 ## Per-player filtering
 
 All of it happens in `buildGameStateForPlayers` (`:644-803`), and every push goes to a **user

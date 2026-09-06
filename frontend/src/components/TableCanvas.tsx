@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef, useImperativeHandle, forwardRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { soundEngine } from '../utils/soundEngine';
+import { playAsafSound, stopAsafSound, playWaitingForAsafSound, stopWaitingForAsafSound } from '../utils/sound';
 import { hapticLightTick, hapticFirmSnap, hapticDoubleError } from '../utils/haptics';
 import CardFlightLayer, { CardFlightSpec, FlightPoint } from './CardFlightLayer';
 import './TableCanvas.css';
@@ -48,6 +49,8 @@ interface TableCanvasProps {
   yanivCalledAt?: number | null;
   yanivContestTimerSeconds?: number;
   allPlayerHands?: Record<string, Card[]>;
+  /** True once the server has revealed the round (ROUND_OVER / GAME_OVER). */
+  isRoundOver?: boolean;
   // Current user ID for Yaniv contest UI
   currentUserId?: string | null;
   // Server-driven turn timer / auto-play
@@ -87,7 +90,18 @@ const EMOTE_FALLBACK_TEXT: Record<string, string> = {
   FLEX: 'oh yes!',
 };
 
+/**
+ * Memoized card-art URL lookup. Called per card per render (including the
+ * 1/sec turn-timer tick); without the cache it rebuilds two map literals and
+ * two string concats for every card on every one of those renders.
+ * Pure function of (rank, suit) — the cache cannot change what it returns.
+ */
+const cardImagePathCache = new Map<string, string>();
+
 export const getCardImagePath = (rank: string, suit: string): string => {
+  const cacheKey = rank + '|' + suit;
+  const cached = cardImagePathCache.get(cacheKey);
+  if (cached !== undefined) return cached;
   const rankMap: Record<string, string> = {
     ACE: 'ace',
     TWO: '2',
@@ -118,7 +132,9 @@ export const getCardImagePath = (rank: string, suit: string): string => {
     return '/cards/ace_of_hearts.svg'; // fallback
   }
 
-  return `/cards/${rankStr}_of_${suitStr}.svg`;
+  const path = `/cards/${rankStr}_of_${suitStr}.svg`;
+  cardImagePathCache.set(cacheKey, path);
+  return path;
 };
 
 export const getSuitColor = (suit: string) => {
@@ -174,6 +190,49 @@ export const cardFlightBox = (
   };
 };
 
+export interface FanLandingSlot extends FlightPoint {
+  /** End rotation matching the fan slot (same formula as DiscardFanCard). */
+  rotation: number;
+}
+
+/**
+ * Where each card of a fresh discard combo lands on the pile — one slot per
+ * card, fanned the way DiscardFanCard renders them, instead of all stacked
+ * on the pile center.
+ *
+ * Previously every flight in a set shared one `to` box, so N cards landed in
+ * a pile and the real fan popped in underneath them spread out: the
+ * stacked-landing → spread-pop snap. These slots mirror the fan's own math
+ * (rotation/translateY identical to DiscardFanCard; horizontal step
+ * proportional to the measured card width so it tracks every breakpoint the
+ * same way the clamp()-sized cards do), so each flight docks exactly where
+ * its pile card is about to render and the handoff is invisible.
+ */
+export const fanLandingSlots = (
+  pileBox: FlightPoint,
+  size: { width: number; height: number },
+  count: number
+): FanLandingSlot[] => {
+  const n = Math.max(1, Math.min(count, 5));
+  // Overlap step as a fraction of card width, matching the CSS negative
+  // margins that cap the fan at ~two card widths (see TableCanvas.css):
+  // 2 cards step wide, 3 tighter, 4+ near-flat.
+  const step = n <= 2 ? size.width * 0.7 : n === 3 ? size.width * 0.5 : size.width * 0.28;
+  const cx = pileBox.x + pileBox.width / 2;
+  const cy = pileBox.y + pileBox.height / 2;
+  const flatFan = n >= 4;
+  return Array.from({ length: count }, (_, i) => {
+    const off = i - (count - 1) / 2;
+    return {
+      x: cx + off * step - size.width / 2,
+      y: cy - size.height / 2 + (flatFan ? 0 : Math.abs(off) * 2),
+      width: size.width,
+      height: size.height,
+      rotation: off * (flatFan ? 1 : 3),
+    };
+  });
+};
+
 /**
  * What a knocked-out player is shown about someone still in the game.
  *
@@ -189,7 +248,7 @@ export const cardFlightBox = (
  * in Yaniv range has to look identical: the point is the suspense of not knowing which
  * of them takes it, and a number here would give the round away.
  */
-function SpectatorMeters({ reading }: { reading: SpectatorReading }) {
+const SpectatorMeters = React.memo(function SpectatorMeters({ reading }: { reading: SpectatorReading }) {
   const percent = reading.yanivProximityPercent;
 
   const yanivTier = reading.canCallYanivNow
@@ -223,6 +282,314 @@ function SpectatorMeters({ reading }: { reading: SpectatorReading }) {
       </span>
     </div>
   );
+}, areSpectatorMetersEqual);
+
+function areSpectatorMetersEqual(
+  prev: { reading: SpectatorReading },
+  next: { reading: SpectatorReading }
+): boolean {
+  return (
+    prev.reading.canCallYanivNow === next.reading.canCallYanivNow &&
+    prev.reading.yanivProximityPercent === next.reading.yanivProximityPercent &&
+    prev.reading.pointsFromElimination === next.reading.pointsFromElimination
+  );
+}
+
+interface OpponentSeatProps {
+  opponent: OpponentInfo;
+  index: number;
+  turnTimerSeconds: number;
+  turnTimerTotalSeconds: number;
+  autoPlayed: boolean;
+}
+
+/**
+ * One seat in the opponents arc. Memoized so the per-second turn-timer tick
+ * re-renders only the seat holding the turn (its progress bar moves) instead
+ * of every seat in the arc.
+ */
+const OpponentSeat = React.memo(function OpponentSeat({
+  opponent,
+  index,
+  turnTimerSeconds,
+  turnTimerTotalSeconds,
+  autoPlayed,
+}: OpponentSeatProps) {
+  const isTurn = opponent.isCurrentTurn;
+  const isCurrentPlayer = opponent.isCurrentPlayer;
+  const timerProgress = isTurn ? Math.max(0, turnTimerSeconds / (turnTimerTotalSeconds || 45)) : 1;
+  const isUrgentTimer = isTurn && turnTimerSeconds <= 5;
+  const isDisconnected = opponent.isDisconnected;
+  const stackCount = Math.min(opponent.cardCount, 5);
+  const stackCenter = (stackCount - 1) / 2;
+  const displayName = isCurrentPlayer ? 'You' : opponent.displayName;
+
+  return (
+    <motion.div
+      className={`opponent-seat ${isTurn ? 'active-turn' : ''} ${
+        opponent.isEliminated ? 'eliminated' : ''
+      } ${isDisconnected ? 'disconnected' : ''} ${isCurrentPlayer ? 'current-player' : ''}`}
+      data-user-id={opponent.userId}
+      initial={{ opacity: 0, y: -20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: index * 0.1 }}
+    >
+      {isTurn && (
+        <div className="turn-progress-track" aria-hidden="true">
+          <div
+            className={`turn-progress-fill ${isUrgentTimer ? 'urgent' : ''}`}
+            style={{ width: `${Math.max(0, Math.min(100, timerProgress * 100))}%` }}
+          />
+        </div>
+      )}
+      <div className="opponent-identity">
+        {isTurn && <span className="turn-dot" title="Current turn" />}
+        <span className="opponent-name">{displayName}</span>
+        {opponent.isHost && <span className="inline-badge" title="Host">👑</span>}
+        {autoPlayed && (
+          <span className="inline-badge" title="Turn auto-played by server">🤖</span>
+        )}
+        {isDisconnected && (
+          <span className="inline-badge" title="Disconnected — reconnecting…">⚡</span>
+        )}
+      </div>
+      <div className="opponent-meta">
+        {opponent.spectatorReading && (
+          <SpectatorMeters reading={opponent.spectatorReading} />
+        )}
+      </div>
+      <div className="opponent-info-row">
+        <div className="opponent-score-pill">
+          <span className="score-val">{opponent.score} pts</span>
+        </div>
+        <div className="opponent-card-stack" title={`${opponent.cardCount} cards in hand`}>
+          {Array.from({ length: stackCount }).map((_, cIdx) => (
+            <div
+              key={cIdx}
+              className="mini-card-back"
+              style={{
+                transform: `translateX(${(cIdx - stackCenter) * 4}px) rotate(${(cIdx - stackCenter) * 6}deg)`,
+              }}
+            />
+          ))}
+          <span className="card-count-badge">{opponent.cardCount}</span>
+        </div>
+      </div>
+    </motion.div>
+  );
+}, areOpponentSeatPropsEqual);
+
+function areOpponentSeatPropsEqual(prev: OpponentSeatProps, next: OpponentSeatProps): boolean {
+  const a = prev.opponent;
+  const b = next.opponent;
+  // Timer props only matter for the seat holding the turn; idle seats skip
+  // every tick entirely.
+  const timerRelevant =
+    a.isCurrentTurn || b.isCurrentTurn
+      ? prev.turnTimerSeconds === next.turnTimerSeconds &&
+        prev.turnTimerTotalSeconds === next.turnTimerTotalSeconds
+      : true;
+  return (
+    timerRelevant &&
+    prev.index === next.index &&
+    prev.autoPlayed === next.autoPlayed &&
+    a.userId === b.userId &&
+    a.displayName === b.displayName &&
+    a.score === b.score &&
+    a.isHost === b.isHost &&
+    a.isCurrentTurn === b.isCurrentTurn &&
+    a.isEliminated === b.isEliminated &&
+    a.cardCount === b.cardCount &&
+    a.isDisconnected === b.isDisconnected &&
+    a.isCurrentPlayer === b.isCurrentPlayer &&
+    a.spectatorReading === b.spectatorReading
+  );
+}
+
+interface HandCardProps {
+  card: Card;
+  index: number;
+  totalCards: number;
+  isSelected: boolean;
+  isDraggingThis: boolean;
+  isDragTarget: boolean;
+  isDealingAnimation: boolean;
+  onCardClick: (card: Card) => void;
+  onDragStart: (e: React.DragEvent, cardId: string) => void;
+  onDragOver: (e: React.DragEvent, cardId: string) => void;
+  onDragLeave: (cardId: string) => void;
+  onDrop: (e: React.DragEvent, cardId: string) => void;
+  registerEl: (cardId: string, el: HTMLDivElement | null) => void;
+}
+
+/**
+ * One card in the player's hand. Memoized so selecting, hovering, or
+ * timer-ticking one card doesn't re-render the siblings — only the card
+ * whose props changed re-renders.
+ */
+const HandCard = React.memo(function HandCard({
+  card,
+  index,
+  totalCards,
+  isSelected,
+  isDraggingThis,
+  isDragTarget,
+  isDealingAnimation,
+  onCardClick,
+  onDragStart,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+  registerEl,
+}: HandCardProps) {
+  const centerOffset = index - (totalCards - 1) / 2;
+  const rotationDeg = centerOffset * 3.5;
+  const translateY = Math.abs(centerOffset) * 4;
+
+  return (
+    <motion.div
+      ref={(el) => registerEl(card.id, el as HTMLDivElement | null)}
+      className={`hand-card ${isSelected ? 'selected-lift' : ''} ${
+        isDraggingThis ? 'is-being-dragged' : ''
+      } ${isDragTarget ? 'drag-over-target' : ''} interactive`}
+      style={{
+        zIndex: isSelected ? 50 : isDragTarget ? 45 : index + 5,
+        // Promote once so every select/hover/drag frame stays on the
+        // compositor instead of re-rasterizing the SVG per frame.
+        willChange: 'transform, opacity',
+      }}
+      // NOTE: no `layout` prop here by design. `layout` forces a layout
+      // measurement + main-thread position animation on every hand reorder,
+      // which blows the 8.33ms frame budget during sort/deal. Reorder and
+      // select/hover motion below is transform/opacity-only (GPU path).
+      initial={
+        isDealingAnimation
+          ? { y: -200, x: 0, opacity: 0, rotate: 180 }
+          : { opacity: 1, y: 0 }
+      }
+      animate={{
+        opacity: isDraggingThis ? 0.4 : 1,
+        y: isSelected ? -24 : isDragTarget ? -16 : translateY,
+        rotate: isSelected || isDragTarget ? 0 : rotationDeg,
+        scale: isSelected ? 1.08 : isDragTarget ? 1.05 : 1,
+      }}
+      transition={{ type: 'spring', stiffness: 400, damping: 28 }}
+      draggable={true}
+      onDragStart={(e) => onDragStart(e as unknown as React.DragEvent, card.id)}
+      onDragOver={(e) => onDragOver(e as unknown as React.DragEvent, card.id)}
+      onDragLeave={() => onDragLeave(card.id)}
+      onDrop={(e) => onDrop(e as unknown as React.DragEvent, card.id)}
+      onClick={() => onCardClick(card)}
+      whileHover={{ y: isSelected ? -28 : -14, scale: 1.05, zIndex: 60 }}
+    >
+      <img
+        src={getCardImagePath(card.rank, card.suit)}
+        alt={`${card.rank} of ${card.suit}`}
+        className="card-img"
+      />
+      {isSelected && <div className="selected-gold-trim" />}
+      {isDragTarget && <div className="reorder-insert-glow" />}
+    </motion.div>
+  );
+}, areHandCardPropsEqual);
+
+function areHandCardPropsEqual(prev: HandCardProps, next: HandCardProps): boolean {
+  return (
+    prev.card.id === next.card.id &&
+    prev.card.rank === next.card.rank &&
+    prev.card.suit === next.card.suit &&
+    prev.index === next.index &&
+    prev.totalCards === next.totalCards &&
+    prev.isSelected === next.isSelected &&
+    prev.isDraggingThis === next.isDraggingThis &&
+    prev.isDragTarget === next.isDragTarget &&
+    prev.isDealingAnimation === next.isDealingAnimation &&
+    prev.onCardClick === next.onCardClick &&
+    prev.onDragStart === next.onDragStart &&
+    prev.onDragOver === next.onDragOver &&
+    prev.onDragLeave === next.onDragLeave &&
+    prev.onDrop === next.onDrop &&
+    prev.registerEl === next.registerEl
+  );
+}
+
+interface DiscardFanCardProps {
+  card: Card;
+  index: number;
+  totalCards: number;
+  isDrawable: boolean;
+  isSequenceMiddleLocked: boolean;
+  onDraw: (card: Card) => void;
+}
+
+/** One card in the discard fan. Memoized: pile re-renders only touch changed cards. */
+const DiscardFanCard = React.memo(function DiscardFanCard({
+  card,
+  index,
+  totalCards,
+  isDrawable,
+  isSequenceMiddleLocked,
+  onDraw,
+}: DiscardFanCardProps) {
+  const centerOffset = index - (totalCards - 1) / 2;
+  const flatFan = totalCards >= 4;
+  const rotationDeg = centerOffset * (flatFan ? 1 : 3);
+  const translateY = flatFan ? 0 : Math.abs(centerOffset) * 2;
+  const zIndex = index + 1;
+
+  return (
+    <motion.div
+      className={`discard-fan-card ${isDrawable ? 'drawable-eligible' : 'locked-ineligible'}`}
+      style={{
+        zIndex,
+        transformOrigin: 'bottom center',
+        willChange: 'transform, opacity',
+      }}
+      // Settle-in on mount: freshly arrived discards drop a few px and fade
+      // up into their slot instead of popping in underneath the landing
+      // flights. Memoization means only newly mounted cards run this —
+      // survivors of a pile update stay put. (Rotate is omitted from initial
+      // so the fan angle is already correct on the first frame.)
+      initial={{ opacity: 0.4, scale: 0.9, y: translateY - 8 }}
+      animate={{
+        opacity: 1,
+        scale: 1,
+        rotate: rotationDeg,
+        y: translateY,
+      }}
+      transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+      // Transform-only hover: the gold glow lives in CSS (:hover in
+      // TableCanvas.css), which paints once per hover enter/exit. Animating
+      // boxShadow through framer-motion repaints a blurred shadow on EVERY
+      // spring frame — the single most expensive per-frame paint on the table.
+      whileHover={isDrawable ? { y: -8, scale: 1.03, rotate: 0 } : { x: [-1, 1, -1, 0] }}
+      onClick={() => onDraw(card)}
+    >
+      <img
+        src={getCardImagePath(card.rank, card.suit)}
+        alt={`${card.rank} of ${card.suit}`}
+        className="card-img"
+      />
+      {isSequenceMiddleLocked && totalCards < 4 && (
+        <div className="locked-indicator" title="Middle sequence cards cannot be drawn">
+          🔒
+        </div>
+      )}
+    </motion.div>
+  );
+}, areDiscardFanCardPropsEqual);
+
+function areDiscardFanCardPropsEqual(prev: DiscardFanCardProps, next: DiscardFanCardProps): boolean {
+  return (
+    prev.card.id === next.card.id &&
+    prev.card.rank === next.card.rank &&
+    prev.card.suit === next.card.suit &&
+    prev.index === next.index &&
+    prev.totalCards === next.totalCards &&
+    prev.isDrawable === next.isDrawable &&
+    prev.isSequenceMiddleLocked === next.isSequenceMiddleLocked &&
+    prev.onDraw === next.onDraw
+  );
 }
 
 function TableCanvas({
@@ -249,6 +616,7 @@ function TableCanvas({
   yanivCalledAt = null,
   yanivContestTimerSeconds = 5,
   allPlayerHands = {},
+  isRoundOver = false,
   // Current user ID for Yaniv contest UI
   currentUserId = null,
   // Server-driven turn timer / auto-play
@@ -270,7 +638,7 @@ function TableCanvas({
   const [dragOverCardId, setDragOverCardId] = useState<string | null>(null);
   const [isDealingAnimation, setIsDealingAnimation] = useState(false);
   const [showAsafBanner, setShowAsafBanner] = useState(false);
-  const [lastTapTime, setLastTapTime] = useState<Record<string, number>>({});
+  const [, setLastTapTime] = useState<Record<string, number>>({});
   const [turnTimerSeconds, setTurnTimerSeconds] = useState<number>(30);
   const [hasPlayedYanivReadyChime, setHasPlayedYanivReadyChime] = useState(false);
   const [yanivContestTimerRemaining, setYanivContestTimerRemaining] = useState<number>(0);
@@ -327,6 +695,18 @@ function TableCanvas({
     incomingFlight !== null ||
     opponentDiscardFlights.length > 0 ||
     opponentDrawFlights.length > 0;
+  // Mirror refs so stable (empty-deps) callbacks can read the latest values
+  // without re-creating identity every render — which would defeat the
+  // React.memo comparators on HandCard/DiscardFanCard/SingleFlight.
+  const isFlightAnimatingRef = useRef(isFlightAnimating);
+  isFlightAnimatingRef.current = isFlightAnimating;
+  const localSortedHandRef = useRef(localSortedHand);
+  localSortedHandRef.current = localSortedHand;
+  // Prop mirrors for stable empty-deps callbacks (draw handlers, flight
+  // completion). Ref writes during render are safe here: they are only read
+  // inside event/effect callbacks, never during a concurrent render pass.
+  const isPlayerTurnRef = useRef(isPlayerTurn);
+  isPlayerTurnRef.current = isPlayerTurn;
 
   // One shape for all three. Every emote is words, so every emote reads as a
   // banner in the left corner below the opponent cards naming only its
@@ -394,17 +774,65 @@ function TableCanvas({
     });
   }, []);
 
+  // ---- Batched geometry: single read pass, cached across flights ----
+  // getBoundingClientRect forces a sync layout. Flights used to call it once
+  // per card interleaved with React state writes (forced reflow per card).
+  // Instead: all rects for one flight batch are read back-to-back with no
+  // writes between them, and the card size (identical for every endpoint) is
+  // cached for CARD_SIZE_CACHE_TTL_MS and invalidated by ResizeObserver.
+  const cardSizeCacheRef = useRef<{ size: { width: number; height: number }; at: number } | null>(null);
+  const CARD_SIZE_CACHE_TTL_MS = 500;
+
   // The one true card size for flights: a rendered hand card's layout box
   // (offsetWidth/Height — transform-free, so fan rotation and the selected
   // lift never leak in), exact at every breakpoint. Falls back to the
   // desktop card size when no hand card is rendered (or under test).
+  // Cached: every endpoint in a batch shares one size, so N-card discards
+  // measure once, not N times.
   const measuredCardSize = (): { width: number; height: number } => {
+    const cached = cardSizeCacheRef.current;
+    if (cached && Date.now() - cached.at < CARD_SIZE_CACHE_TTL_MS) return cached.size;
     for (const el of handCardEls.current.values()) {
       if (el.offsetWidth > 0 && el.offsetHeight > 0) {
-        return { width: el.offsetWidth, height: el.offsetHeight };
+        const size = { width: el.offsetWidth, height: el.offsetHeight };
+        cardSizeCacheRef.current = { size, at: Date.now() };
+        return size;
       }
     }
-    return FALLBACK_CARD_SIZE;
+    return cached?.size ?? FALLBACK_CARD_SIZE;
+  };
+
+  // Layout breakpoint changes (fan overlap, card clamp()) resize every card:
+  // drop the cached size so the next batch re-measures once. Observes the
+  // table root (covers hand/pile/seat resizes via bubbled layout) rather than
+  // each card — one observer, no per-card lifecycle.
+  useEffect(() => {
+    if (typeof ResizeObserver === 'undefined') return;
+    const invalidate = () => {
+      cardSizeCacheRef.current = null;
+    };
+    const ro = new ResizeObserver(invalidate);
+    if (rootRef.current) ro.observe(rootRef.current);
+    if (handRowRef.current) ro.observe(handRowRef.current);
+    return () => ro.disconnect();
+  }, []);
+
+  // Single-query seat lookup. The old querySelectorAll + forEach visited every
+  // seat's rect; an attribute selector resolves only the actor's seat, so one
+  // flight batch reads exactly the rects it animates (actor + pile/deck).
+  const seatEl = (userId: string): HTMLElement | null => {
+    const root = rootRef.current;
+    if (!root) return null;
+    try {
+      return root.querySelector(`[data-user-id="${CSS.escape(userId)}"]`);
+    } catch {
+      // CSS.escape missing (very old browsers) or bad id: linear fallback.
+      const seats = root.querySelectorAll('[data-user-id]');
+      for (let i = 0; i < seats.length; i++) {
+        if (seats[i].getAttribute('data-user-id') === userId) return seats[i] as HTMLElement;
+      }
+      return null;
+    }
   };
 
   // Opponent flights share one completion path: draws just clear, and the
@@ -480,16 +908,12 @@ function TableCanvas({
     if (discarded.length === 0 && picked.length === 0 && !deckDrawn) return;
 
     const size = measuredCardSize();
-    // Seat anchor, looked up live: an opponent's discards fly from their
-    // seat, their draws fly back to it.
-    const seatBox = (userId: string) => {
-      const seats = rootRef.current?.querySelectorAll('[data-user-id]');
-      let seat: Element | null = null;
-      seats?.forEach((el) => {
-        if (el.getAttribute('data-user-id') === userId) seat = el;
-      });
-      return cardFlightBox(seat as HTMLElement | null, size);
-    };
+    // Seat anchor, looked up live via a single attribute query — always
+    // fresh, with no ref lifecycle to go stale between the commit and the
+    // passive effects that measure them. All rects below (actor, pile, deck)
+    // are read back-to-back with no state writes between them: one layout
+    // pass, not one per endpoint.
+    const seatBox = (userId: string) => cardFlightBox(seatEl(userId), size);
     const actorBox = seatBox(prevTurn);
     if (!actorBox) return;
 
@@ -503,15 +927,18 @@ function TableCanvas({
       // Hold the pile on its previous render; the discards appear as they land.
       const prevDisplay = prev.top.length > 0 ? prev.top : prev.drawable;
       setPileOverride(prevDisplay);
+      // One fan slot per card: the set lands already fanned, each flight
+      // docking where its pile card renders (see fanLandingSlots).
+      const slots = fanLandingSlots(pileBox, size, discarded.length);
       setOpponentDiscardFlights(
         discarded.map((card, i) => ({
           key: `opp-discard-${card.id}-${now}`,
           from: actorBox,
-          to: pileBox,
+          to: slots[i],
           faceUp: true,
           faceImageSrc: getCardImagePath(card.rank, card.suit),
           faceAlt: `${card.rank} of ${card.suit}`,
-          rotation: (i - (discarded.length - 1) / 2) * 8,
+          rotation: slots[i].rotation,
           delay: i * 0.06,
         }))
       );
@@ -550,8 +977,8 @@ function TableCanvas({
   // Preserve user custom card reordering when hand state updates from server.
   // When the push is the result of our own discard-and-draw, the drawn card
   // is withheld and flown in from the pile it came from instead of popping
-  // into the hand: deck draws fly card-back-down, discard pickups fly
-  // face-up (revealed).
+  // into the hand: deck draws fly out card-back-down and turn over mid-travel
+  // (revealFace), discard pickups fly face-up (revealed).
   useEffect(() => {
     const prev = prevHandRef.current;
     prevHandRef.current = hand;
@@ -575,10 +1002,13 @@ function TableCanvas({
       });
       const fromEl =
         pendingDraw.drawSource === 'DECK' ? drawPileRef.current : discardPileRef.current;
+      // Batched read pass: size (cached) + both endpoint rects back-to-back
+      // with no DOM writes between them. setLocalSortedHand above only
+      // schedules a React render — no synchronous layout — so this stays one
+      // forced reflow, not one per endpoint.
       const size = measuredCardSize();
       const from = cardFlightBox(fromEl, size);
-      const handEl = handRowRef.current;
-      const handRect = handEl?.getBoundingClientRect();
+      const handRect = handRowRef.current?.getBoundingClientRect() ?? null;
       const to: FlightPoint =
         handRect && handRect.width > 0
           ? {
@@ -600,8 +1030,12 @@ function TableCanvas({
           from,
           to,
           faceUp,
-          faceImageSrc: faceUp ? getCardImagePath(drawn.rank, drawn.suit) : undefined,
+          // Deck draws carry the face along so the flight can turn over
+          // mid-travel (revealFace) instead of snapping from back to face
+          // when the withheld card joins the hand on landing.
+          faceImageSrc: getCardImagePath(drawn.rank, drawn.suit),
           faceAlt: `${drawn.rank} of ${drawn.suit}`,
+          revealFace: !faceUp,
         });
         soundEngine.playDealerFlick();
       } else {
@@ -637,27 +1071,61 @@ function TableCanvas({
     }
   }, [serverError]);
 
+  // All transient sound/banner timers live here so rapid rounds or an
+  // unmount clears every pending timeout — the old dealing loop fired N
+  // untracked setTimeout sounds that leaked across rounds.
+  const transientTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+  useEffect(() => {
+    const timers = transientTimersRef.current;
+    return () => {
+      timers.forEach(clearTimeout);
+      timers.clear();
+    };
+  }, []);
+
   useEffect(() => {
     if (hand.length > 0) {
       setIsDealingAnimation(true);
       const dealCount = Math.min(hand.length, 5);
       for (let i = 0; i < dealCount; i++) {
-        setTimeout(() => {
+        const t = setTimeout(() => {
+          transientTimersRef.current.delete(t);
           soundEngine.playDealerFlick();
         }, i * 140);
+        transientTimersRef.current.add(t);
       }
       const timer = setTimeout(() => {
+        transientTimersRef.current.delete(timer);
         setIsDealingAnimation(false);
       }, dealCount * 140 + 300);
-      return () => clearTimeout(timer);
+      transientTimersRef.current.add(timer);
+      return () => {
+        transientTimersRef.current.delete(timer);
+        clearTimeout(timer);
+      };
     }
   }, [roundNumber]);
 
   
+  // Waiting-for-Asaf: plays while every player watches the 5s Yaniv reveal
+  // countdown. Stops when the countdown ends and all tables move to the result
+  // screen — the server keeps sending yanivCallerId on ROUND_OVER (it names the
+  // caller there), so the stop signal is the explicit isRoundOver push, not the
+  // caller clearing. Declared before the asaf effect so the countdown track
+  // stops before the asaf track starts on the same reveal commit.
+  useEffect(() => {
+    if (yanivCallerId && !isRoundOver) {
+      playWaitingForAsafSound();
+    } else {
+      stopWaitingForAsafSound();
+    }
+    return () => stopWaitingForAsafSound();
+  }, [yanivCallerId, isRoundOver]);
+
   useEffect(() => {
     if (isAsaf) {
       setShowAsafBanner(true);
-      soundEngine.playAsafCrash();
+      playAsafSound();
       const timer = setTimeout(() => setShowAsafBanner(false), 4500);
       return () => clearTimeout(timer);
     }
@@ -665,21 +1133,36 @@ function TableCanvas({
 
   // The banner covers the whole table and eats clicks. Its timer outlives the round it
   // belongs to, so a quick Next Round leaves it sitting over the new deal, blocking the
-  // first turn. A new round always clears it.
+  // first turn. A new round always clears it. The asaf track is long, so the new round
+  // also stops it — every client learns the round changed from the server broadcast,
+  // which is what stops playback for all players.
   useEffect(() => {
     setShowAsafBanner(false);
+    stopAsafSound();
+    stopWaitingForAsafSound();
   }, [roundNumber]);
+
+  // Never let the long tracks leak past this table (exit, game over unmount).
+  useEffect(() => {
+    return () => {
+      stopAsafSound();
+      stopWaitingForAsafSound();
+    };
+  }, []);
 
   // Turn timer driven by the server's authoritative deadline. The server
   // performs auto-play on expiry - the client only displays and ticks.
+  // Guarded: the 250ms poll only commits state when the displayed second
+  // actually changes, so the whole tree re-renders ~1/sec, not 4/sec.
   useEffect(() => {
     const total = turnTimerTotalSeconds || 45;
     if (!turnEndsAt) {
-      setTurnTimerSeconds(total);
+      setTurnTimerSeconds((prev) => (prev === total ? prev : total));
       return;
     }
     const updateTimer = () => {
-      setTurnTimerSeconds(Math.max(0, Math.ceil((turnEndsAt - Date.now()) / 1000)));
+      const next = Math.max(0, Math.ceil((turnEndsAt - Date.now()) / 1000));
+      setTurnTimerSeconds((prev) => (prev === next ? prev : next));
     };
     updateTimer();
     const interval = setInterval(updateTimer, 250);
@@ -700,7 +1183,9 @@ function TableCanvas({
     }
   }, [isPlayerTurn, currentTurnPlayerId]);
 
-  // Yaniv Contest Timer Effect
+  // Yaniv Contest Timer Effect. Guarded like the turn timer: the 100ms
+  // poll only commits when the displayed second changes, so overlay ticks
+  // don't re-render the table 10x/sec.
   useEffect(() => {
     if (yanivCallerId && yanivCalledAt && yanivContestTimerSeconds > 0) {
       setShowYanivContestOverlay(true);
@@ -709,7 +1194,7 @@ function TableCanvas({
       const updateTimer = () => {
         const now = Date.now();
         const remaining = Math.max(0, Math.ceil((endTime - now) / 1000));
-        setYanivContestTimerRemaining(remaining);
+        setYanivContestTimerRemaining((prev) => (prev === remaining ? prev : remaining));
         
         if (remaining <= 0) {
           setShowYanivContestOverlay(false);
@@ -779,6 +1264,11 @@ function TableCanvas({
   // still flying in — then the previous render, so the new cards appear as
   // their flights land instead of popping in underneath them.
   const renderDiscardCards = pileOverride ?? discardDisplayCards;
+  // Mirrors for stable draw callbacks (declared after the memo above).
+  const discardDisplayRef = useRef(discardDisplayCards);
+  discardDisplayRef.current = discardDisplayCards;
+  const drawableRef = useRef(drawableDiscardCards);
+  drawableRef.current = drawableDiscardCards;
 
   // A new deal invalidates everything in flight: drops, timers and pending
   // sends belong to the previous round's layout. (Push-diff baselines are
@@ -798,62 +1288,71 @@ function TableCanvas({
     handCardEls.current.clear();
   }, [roundNumber]);
 
-  // Card click: Single-tap toggle or double-tap multi-select
-  const handleCardClick = (card: Card) => {
-    if (isFlightAnimating) return;
+  // Card click: Single-tap toggle or double-tap multi-select. Stable identity
+  // so memoized HandCards don't re-render when unrelated state ticks.
+  const handleCardClick = useCallback((card: Card) => {
+    if (isFlightAnimatingRef.current) return;
     const now = Date.now();
-    const lastTap = lastTapTime[card.id] || 0;
-    const isDoubleTap = now - lastTap < 300;
-    setLastTapTime((prev) => ({ ...prev, [card.id]: now }));
+    setLastTapTime((prevTimes) => {
+      const lastTap = prevTimes[card.id] || 0;
+      const isDoubleTap = now - lastTap < 300;
+      if (isDoubleTap) {
+        const matchingRankCards = localSortedHandRef.current.filter((c) => c.rank === card.rank);
+        const matchingIds = matchingRankCards.map((c) => c.id);
+        setSelectedCards((prev) => {
+          const allSelected = matchingIds.every((id) => prev.includes(id));
+          if (allSelected) {
+            return prev.filter((id) => !matchingIds.includes(id));
+          } else {
+            return Array.from(new Set([...prev, ...matchingIds]));
+          }
+        });
+        soundEngine.playMultiSelectTick();
+        hapticLightTick();
+      } else {
+        setSelectedCards((prev) =>
+          prev.includes(card.id) ? prev.filter((id) => id !== card.id) : [...prev, card.id]
+        );
+        soundEngine.playCardSelectTick();
+        hapticLightTick();
+      }
+      return { ...prevTimes, [card.id]: now };
+    });
+  }, []);
 
-    if (isDoubleTap) {
-      const matchingRankCards = localSortedHand.filter((c) => c.rank === card.rank);
-      const matchingIds = matchingRankCards.map((c) => c.id);
-      setSelectedCards((prev) => {
-        const allSelected = matchingIds.every((id) => prev.includes(id));
-        if (allSelected) {
-          return prev.filter((id) => !matchingIds.includes(id));
-        } else {
-          return Array.from(new Set([...prev, ...matchingIds]));
-        }
-      });
-      soundEngine.playMultiSelectTick();
-      hapticLightTick();
-    } else {
-      setSelectedCards((prev) =>
-        prev.includes(card.id) ? prev.filter((id) => id !== card.id) : [...prev, card.id]
-      );
-      soundEngine.playCardSelectTick();
-      hapticLightTick();
-    }
-  };
-
-  // Drag-and-drop handler for hand reordering only (no staging)
-  const handleHandCardDragStart = (e: React.DragEvent, cardId: string) => {
+  // Drag-and-drop handler for hand reordering only (no staging). Stable
+  // identities for the same memo reason; dragOver target is compared via ref
+  // to avoid re-creating the callback every hover change.
+  const dragOverRef = useRef<string | null>(null);
+  const draggedCardIdRef = useRef<string | null>(null);
+  const handleHandCardDragStart = useCallback((e: React.DragEvent, cardId: string) => {
+    draggedCardIdRef.current = cardId;
     setDraggedCardId(cardId);
     e.dataTransfer.setData('handReorderId', cardId);
     e.dataTransfer.effectAllowed = 'move';
     soundEngine.playFeltSlide(0.4);
-  };
+  }, []);
 
-  const handleHandCardDragOver = (e: React.DragEvent, targetCardId: string) => {
+  const handleHandCardDragOver = useCallback((e: React.DragEvent, targetCardId: string) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
-    if (dragOverCardId !== targetCardId) {
+    if (dragOverRef.current !== targetCardId) {
+      dragOverRef.current = targetCardId;
       setDragOverCardId(targetCardId);
     }
-  };
+  }, []);
 
-  const handleHandCardDragLeave = (targetCardId: string) => {
-    if (dragOverCardId === targetCardId) {
+  const handleHandCardDragLeave = useCallback((targetCardId: string) => {
+    if (dragOverRef.current === targetCardId) {
+      dragOverRef.current = null;
       setDragOverCardId(null);
     }
-  };
+  }, []);
 
-  const handleHandCardDrop = (e: React.DragEvent, targetCardId: string) => {
+  const handleHandCardDrop = useCallback((e: React.DragEvent, targetCardId: string) => {
     e.preventDefault();
     e.stopPropagation();
-    const sourceId = e.dataTransfer.getData('handReorderId') || draggedCardId;
+    const sourceId = e.dataTransfer.getData('handReorderId') || draggedCardIdRef.current;
 
     if (sourceId && sourceId !== targetCardId) {
       setLocalSortedHand((prev) => {
@@ -869,9 +1368,16 @@ function TableCanvas({
       hapticLightTick();
     }
 
+    draggedCardIdRef.current = null;
+    dragOverRef.current = null;
     setDraggedCardId(null);
     setDragOverCardId(null);
-  };
+  }, []);
+
+  const registerHandCardEl = useCallback((cardId: string, el: HTMLDivElement | null) => {
+    if (el) handCardEls.current.set(cardId, el);
+    else handCardEls.current.delete(cardId);
+  }, []);
 
   const validateAndDiscard = useCallback((
     drawSource: 'DECK' | 'DISCARD_PILE',
@@ -898,22 +1404,30 @@ function TableCanvas({
     // send (and with it every real state change) waits until they land.
     // Both ends are card-shaped boxes in one measured size, so the flight
     // never stretches or crops the card.
+    // Batched read pass: resolve every source element first, then measure
+    // all rects back-to-back with no writes between them — one forced
+    // reflow for the whole multi-card discard, not one per card.
     const size = measuredCardSize();
-    const target = cardFlightBox(discardPileRef.current, size);
+    const sources = cardsObjects.map((card) => handCardEls.current.get(card.id) ?? handRowRef.current);
+    const pileBox = cardFlightBox(discardPileRef.current, size);
+    // One fan slot per card (not one shared center box): a set lands already
+    // fanned, each flight docking where its pile card is about to render.
+    const slots = pileBox ? fanLandingSlots(pileBox, size, cardsObjects.length) : [];
     const now = Date.now();
     const flights: CardFlightSpec[] = [];
-    cardsObjects.forEach((card, i) => {
-      const el = handCardEls.current.get(card.id);
-      const from = cardFlightBox(el ?? handRowRef.current, size);
-      if (from && target) {
+    sources.forEach((el, i) => {
+      const card = cardsObjects[i];
+      const from = cardFlightBox(el, size);
+      const slot = slots[i];
+      if (from && slot) {
         flights.push({
           key: `discard-${card.id}-${now}`,
           from,
-          to: target,
+          to: slot,
           faceUp: true,
           faceImageSrc: getCardImagePath(card.rank, card.suit),
           faceAlt: `${card.rank} of ${card.suit}`,
-          rotation: (i - (cardsObjects.length - 1) / 2) * 8,
+          rotation: slot.rotation,
           delay: i * 0.06,
         });
       }
@@ -937,15 +1451,21 @@ function TableCanvas({
     setOutgoingFlights(flights);
   }, [selectedCards, localSortedHand, isFlightAnimating]);
 
-  const handleDrawFromDeck = () => {
-    if (!isPlayerTurn) return;
-    validateAndDiscard('DECK');
-  };
+  // Latest validateAndDiscard without re-creating downstream callbacks:
+  // DiscardFanCard's onDraw prop stays stable across selection/timer ticks.
+  const validateAndDiscardRef = useRef(validateAndDiscard);
+  validateAndDiscardRef.current = validateAndDiscard;
 
-  const handleDrawFromDiscard = (targetCard: Card) => {
-    if (!isPlayerTurn) return;
+  const handleDrawFromDeck = useCallback(() => {
+    if (!isPlayerTurnRef.current) return;
+    validateAndDiscardRef.current('DECK');
+  }, []);
 
-    if (discardDisplayCards.length === 0) {
+  const handleDrawFromDiscard = useCallback((targetCard: Card) => {
+    if (!isPlayerTurnRef.current) return;
+
+    const display = discardDisplayRef.current;
+    if (display.length === 0) {
       setStatusFeedback('Discard pile is empty');
       setIsFeedbackError(true);
       soundEngine.playInvalidRejection();
@@ -953,7 +1473,7 @@ function TableCanvas({
       return;
     }
 
-    const isDrawable = drawableDiscardCards.some((dc) => dc.id === targetCard.id);
+    const isDrawable = drawableRef.current.some((dc) => dc.id === targetCard.id);
     if (!isDrawable) {
       setStatusFeedback(
         `Locked: Middle card (${targetCard.rank} of ${targetCard.suit}) cannot be drawn. Only outer ends of a sequence are eligible.`
@@ -964,8 +1484,8 @@ function TableCanvas({
       return;
     }
 
-    validateAndDiscard('DISCARD_PILE', targetCard.id);
-  };
+    validateAndDiscardRef.current('DISCARD_PILE', targetCard.id);
+  }, []);
 
   const handleSortByRank = () => {
     soundEngine.playSortCascade();
@@ -1070,13 +1590,30 @@ function TableCanvas({
     return -1;
   }, [selectedCards, localSortedHand]);
 
-  // Single stable callback for the flight layer: reads the current incoming
-  // flight, so it only changes identity when that flight does.
+  // Single stable callback for the flight layer. Reads the incoming key via
+  // ref so its identity never changes on timer/selection ticks — memoized
+  // SingleFlights skip re-render and framer-motion never restarts mid-flight.
+  // Completion handlers themselves are idempotent (repeat keys are no-ops).
+  const incomingKeyRef = useRef<string | null>(null);
+  incomingKeyRef.current = incomingFlight?.key ?? null;
   const handleAnyFlightComplete = useCallback((key: string) => {
-    if (incomingFlight?.key === key) handleIncomingFlightComplete(key);
+    if (incomingKeyRef.current === key) handleIncomingFlightComplete(key);
     else if (key.startsWith('opp-')) handleOpponentFlightComplete(key);
     else handleOutgoingFlightComplete(key);
-  }, [incomingFlight, handleIncomingFlightComplete, handleOpponentFlightComplete, handleOutgoingFlightComplete]);
+  }, [handleIncomingFlightComplete, handleOpponentFlightComplete, handleOutgoingFlightComplete]);
+
+  // One array identity for the flight overlay: without this, every parent
+  // re-render (timer tick, hover, selection) hands CardFlightLayer a fresh
+  // array and re-renders every in-flight card.
+  const allFlights = useMemo(
+    () => [
+      ...outgoingFlights,
+      ...(incomingFlight ? [incomingFlight] : []),
+      ...opponentDiscardFlights,
+      ...opponentDrawFlights,
+    ],
+    [outgoingFlights, incomingFlight, opponentDiscardFlights, opponentDrawFlights]
+  );
 
   // Note: Keyboard reordering (ArrowLeft/ArrowRight) still works for selected cards
 
@@ -1165,82 +1702,16 @@ function TableCanvas({
 
         {/* 1. All Players Arc (Top Semi-Circle) - includes current player */}
         <div className="opponents-radial-arc">
-          {opponents.map((opponent, idx) => {
-            const isTurn = opponent.isCurrentTurn;
-            const isCurrentPlayer = opponent.isCurrentPlayer;
-            const timerProgress = isTurn ? Math.max(0, turnTimerSeconds / (turnTimerTotalSeconds || 45)) : 1;
-            const isUrgentTimer = isTurn && turnTimerSeconds <= 5;
-            const isDisconnected = opponent.isDisconnected;
-            const isAutoPlayed = autoPlayedPlayerId != null && autoPlayedPlayerId === opponent.userId;
-            // Center the mini card-back stack on the actual count, not a fixed 5-card layout
-            const stackCount = Math.min(opponent.cardCount, 5);
-            const stackCenter = (stackCount - 1) / 2;
-
-            // Display name: "You" for current player, actual name for others
-            const displayName = isCurrentPlayer ? 'You' : opponent.displayName;
-
-            return (
-              <motion.div
-                key={opponent.userId || idx}
-                className={`opponent-seat ${isTurn ? 'active-turn' : ''} ${
-                  opponent.isEliminated ? 'eliminated' : ''
-                } ${isDisconnected ? 'disconnected' : ''} ${isCurrentPlayer ? 'current-player' : ''}`}
-                data-user-id={opponent.userId}
-                initial={{ opacity: 0, y: -20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: idx * 0.1 }}
-              >
-                {/* Turn countdown: gutter + fill bar along the seat's top edge.
-                    Absolute, so it costs zero layout. */}
-                {isTurn && (
-                  <div className="turn-progress-track" aria-hidden="true">
-                    <div
-                      className={`turn-progress-fill ${isUrgentTimer ? 'urgent' : ''}`}
-                      style={{ width: `${Math.max(0, Math.min(100, timerProgress * 100))}%` }}
-                    />
-                  </div>
-                )}
-
-                {/* Identity is one inline row: the initials avatar only repeated
-                    what the name already says, so it was pure height. */}
-                <div className="opponent-identity">
-                  {isTurn && <span className="turn-dot" title="Current turn" />}
-                  <span className="opponent-name">{displayName}</span>
-                  {opponent.isHost && <span className="inline-badge" title="Host">👑</span>}
-                  {isAutoPlayed && (
-                    <span className="inline-badge" title="Turn auto-played by server">🤖</span>
-                  )}
-                  {isDisconnected && (
-                    <span className="inline-badge" title="Disconnected — reconnecting…">⚡</span>
-                  )}
-                </div>
-
-                <div className="opponent-meta">
-                  {opponent.spectatorReading && (
-                    <SpectatorMeters reading={opponent.spectatorReading} />
-                  )}
-                </div>
-
-                <div className="opponent-info-row">
-                  <div className="opponent-score-pill">
-                    <span className="score-val">{opponent.score} pts</span>
-                  </div>
-                  <div className="opponent-card-stack" title={`${opponent.cardCount} cards in hand`}>
-                    {Array.from({ length: stackCount }).map((_, cIdx) => (
-                      <div
-                        key={cIdx}
-                        className="mini-card-back"
-                        style={{
-                          transform: `translateX(${(cIdx - stackCenter) * 4}px) rotate(${(cIdx - stackCenter) * 6}deg)`,
-                        }}
-                      />
-                    ))}
-                    <span className="card-count-badge">{opponent.cardCount}</span>
-                  </div>
-                </div>
-              </motion.div>
-            );
-          })}
+          {opponents.map((opponent, idx) => (
+            <OpponentSeat
+              key={opponent.userId || idx}
+              opponent={opponent}
+              index={idx}
+              turnTimerSeconds={turnTimerSeconds}
+              turnTimerTotalSeconds={turnTimerTotalSeconds || 45}
+              autoPlayed={autoPlayedPlayerId != null && autoPlayedPlayerId === opponent.userId}
+            />
+          ))}
         </div>
 
         {/* 2. Center Play Area - Natural Piles on Felt */}
@@ -1312,50 +1783,18 @@ function TableCanvas({
                       !isDrawable &&
                       idx > 0 &&
                       idx < renderDiscardCards.length - 1;
-
-                    // Tight fan capped at two card widths: overlap does the work,
-                    // so spread flattens out at 4+ cards instead of widening the box.
-                    // Fan spread based on card count (max 5 cards)
                     const totalCards = Math.min(renderDiscardCards.length, 5);
-                    const centerOffset = idx - (totalCards - 1) / 2;
-                    const flatFan = totalCards >= 4;
-                    const rotationDeg = centerOffset * (flatFan ? 1 : 3); // Gentle fan spread
-                    // No downward spread at 4+: edge cards would overhang the box and
-                    // sit the fan visually lower than the draw pile.
-                    const translateY = flatFan ? 0 : Math.abs(centerOffset) * 2;
-                    // Ascending: each card sits above the previous, so the last card
-                    // is fully visible and the first keeps its widened touch strip.
-                    // Center-on-top buried the playable ends under the locked middles.
-                    const zIndex = idx + 1;
 
                     return (
-                      <motion.div
+                      <DiscardFanCard
                         key={card.id || idx}
-                        className={`discard-fan-card ${isDrawable ? 'drawable-eligible' : 'locked-ineligible'}`}
-                        style={{
-                          zIndex,
-                          transformOrigin: 'bottom center',
-                        }}
-                        animate={{
-                          rotate: rotationDeg,
-                          y: translateY,
-                        }}
-                        transition={{ type: 'spring', stiffness: 500, damping: 30 }}
-                        whileHover={isDrawable ? { y: -8, scale: 1.03, rotate: 0, boxShadow: '0 0 20px rgba(212, 175, 55, 0.8), 0 8px 24px rgba(0, 0, 0, 0.6)' } : { x: [-1, 1, -1, 0] }}
-                        onClick={() => handleDrawFromDiscard(card)}
-                      >
-                        <img
-                          src={getCardImagePath(card.rank, card.suit)}
-                          alt={`${card.rank} of ${card.suit}`}
-                          className="card-img"
-                        />
-
-                        {isSequenceMiddleLocked && totalCards < 4 && (
-                          <div className="locked-indicator" title="Middle sequence cards cannot be drawn">
-                            🔒
-                          </div>
-                        )}
-                      </motion.div>
+                        card={card}
+                        index={idx}
+                        totalCards={totalCards}
+                        isDrawable={isDrawable}
+                        isSequenceMiddleLocked={isSequenceMiddleLocked}
+                        onDraw={handleDrawFromDiscard}
+                      />
                     );
                     })}
                 </div>
@@ -1520,76 +1959,36 @@ function TableCanvas({
           <div className="player-hand-container">
             <div ref={handRowRef} className="player-hand-fanned">
               <AnimatePresence>
-                {localSortedHand.map((card, idx) => {
-                  const isSelected = selectedCards.includes(card.id);
-
-                  const totalCards = localSortedHand.length;
-                  const centerOffset = idx - (totalCards - 1) / 2;
-                  const rotationDeg = centerOffset * 3.5;
-                  const translateY = Math.abs(centerOffset) * 4;
-                  const isDraggingThis = draggedCardId === card.id;
-                  const isDragTarget = dragOverCardId === card.id && draggedCardId !== card.id;
-
-                  return (
-                    <motion.div
-                      key={card.id}
-                      ref={(el) => {
-                        if (el) handCardEls.current.set(card.id, el as HTMLDivElement);
-                        else handCardEls.current.delete(card.id);
-                      }}
-                      className={`hand-card ${isSelected ? 'selected-lift' : ''} ${
-                        isDraggingThis ? 'is-being-dragged' : ''
-                      } ${isDragTarget ? 'drag-over-target' : ''} interactive`}
-                      style={{
-                        zIndex: isSelected ? 50 : isDragTarget ? 45 : idx + 5,
-                      }}
-                      layout
-                      initial={
-                        isDealingAnimation
-                          ? { y: -200, x: 0, opacity: 0, rotate: 180 }
-                          : { opacity: 1, y: 0 }
-                      }
-                      animate={{
-                        opacity: isDraggingThis ? 0.4 : 1,
-                        y: isSelected ? -24 : isDragTarget ? -16 : translateY,
-                        rotate: isSelected || isDragTarget ? 0 : rotationDeg,
-                        scale: isSelected ? 1.08 : isDragTarget ? 1.05 : 1,
-                      }}
-                      transition={{ type: 'spring', stiffness: 400, damping: 28 }}
-                      draggable={true}
-                      onDragStart={(e) => handleHandCardDragStart(e as any, card.id)}
-                      onDragOver={(e) => handleHandCardDragOver(e as any, card.id)}
-                      onDragLeave={() => handleHandCardDragLeave(card.id)}
-                      onDrop={(e) => handleHandCardDrop(e as any, card.id)}
-                      onClick={() => handleCardClick(card)}
-                      whileHover={{ y: isSelected ? -28 : -14, scale: 1.05, zIndex: 60 }}
-                    >
-                      <img
-                        src={getCardImagePath(card.rank, card.suit)}
-                        alt={`${card.rank} of ${card.suit}`}
-                        className="card-img"
-                      />
-                      {isSelected && <div className="selected-gold-trim" />}
-                      {isDragTarget && <div className="reorder-insert-glow" />}
-                    </motion.div>
-                  );
-                })}
+                {localSortedHand.map((card, idx) => (
+                  <HandCard
+                    key={card.id}
+                    card={card}
+                    index={idx}
+                    totalCards={localSortedHand.length}
+                    isSelected={selectedCards.includes(card.id)}
+                    isDraggingThis={draggedCardId === card.id}
+                    isDragTarget={dragOverCardId === card.id && draggedCardId !== card.id}
+                    isDealingAnimation={isDealingAnimation}
+                    onCardClick={handleCardClick}
+                    onDragStart={handleHandCardDragStart}
+                    onDragOver={handleHandCardDragOver}
+                    onDragLeave={handleHandCardDragLeave}
+                    onDrop={handleHandCardDrop}
+                    registerEl={registerHandCardEl}
+                  />
+                ))}
               </AnimatePresence>
             </div>
           </div>
         </div>
       </div>
       {/* Card flights paint above everything in a fixed overlay: discards fly
-          hand → discard pile, deck draws fly card-back-down pile → hand, and
+          hand → discard pile, deck draws fly out card-back-down and turn over
+          mid-travel pile → hand, and
           discard pickups fly face-up (revealed) pile → hand. Opponent turns
           fly the same paths from every seat, driven by server-push diffs. */}
       <CardFlightLayer
-        flights={[
-          ...outgoingFlights,
-          ...(incomingFlight ? [incomingFlight] : []),
-          ...opponentDiscardFlights,
-          ...opponentDrawFlights,
-        ]}
+        flights={allFlights}
         onFlightComplete={handleAnyFlightComplete}
       />
     </div>

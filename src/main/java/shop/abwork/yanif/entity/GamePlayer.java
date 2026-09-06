@@ -7,7 +7,13 @@ import jakarta.persistence.*;
  * Uses composite primary key (gameId, userId).
  */
 @Entity
-@Table(name = "game_players")
+@Table(name = "game_players", indexes = {
+        // Hot paths: findByGameId runs on EVERY broadcast (loadRoomView);
+        // findByUserId runs on every reconnect (findActiveGameRoomForUser).
+        // The composite PK alone cannot serve either single-column lookup.
+        @Index(name = "idx_game_players_game", columnList = "gameId"),
+        @Index(name = "idx_game_players_user", columnList = "userId")
+})
 public class GamePlayer {
 
     @EmbeddedId

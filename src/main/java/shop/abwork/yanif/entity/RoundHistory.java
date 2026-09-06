@@ -9,7 +9,10 @@ import java.time.ZoneOffset;
  * Stores round-specific scoring, Yaniv calls, and Asaf situations.
  */
 @Entity
-@Table(name = "round_histories")
+@Table(name = "round_histories", indexes = {
+        // Serves findByGameIdOrderByRoundNumber (history fetch per game view).
+        @Index(name = "idx_round_histories_game", columnList = "gameId")
+})
 public class RoundHistory {
 
     @Id

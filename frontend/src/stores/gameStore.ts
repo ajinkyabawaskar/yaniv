@@ -206,3 +206,36 @@ if (typeof window !== 'undefined') {
   (window as any).__USE_GAME_STORE__ = useGameStore;
 }
 
+// ---- Granular selectors: subscribe to one slice, not the whole table ----
+// `useGameStore()` without a selector re-renders on EVERY setGame — including
+// the per-second turn-timer tick — which re-renders the entire TableCanvas
+// tree. Prefer these selectors so each component only wakes for the slices
+// it actually renders. All return stable references for unchanged slices
+// (Zustand bails out on Object.is), so timer ticks don't touch hand/pile
+// subscribers and hand updates don't touch timer subscribers.
+export const selectPlayerHand = (s: GameState) => s.playerHand;
+export const selectTopDiscardCards = (s: GameState) => s.topDiscardCards;
+export const selectDrawableDiscardCards = (s: GameState) => s.drawableDiscardCards;
+export const selectDeckCount = (s: GameState) => s.deckCount;
+export const selectCurrentTurnPlayerId = (s: GameState) => s.currentTurnPlayerId;
+export const selectRoundNumber = (s: GameState) => s.roundNumber;
+export const selectScores = (s: GameState) => s.scores;
+export const selectPlayerNames = (s: GameState) => s.playerNames;
+export const selectOpponentCounts = (s: GameState) => s.opponentCounts;
+export const selectTurnEndsAt = (s: GameState) => s.turnEndsAt;
+export const selectTurnTimerSeconds = (s: GameState) => s.turnTimerSeconds;
+export const selectYanivContest = (s: GameState) => ({
+  yanivCallerId: s.yanivCallerId,
+  yanivCallerName: s.yanivCallerName,
+  yanivCalledAt: s.yanivCalledAt,
+  yanivContestTimerSeconds: s.yanivContestTimerSeconds,
+});
+export const selectRoundOver = (s: GameState) => ({
+  isRoundOver: s.isRoundOver,
+  isGameOver: s.isGameOver,
+  roundWinner: s.roundWinner,
+  roundWinners: s.roundWinners,
+  isAsaf: s.isAsaf,
+  asafByUserId: s.asafByUserId,
+});
+

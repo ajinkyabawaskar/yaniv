@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import SockJS from 'sockjs-client';
 import { Client, Message, StompSubscription } from '@stomp/stompjs';
 import { useAuthStore } from '../stores/authStore';
@@ -42,8 +42,11 @@ const getWsUrl = (): string => {
 };
 
 export function StompProvider({ children }: { children: React.ReactNode }) {
-  const { jwtToken, user } = useAuthStore();
-  const userId = user?.userId;
+  // Granular selectors: the provider must NOT wake when unrelated auth slices
+  // (e.g. displayName edits) change — every wake rebuilds the context value
+  // and re-renders all useStomp() consumers mid-animation.
+  const jwtToken = useAuthStore((s) => s.jwtToken);
+  const userId = useAuthStore((s) => s.user?.userId);
   const [isConnected, setIsConnected] = useState(false);
   const pageHideHandlerRef = useRef<(() => void) | null>(null);
   const pageShowHandlerRef = useRef<(() => void) | null>(null);
@@ -181,7 +184,10 @@ export function StompProvider({ children }: { children: React.ReactNode }) {
     };
   }, [jwtToken, userId]);
 
-  const send = (destination: string, body: any) => {
+  // Stable callbacks + memoized value: without these, EVERY isConnected
+  // toggle (or any parent render) hands a fresh object to the Provider and
+  // re-renders GameView/TableCanvas even when nothing game-related changed.
+  const send = useCallback((destination: string, body: any) => {
     console.log('STOMP send:', destination, body);
     if (clientRef.current && clientRef.current.connected) {
       clientRef.current.publish({
@@ -196,9 +202,9 @@ export function StompProvider({ children }: { children: React.ReactNode }) {
       console.log('Client connected:', clientRef.current?.connected);
       console.log('Client exists:', !!clientRef.current);
     }
-  };
+  }, []);
 
-  const subscribe = (destination: string, callback: (message: Message) => void) => {
+  const subscribe = useCallback((destination: string, callback: (message: Message) => void) => {
     console.log('STOMP subscribe:', destination);
     if (!clientRef.current || !clientRef.current.connected) {
       console.error('Cannot subscribe: WebSocket not connected');
@@ -211,23 +217,24 @@ export function StompProvider({ children }: { children: React.ReactNode }) {
     subscriptionsRef.current.set(destination, subscription);
     console.log('STOMP subscription created for:', destination);
     return subscription;
-  };
+  }, []);
 
   // Expose a method to flush pending messages
-  const flushPending = () => {
+  const flushPending = useCallback(() => {
     if (clientRef.current && clientRef.current.connected) {
       pendingMessagesRef.current.splice(0).forEach(({ destination, body }) => {
         clientRef.current!.publish({ destination, body: JSON.stringify(body) });
         console.log('Flushed pending message:', destination);
       });
     }
-  };
+  }, []);
 
-  return (
-    <StompContext.Provider value={{ isConnected, client: clientRef.current, send, subscribe, flushPending }}>
-      {children}
-    </StompContext.Provider>
+  const value = useMemo(
+    () => ({ isConnected, client: clientRef.current, send, subscribe, flushPending }),
+    [isConnected, send, subscribe, flushPending],
   );
+
+  return <StompContext.Provider value={value}>{children}</StompContext.Provider>;
 }
 
 export function useStomp() {

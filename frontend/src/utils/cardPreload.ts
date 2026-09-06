@@ -31,16 +31,14 @@ export function getAllCardPaths(): string[] {
  */
 export function preloadAllCards(): Promise<void> {
   const paths = getAllCardPaths();
-  console.log(`[CardPreload] Preloading ${paths.length} card SVGs via Image()`);
 
   // Use Image() constructor for preloading - more reliable than link[rel=preload]
-  const promises = paths.map((path, index) => {
+  // NOTE: no per-card logging here — 52 console writes on the main thread
+  // during mount stole frame budget from the first deal animation.
+  const promises = paths.map((path) => {
     return new Promise<void>((resolve) => {
       const img = new Image();
       img.onload = () => {
-        if (index < 5 || index >= paths.length - 5) {
-          console.log(`[CardPreload] Loaded: ${path}`);
-        }
         resolve();
       };
       img.onerror = () => {
@@ -51,9 +49,7 @@ export function preloadAllCards(): Promise<void> {
     });
   });
 
-  return Promise.all(promises).then(() => {
-    console.log('[CardPreload] All card SVGs preloaded successfully');
-  });
+  return Promise.all(promises).then(() => {});
 }
 
 /**
@@ -62,7 +58,6 @@ export function preloadAllCards(): Promise<void> {
  */
 export function preloadCardsViaLink(): void {
   const paths = getAllCardPaths();
-  console.log(`[CardPreload] Adding ${paths.length} preload links to document.head`);
 
   paths.forEach((path) => {
     // Check if already preloaded
@@ -106,25 +101,35 @@ export function useCardPreload() {
   const preload = useCallback(async () => {
     if (isPreloaded || isPreloading) return;
 
-    console.log('[CardPreload] Hook: Starting preload');
     setIsPreloading(true);
     setProgress(0);
 
     const paths = getAllCardPaths();
     const total = paths.length;
     let loaded = 0;
+    let lastReported = 0;
+
+    // Progress is coarsened to 10% steps: the old code called setProgress
+    // (=> a React render) on EVERY one of the 52 onloads, re-rendering the
+    // mount tree 52x during the most jank-sensitive moment of app start.
+    const bump = () => {
+      loaded++;
+      const pct = Math.round((loaded / total) * 100);
+      if (pct - lastReported >= 10 || loaded === total) {
+        lastReported = pct;
+        setProgress(pct);
+      }
+    };
 
     await Promise.all(paths.map((path) => {
       return new Promise<void>((resolve) => {
         const img = new Image();
         img.onload = () => {
-          loaded++;
-          setProgress(Math.round((loaded / total) * 100));
+          bump();
           resolve();
         };
         img.onerror = () => {
-          loaded++;
-          setProgress(Math.round((loaded / total) * 100));
+          bump();
           resolve();
         };
         img.src = path;
@@ -134,7 +139,6 @@ export function useCardPreload() {
     setIsPreloading(false);
     setIsPreloaded(true);
     setProgress(100);
-    console.log('[CardPreload] Hook: Preload complete');
   }, [isPreloaded, isPreloading]);
 
   return { preload, isPreloading, isPreloaded, progress };

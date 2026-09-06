@@ -10,6 +10,15 @@ import TableCanvas from './TableCanvas';
 
 (global as any).IS_REACT_ACT_ENVIRONMENT = true;
 
+// jsdom has no real audio (play/pause log "Not implemented" noise), so stub the
+// file-based sound helpers TableCanvas drives during the contest window.
+jest.mock('../utils/sound', () => ({
+  playAsafSound: jest.fn(),
+  stopAsafSound: jest.fn(),
+  playWaitingForAsafSound: jest.fn(),
+  stopWaitingForAsafSound: jest.fn(),
+}));
+
 beforeAll(() => {
   window.matchMedia =
     window.matchMedia ||

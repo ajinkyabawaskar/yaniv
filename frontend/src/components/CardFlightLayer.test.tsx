@@ -9,7 +9,8 @@
  */
 import React, { act } from 'react';
 import { createRoot, Root } from 'react-dom/client';
-import TableCanvas from './TableCanvas';
+import TableCanvas, { fanLandingSlots } from './TableCanvas';
+import CardFlightLayer from './CardFlightLayer';
 import { travelTiltFor } from './CardFlightLayer';
 
 (global as any).IS_REACT_ACT_ENVIRONMENT = true;
@@ -114,8 +115,74 @@ test('discard flies hand → discard pile and defers the server send until landi
   expect(onDiscard).not.toHaveBeenCalled();
 });
 
-test('travel tilt is deterministic per flight and stays within ±5° of landing rotation', () => {
-  for (const key of ['discard-c1-123', 'opp-draw-u1-456', 'draw-x-0']) {
+test('deck-draw reveal flight turns over mid-travel instead of snapping on landing', () => {
+  mockMatchMedia(false);
+  const onFlightComplete = jest.fn();
+  const box = { x: 100, y: 200, width: 88, height: 124 };
+  act(() => {
+    root.render(
+      <CardFlightLayer
+        flights={[
+          {
+            key: 'draw-c9-123',
+            from: box,
+            to: { x: 300, y: 500, width: 88, height: 124 },
+            faceUp: false,
+            faceImageSrc: '/cards/5_of_hearts.svg',
+            faceAlt: 'FIVE of HEARTS',
+            revealFace: true,
+          },
+        ]}
+        onFlightComplete={onFlightComplete}
+      />
+    );
+  });
+
+  // Starts as a reveal (not a plain back): both faces ride along so the
+  // crossfade at the edge-on point has something to show.
+  const flight = document.body.querySelector('[data-testid="card-flight"]') as HTMLElement | null;
+  expect(flight).not.toBeNull();
+  expect(flight?.getAttribute('data-face')).toBe('reveal');
+  expect(flight?.querySelector('.card-flip-inner')).not.toBeNull();
+  expect(flight?.querySelector('.card-flight-back')).not.toBeNull();
+  expect(flight?.querySelector('img[alt="FIVE of HEARTS"]')).not.toBeNull();
+  // The state handoff still waits for the landing, not the flip.
+  expect(onFlightComplete).not.toHaveBeenCalled();
+});
+
+test('discard sets land fanned on the pile: one slot per card, centered, fan-matched rotation', () => {
+  const pileBox = { x: 100, y: 200, width: 176, height: 124 };
+  const size = { width: 88, height: 124 };
+
+  // Single discard: dead center, no tilt — same as before.
+  const single = fanLandingSlots(pileBox, size, 1);
+  expect(single).toHaveLength(1);
+  expect(single[0].x).toBe(100 + 176 / 2 - 88 / 2);
+  expect(single[0].rotation).toBe(0);
+
+  // Three discards: spread around the pile center with the fan's own
+  // 3°-per-offset rotation, so each flight docks where its pile card renders.
+  const three = fanLandingSlots(pileBox, size, 3);
+  expect(three).toHaveLength(3);
+  const centerX = 100 + 176 / 2;
+  expect(three[0].x + 44).toBeLessThan(three[1].x + 44);
+  expect(three[1].x + 44).toBeLessThan(three[2].x + 44);
+  // Symmetric about the pile center…
+  expect(three[0].x + three[2].x).toBeCloseTo(2 * (centerX - 44), 5);
+  expect(three[1].x).toBeCloseTo(centerX - 44, 5);
+  // …with matching fan tilt (-3°, 0, 3°).
+  expect(three.map((s) => s.rotation)).toEqual([-3, 0, 3]);
+
+  // Five discards: near-flat fan (1° per offset), all card-sized.
+  const five = fanLandingSlots(pileBox, size, 5);
+  expect(five.map((s) => s.rotation)).toEqual([-2, -1, 0, 1, 2]);
+  for (const slot of five) {
+    expect(slot.width).toBe(88);
+    expect(slot.height).toBe(124);
+  }
+});
+
+test('travel tilt is deterministic per flight and stays within ±5° of landing rotation', () => {  for (const key of ['discard-c1-123', 'opp-draw-u1-456', 'draw-x-0']) {
     const first = travelTiltFor(key, 8);
     expect(travelTiltFor(key, 8)).toBe(first);
     expect(first).toBeGreaterThanOrEqual(3);

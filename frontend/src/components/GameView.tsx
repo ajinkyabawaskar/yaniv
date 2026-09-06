@@ -1,10 +1,10 @@
-import React, { useEffect, useState, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useState, useMemo, useRef } from 'react';
 import { useStomp } from '../contexts/StompContext';
 import { useGameStore, ReactionEvent } from '../stores/gameStore';
 import { gameApi } from '../utils/api';
 import TableCanvas, { OpponentInfo, TableCanvasHandle, getCardImagePath } from './TableCanvas';
 import ScoreboardView from './ScoreboardView';
-import { playTurnChangeSound, playYourTurnSound, isSoundEnabled, setSoundEnabled, setupAudioUnlock } from '../utils/sound';
+import { playTurnChangeSound, playYourTurnSound, isSoundEnabled, setSoundEnabled, setupAudioUnlock, preloadAsafSound, stopAsafSound, preloadWaitingForAsafSound, playAllCardsDiscardedSound, preloadAllCardsDiscardedSound, playAcePickedSound, preloadAcePickedSound } from '../utils/sound';
 import { setupBgMusicUnlock, preloadBgMusic } from '../utils/backgroundMusic';
 import { SCORE_LIMITS, DEFAULT_SCORE_LIMIT, canChooseScoreLimit } from '../utils/scoreLimits';
 import './GameView.css';
@@ -45,7 +45,13 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
   const [yanivContestTimerRemaining, setYanivContestTimerRemaining] = useState<number>(0);
   const [autoPlayNotice, setAutoPlayNotice] = useState<string | null>(null);
 
-  const currentUserId = localStorage.getItem('userId') || '';
+  // Read once: localStorage is synchronous I/O, and the old code paid it on
+  // EVERY render plus once per outbound action. The id never changes mid-game.
+  const currentUserIdRef = useRef<string | null>(null);
+  if (currentUserIdRef.current === null) {
+    currentUserIdRef.current = localStorage.getItem('userId') || '';
+  }
+  const currentUserId = currentUserIdRef.current;
   const [soundEnabled, setSoundEnabledState] = useState(() => isSoundEnabled());
   const prevTurnRef = useRef<string | null>(null);
   const hasStartedRef = useRef(false);
@@ -55,6 +61,10 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
     setupAudioUnlock();
     setupBgMusicUnlock();
     preloadBgMusic();
+    preloadAsafSound();
+    preloadWaitingForAsafSound();
+    preloadAllCardsDiscardedSound();
+    preloadAcePickedSound();
     const handler = (e: Event) => setSoundEnabledState((e as CustomEvent).detail);
     window.addEventListener('yanif:sound-toggled', handler as EventListener);
     return () => {
@@ -230,6 +240,18 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
             setTimeout(() => setAutoPlayNotice(null), 4000);
           }
 
+          // Transient per-broadcast flag: the server sets it only on the push that
+          // follows a whole-hand discard, so every table plays it exactly once.
+          if (gameData.allCardsDiscardedByUserId) {
+            playAllCardsDiscardedSound();
+          }
+
+          // Same one-shot shape: set only on the push after an ace is drawn from
+          // the discard pile. Deck draws never set it — that card stays hidden.
+          if (gameData.acePickedByUserId) {
+            playAcePickedSound();
+          }
+
           const userId = localStorage.getItem('userId');
           // Expose for e2e tests (Playwright asserts on these handles)
           (window as any).__GAME_STATE__ = gameData;
@@ -270,8 +292,7 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
           players: gameData.players || [],
           maxPlayers: gameData.maxPlayers || 6,
         });
-        const userId = localStorage.getItem('userId');
-        setIsHost(gameData.hostUserId === userId);
+        setIsHost(gameData.hostUserId === currentUserIdRef.current);
         setGameStarted(gameData.status !== 'LOBBY');
       })
       .catch((err) => console.error('Failed to load game table:', err))
@@ -290,13 +311,17 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
     }
   }, [isConnected, gameId, send, flushPending]);
 
-  const handleSetScoreLimit = (limit: number) => {
+  // Stable callbacks: TableCanvas children are memoized with referential
+  // comparators (areHandCardPropsEqual / areDiscardFanCardPropsEqual), which
+  // only skip re-renders when handler identities are stable. Plain closures
+  // here defeated every one of those memos on each GameView render.
+  const handleSetScoreLimit = useCallback((limit: number) => {
     if (limit === gameState.targetScore) return;
     setStartMessage(null);
     send('/app/room/' + gameId + '/target-score', { targetScore: limit });
-  };
+  }, [gameState.targetScore, gameId, send]);
 
-  const handleStartGame = () => {
+  const handleStartGame = useCallback(() => {
     if (!isConnected) {
       setStartMessage('Connecting to game server... please wait');
       return;
@@ -307,55 +332,55 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
     }
     setStartMessage(null);
     send('/app/room/' + gameId + '/start', {});
-  };
+  }, [isConnected, isHost, gameId, send]);
 
-  const handleNextRound = () => {
+  const handleNextRound = useCallback(() => {
+    // Cut the long asaf track immediately for the player who advances; the
+    // resulting round-change broadcast stops it on every other table too.
+    stopAsafSound();
     send('/app/room/' + gameId + '/next-round', {});
     setShowRoundOver(false);
-  };
+  }, [gameId, send]);
 
-  const handleDiscard = (cardIds: string[], drawSource: string, drawnCardId?: string) => {
-    const userId = localStorage.getItem('userId');
+  const handleDiscard = useCallback((cardIds: string[], drawSource: string, drawnCardId?: string) => {
     send('/app/room/' + gameId + '/action', {
       actionType: 'DISCARD_AND_DRAW',
-      playerId: userId,
+      playerId: currentUserIdRef.current,
       discardedCardIds: cardIds,
       drawSource,
       drawnCardId,
       actionId: newActionId(),
     });
-  };
+  }, [gameId, send]);
 
-  const handleBonusDiscard = (shouldDiscard: boolean) => {
-    const userId = localStorage.getItem('userId');
+  const handleBonusDiscard = useCallback((shouldDiscard: boolean) => {
     send('/app/room/' + gameId + '/action', {
       actionType: 'BONUS_DISCARD',
-      playerId: userId,
+      playerId: currentUserIdRef.current,
       bonusDiscard: shouldDiscard,
       actionId: newActionId(),
     });
-  };
+  }, [gameId, send]);
 
   /**
    * Fire an emote at a seat. Nothing is drawn locally in response -- the animation runs
    * when the broadcast comes back, so the sender sees exactly what the room sees, and a
    * dropped frame shows nothing rather than showing it to one player only.
    */
-  const handleSendReaction = (type: 'LOVE' | 'RAGE' | 'TAUNT' | 'MOCK' | 'SHOCK' | 'FLEX', targetUserId: string) => {
+  const handleSendReaction = useCallback((type: 'LOVE' | 'RAGE' | 'TAUNT' | 'MOCK' | 'SHOCK' | 'FLEX', targetUserId: string) => {
     // Deliberately not queued while offline the way actions are. send() holds a frame
     // back until the socket returns, which is right for a turn -- it still has to land --
     // and wrong for an emote, which would arrive as a taunt fired at a round that has
     // long since moved on. An emote missed is an emote gone.
     if (!isConnected) return;
     send('/app/room/' + gameId + '/reaction', { type, targetUserId });
-  };
+  }, [isConnected, gameId, send]);
 
-  const handleCallYaniv = () => {
-    const userId = localStorage.getItem('userId');
+  const handleCallYaniv = useCallback(() => {
     send('/app/room/' + gameId + '/call-yaniv', {
-      playerId: userId,
+      playerId: currentUserIdRef.current,
     });
-  };
+  }, [gameId, send]);
 
   // Compute all players for TableCanvas radial layout (including current player)
   const allPlayersList: OpponentInfo[] = useMemo(() => {
@@ -540,6 +565,7 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
               yanivCalledAt={gameState.yanivCalledAt}
               yanivContestTimerSeconds={gameState.yanivContestTimerSeconds}
               allPlayerHands={gameState.allPlayerHands}
+              isRoundOver={gameState.isRoundOver}
               serverError={serverError}
               currentUserId={currentUserId}
               turnEndsAt={gameState.turnEndsAt}

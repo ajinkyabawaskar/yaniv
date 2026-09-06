@@ -51,18 +51,28 @@ class SoundEngine {
     window.addEventListener('keydown', unlock, { passive: true });
   }
 
+  // Cached 1s white-noise buffer. Generated lazily once and reused by every
+  // felt-slide / dealer-flick / staging-drop: the old code allocated a fresh
+  // AudioBuffer plus a Math.random fill PER PLAY, churning the GC mid-animation.
+  // Callers needing a shorter noise just stop the source early. Same bytes out.
+  private cachedNoiseBuffer: AudioBuffer | null = null;
+
   /**
    * Helper: Generate a White Noise AudioBuffer
    */
   private createNoiseBuffer(durationSeconds: number = 0.5): AudioBuffer | null {
     const ctx = this.getContext();
     if (!ctx) return null;
-    const bufferSize = Math.floor(ctx.sampleRate * durationSeconds);
+    if (this.cachedNoiseBuffer && this.cachedNoiseBuffer.sampleRate === ctx.sampleRate) {
+      return this.cachedNoiseBuffer;
+    }
+    const bufferSize = Math.floor(ctx.sampleRate * Math.max(durationSeconds, 1));
     const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
     const data = buffer.getChannelData(0);
     for (let i = 0; i < bufferSize; i++) {
       data[i] = Math.random() * 2 - 1;
     }
+    this.cachedNoiseBuffer = buffer;
     return buffer;
   }
 

@@ -69,7 +69,7 @@ public class SecurityConfig {
                 .requestMatchers("/actuator", "/actuator/**").permitAll()
                 // Static resources and SPA routes (React Router handles client-side routing)
                 .requestMatchers("/", "/index.html", "/static/**", "/cards/**", "/asset-manifest.json", "/manifest.json", "/favicon.ico", "/favicon.svg",
-                        "/background.mp3", "/*.mp3", "/sounds/**",
+                        "/background.mp3", "/asaf.mp3", "/waiting-for-asaf.mp3", "/all-cards-discarded.mp3", "/ace-picked.mp3", "/*.mp3", "/sounds/**",
                         "/home", "/join/**", "/rules").permitAll()
                 // Everything else requires authentication
                 .anyRequest().authenticated()

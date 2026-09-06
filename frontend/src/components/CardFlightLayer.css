@@ -35,6 +35,27 @@
   pointer-events: none;
 }
 
+/* Deck-draw reveal: the flying card turns over mid-travel via an edge-on
+   scaleX squeeze with the back/face crossfading at the narrow point. Both
+   faces are absolutely stacked (composite-only: transform + opacity), so the
+   flip costs no layout or paint work. */
+.card-flip-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.card-flip-face {
+  position: absolute;
+  inset: 0;
+}
+
+.card-flip-face .card-img,
+.card-flip-face .card-flight-back {
+  width: 100%;
+  height: 100%;
+}
+
 /* Card back reuses the deck's felt-and-gold language (TableCanvas.css). */
 .card-flight-back {
   width: 100%;

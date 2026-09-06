@@ -1,6 +1,6 @@
 {
   "name": "yanif-client",
-  "version": "2.0.5",
+  "version": "2.0.11",
   "description": "React frontend for Yanif card game platform",
   "private": true,
   "scripts": {

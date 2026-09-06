@@ -10,7 +10,11 @@ import java.util.UUID;
  */
 @Entity
 @Table(name = "games", indexes = {
-        @Index(name = "idx_room_code", columnList = "room_code")
+        @Index(name = "idx_room_code", columnList = "room_code"),
+        // Live paths: findByStatusIn (reconnect scan), findByStatusOrderByCreatedAtDesc
+        // (open lobbies) filtered by created_at — all three scanned without these.
+        @Index(name = "idx_games_status", columnList = "status"),
+        @Index(name = "idx_games_status_created", columnList = "status, created_at")
 })
 public class Game {
 

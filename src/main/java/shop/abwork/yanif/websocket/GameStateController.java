@@ -106,6 +106,10 @@ public class GameStateController {
 
     // Scheduled executor for Yaniv contest timers and turn timers
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2);
+    // Snapshot persistence has its OWN thread: a slow Redis must never
+    // head-of-line-block turn/contest deadlines sharing the pool above.
+    // Same best-effort semantics — only the thread it runs on changes.
+    private final ExecutorService persistExecutor = Executors.newSingleThreadExecutor();
     private final Map<String, ScheduledFuture<?>> yanivTimers = new ConcurrentHashMap<>();
 
     // Turn timers: auto-play for the current player when their timer expires
@@ -136,6 +140,10 @@ public class GameStateController {
     // Action deduplication: track processed action IDs per player per room
     // Format: roomId:playerId:actionId -> timestamp
     private final Map<String, Long> processedActions = new ConcurrentHashMap<>();
+    // The 5-minute sweep below used to scan the WHOLE map on every deduped
+    // action (O(M) on the hot path). It now runs at most once per 100 actions;
+    // entries only expire, so a deferred sweep changes nothing observable.
+    private final java.util.concurrent.atomic.AtomicLong dedupSweepCounter = new java.util.concurrent.atomic.AtomicLong();
 
     // Track disconnected players who are still in game (for reconnection)
     // roomId -> Set of disconnected userIds
@@ -277,9 +285,12 @@ public class GameStateController {
                     }
                     return;
                 }
-                // Clean up old entries (older than 5 minutes)
-                long cutoff = System.currentTimeMillis() - 5 * 60 * 1000;
-                processedActions.entrySet().removeIf(e -> e.getValue() < cutoff);
+                // Clean up old entries (older than 5 minutes), throttled off
+                // the hot path: at most one O(M) sweep per 100 deduped actions.
+                if (dedupSweepCounter.incrementAndGet() % 100 == 0) {
+                    long cutoff = System.currentTimeMillis() - 5 * 60 * 1000;
+                    processedActions.entrySet().removeIf(e -> e.getValue() < cutoff);
+                }
             }
 
             // Get or restore game engine (never silently re-deal a lost game)
@@ -300,6 +311,8 @@ public class GameStateController {
                 }
 
                 // Process action
+                String allCardsDiscardedByUserId = null;
+                String acePickedByUserId = null;
                 switch (action.actionType) {
                     case "DISCARD_AND_DRAW" -> {
                         Hand playerHand = engine.getPlayerHand(userId);
@@ -307,6 +320,7 @@ public class GameStateController {
                             sendErrorToUser(roomId, userId, "Player hand not found");
                             return;
                         }
+                        int handSizeBeforeDiscard = playerHand.size();
 
                         List<Card> discardedCards = action.discardedCardIds.stream()
                                 .map(id -> playerHand.getCardById(id).orElse(null))
@@ -323,11 +337,18 @@ public class GameStateController {
                         Card drawnCard;
                         if ("DECK".equalsIgnoreCase(action.drawSource)) {
                             drawnCard = null;
+                            // A deck draw is hidden information: the card is nobody's
+                            // business but the drawer's, so it never raises the flag.
                         } else if ("DISCARD_PILE".equalsIgnoreCase(action.drawSource)) {
                             drawnCard = engine.getDiscardPile().getDrawableCard(action.drawnCardId).orElse(null);
                             if (drawnCard == null) {
                                 sendErrorToUser(roomId, userId, "Card not drawable from discard pile: " + action.drawnCardId);
                                 return;
+                            }
+                            // Pile draws are public: the drawable cards ride on every
+                            // state push, so naming an ace taken from them leaks nothing.
+                            if (drawnCard.getRank() == Card.Rank.ACE) {
+                                acePickedByUserId = userId;
                             }
                         } else {
                             sendErrorToUser(roomId, userId, "Invalid draw source: " + action.drawSource);
@@ -335,6 +356,10 @@ public class GameStateController {
                         }
 
                         engine.processDraw(userId, action.drawSource, drawnCard);
+
+                        if (!discardedCards.isEmpty() && discardedCards.size() == handSizeBeforeDiscard) {
+                            allCardsDiscardedByUserId = userId;
+                        }
                     }
                     case "BONUS_DISCARD" -> {
                         if (!engine.isBonusDiscardActive()) {
@@ -354,7 +379,7 @@ public class GameStateController {
                 }
 
                 // Persist snapshot and broadcast game state to all players
-                finishMutation(engine, roomId);
+                finishMutation(engine, roomId, null, allCardsDiscardedByUserId, acePickedByUserId);
             }
             System.out.println("Game action processed, state broadcasted");
 
@@ -820,6 +845,73 @@ public class GameStateController {
 
     private GameStateMessage buildGameStateForPlayers(YanivGameEngine engine, String roomId, String userId,
                                                       String autoPlayedPlayerId, RoomView view) {
+        return buildGameStateForPlayers(engine, roomId, userId, autoPlayedPlayerId, null, view);
+    }
+
+    private GameStateMessage buildGameStateForPlayers(YanivGameEngine engine, String roomId, String userId,
+                                                      String autoPlayedPlayerId, String allCardsDiscardedByUserId,
+                                                      RoomView view) {
+        return buildGameStateForPlayers(engine, roomId, userId, autoPlayedPlayerId, allCardsDiscardedByUserId,
+                null, view);
+    }
+
+    /**
+     * Table cards identical for every recipient of one broadcast, converted to
+     * wire maps ONCE instead of N times. Built per broadcast from the caller's
+     * thread while holding no lock beyond what the caller holds — the engine is
+     * not mutated between build and send on this path, so sharing the lists
+     * across recipients is safe (they are never modified after construction).
+     */
+    private record SharedTableCards(
+            Map<String, Object> topDiscardCard,
+            List<Map<String, Object>> topDiscardCards,
+            List<Map<String, Object>> drawableDiscardCards,
+            Map<String, List<Map<String, Object>>> allPlayerHands) {
+    }
+
+    private static Map<String, Object> cardWireMap(Card c) {
+        Map<String, Object> cardMap = new HashMap<>();
+        cardMap.put("id", c.getId());
+        cardMap.put("rank", c.getRank().toString());
+        cardMap.put("suit", c.getSuit().toString());
+        return cardMap;
+    }
+
+    private SharedTableCards sharedTableCards(YanivGameEngine engine) {
+        Map<String, Object> topCard = engine.getDiscardPile().getTopCard()
+                .map(GameStateController::cardWireMap)
+                .orElse(null);
+        List<Map<String, Object>> topCards = engine.getDiscardPile().getTopCombination()
+                .map(combo -> combo.getCards().stream()
+                        .map(GameStateController::cardWireMap)
+                        .toList())
+                .orElse(new ArrayList<>());
+        List<Map<String, Object>> drawable = engine.getDiscardPile().getDrawableCards().stream()
+                .map(GameStateController::cardWireMap)
+                .toList();
+        Map<String, List<Map<String, Object>>> allHands = null;
+        if (engine.isRoundOver() || engine.isGameOver()) {
+            allHands = new HashMap<>();
+            for (Map.Entry<String, List<Card>> entry : engine.getAllPlayerHands().entrySet()) {
+                allHands.put(entry.getKey(), entry.getValue().stream()
+                        .map(GameStateController::cardWireMap)
+                        .toList());
+            }
+        }
+        return new SharedTableCards(topCard, topCards, drawable, allHands);
+    }
+
+    private GameStateMessage buildGameStateForPlayers(YanivGameEngine engine, String roomId, String userId,
+                                                      String autoPlayedPlayerId, String allCardsDiscardedByUserId,
+                                                      String acePickedByUserId, RoomView view) {
+        return buildGameStateForPlayers(engine, roomId, userId, autoPlayedPlayerId,
+                allCardsDiscardedByUserId, acePickedByUserId, view, sharedTableCards(engine));
+    }
+
+    private GameStateMessage buildGameStateForPlayers(YanivGameEngine engine, String roomId, String userId,
+                                                      String autoPlayedPlayerId, String allCardsDiscardedByUserId,
+                                                      String acePickedByUserId, RoomView view,
+                                                      SharedTableCards shared) {
         GameStateMessage message = new GameStateMessage();
         message.gameId = roomId;
         var game = view.game();
@@ -838,15 +930,8 @@ public class GameStateController {
         message.scores = engine.getPlayerScores();
         message.eliminatedPlayers = new ArrayList<>(engine.getEliminatedPlayers());
         message.deckCount = engine.getDeckCount();
-        message.topDiscardCard = engine.getDiscardPile().getTopCard()
-                .map(c -> {
-                    Map<String, Object> cardMap = new HashMap<>();
-                    cardMap.put("id", c.getId());
-                    cardMap.put("rank", c.getRank().toString());
-                    cardMap.put("suit", c.getSuit().toString());
-                    return cardMap;
-                })
-                .orElse(null);
+        // Shared across all recipients of this broadcast — converted once.
+        message.topDiscardCard = shared.topDiscardCard();
 
         // Names and roster come prepared: built once per broadcast, shared by everyone
         var players = view.players();
@@ -870,33 +955,9 @@ public class GameStateController {
             message.hand = new ArrayList<>();
         }
 
-        // Add drawable discard cards
-        var drawableCards = engine.getDiscardPile().getDrawableCards();
-        message.drawableDiscardCards = drawableCards.stream()
-                .map(c -> {
-                    Map<String, Object> cardMap = new HashMap<>();
-                    cardMap.put("id", c.getId());
-                    cardMap.put("rank", c.getRank().toString());
-                    cardMap.put("suit", c.getSuit().toString());
-                    return cardMap;
-                })
-                .toList();
-
-        // Add all cards of the top combination (for horizontal fan display)
-        var topCombination = engine.getDiscardPile().getTopCombination();
-        if (topCombination.isPresent()) {
-            message.topDiscardCards = topCombination.get().getCards().stream()
-                    .map(c -> {
-                        Map<String, Object> cardMap = new HashMap<>();
-                        cardMap.put("id", c.getId());
-                        cardMap.put("rank", c.getRank().toString());
-                        cardMap.put("suit", c.getSuit().toString());
-                        return cardMap;
-                    })
-                    .toList();
-        } else {
-            message.topDiscardCards = new ArrayList<>();
-        }
+        // Shared across all recipients of this broadcast — converted once.
+        message.drawableDiscardCards = shared.drawableDiscardCards();
+        message.topDiscardCards = shared.topDiscardCards();
 
         // Add opponent card counts
         Map<String, Integer> opponentCounts = new HashMap<>();
@@ -945,22 +1006,9 @@ public class GameStateController {
             message.yanivContestTimerSeconds = engine.getYanivContestTimerSeconds();
         }
 
-        // Reveal all hands on ROUND_OVER or GAME_OVER
+        // Reveal all hands on ROUND_OVER or GAME_OVER (shared, converted once).
         if (engine.isRoundOver() || engine.isGameOver()) {
-            Map<String, List<Map<String, Object>>> allHands = new HashMap<>();
-            Map<String, List<Card>> rawHands = engine.getAllPlayerHands();
-            for (Map.Entry<String, List<Card>> entry : rawHands.entrySet()) {
-                allHands.put(entry.getKey(), entry.getValue().stream()
-                        .map(c -> {
-                            Map<String, Object> cardMap = new HashMap<>();
-                            cardMap.put("id", c.getId());
-                            cardMap.put("rank", c.getRank().toString());
-                            cardMap.put("suit", c.getSuit().toString());
-                            return cardMap;
-                        })
-                        .toList());
-            }
-            message.allPlayerHands = allHands;
+            message.allPlayerHands = shared.allPlayerHands();
             message.roundScores = engine.getRoundScores();
         }
 
@@ -976,6 +1024,14 @@ public class GameStateController {
 
         if (autoPlayedPlayerId != null) {
             message.autoPlayedPlayerId = autoPlayedPlayerId;
+        }
+
+        if (allCardsDiscardedByUserId != null) {
+            message.allCardsDiscardedByUserId = allCardsDiscardedByUserId;
+        }
+
+        if (acePickedByUserId != null) {
+            message.acePickedByUserId = acePickedByUserId;
         }
 
         // Bonus discard state, for the one player who can answer it. Sending it to the
@@ -1044,11 +1100,25 @@ public class GameStateController {
     }
 
     private void broadcastGameState(YanivGameEngine engine, String roomId, String autoPlayedPlayerId) {
+        broadcastGameState(engine, roomId, autoPlayedPlayerId, null);
+    }
+
+    private void broadcastGameState(YanivGameEngine engine, String roomId, String autoPlayedPlayerId,
+                                    String allCardsDiscardedByUserId) {
+        broadcastGameState(engine, roomId, autoPlayedPlayerId, allCardsDiscardedByUserId, null);
+    }
+
+    private void broadcastGameState(YanivGameEngine engine, String roomId, String autoPlayedPlayerId,
+                                    String allCardsDiscardedByUserId, String acePickedByUserId) {
         RoomView view = loadRoomView(roomId);
+        // Convert the identical-for-everyone table cards once; only hand,
+        // opponentCounts, bonus prompt and spectator meters differ per seat.
+        // Bytes on the wire are unchanged — this is purely per-action CPU.
+        SharedTableCards shared = sharedTableCards(engine);
         for (var player : view.players()) {
             String playerId = player.getId().getUserId();
             GameStateMessage stateMessage = buildGameStateForPlayers(engine, roomId, playerId,
-                    autoPlayedPlayerId, view);
+                    autoPlayedPlayerId, allCardsDiscardedByUserId, acePickedByUserId, view, shared);
             messagingTemplate.convertAndSendToUser(
                     playerId,
                     gameStateDestination(roomId),
@@ -1109,14 +1179,9 @@ public class GameStateController {
      */
     private String findActiveGameRoomForUser(String userId) {
         try {
-            // Get all active games from database and check if user is a player
-            List<Game> activeGames = gameService.getActiveGames();
-            for (Game game : activeGames) {
-                var players = gameService.getGamePlayers(game.getId());
-                if (players.stream().anyMatch(gp -> gp.getId().getUserId().equals(userId))) {
-                    return game.getId();
-                }
-            }
+            // Indexed by the user's own memberships (O(their games)), not by
+            // scanning every active game and its roster (O(all games)).
+            return gameService.findActiveGameIdForUser(userId);
         } catch (Exception e) {
             System.err.println("Error finding active game for user " + userId + ": " + e.getMessage());
         }
@@ -1411,15 +1476,29 @@ public class GameStateController {
      * completion bookkeeping, schedule the next turn timer, and broadcast.
      *
      * @param autoPlayedPlayerId non-null when this mutation was performed by auto-play
+     * @param allCardsDiscardedByUserId non-null when this mutation discarded the player's whole hand
+     * @param acePickedByUserId non-null when this mutation drew an ace from the discard pile
      */
     private void finishMutation(YanivGameEngine engine, String roomId) {
         finishMutation(engine, roomId, null);
     }
 
     private void finishMutation(YanivGameEngine engine, String roomId, String autoPlayedPlayerId) {
+        finishMutation(engine, roomId, autoPlayedPlayerId, null);
+    }
+
+    private void finishMutation(YanivGameEngine engine, String roomId, String autoPlayedPlayerId,
+                                String allCardsDiscardedByUserId) {
+        finishMutation(engine, roomId, autoPlayedPlayerId, allCardsDiscardedByUserId, null);
+    }
+
+    private void finishMutation(YanivGameEngine engine, String roomId, String autoPlayedPlayerId,
+                                String allCardsDiscardedByUserId, String acePickedByUserId) {
         // Persist snapshot async (best-effort: a Redis outage must not fail the action,
-        // and must not block the broadcast either -- see evictIdleEngines)
-        scheduler.execute(() -> persistSnapshot(roomId, engine));
+        // and must not block the broadcast either -- see evictIdleEngines).
+        // Runs on persistExecutor, NOT scheduler, so a slow Redis cannot delay
+        // turn/contest/round-over timers sharing that 2-thread pool.
+        persistExecutor.execute(() -> persistSnapshot(roomId, engine));
 
         // The round that ends the game transitions straight to GAME_OVER, never
         // ROUND_OVER, so it must be persisted here too or round_histories is
@@ -1451,7 +1530,7 @@ public class GameStateController {
             scheduleTurnTimerIfNeeded(engine, roomId);
         }
 
-        broadcastGameState(engine, roomId, autoPlayedPlayerId);
+        broadcastGameState(engine, roomId, autoPlayedPlayerId, allCardsDiscardedByUserId, acePickedByUserId);
     }
 
     /**
@@ -1669,15 +1748,21 @@ public class GameStateController {
         AutoPlayStrategy.Decision decision = AutoPlayStrategy.decide(
                 engine.getPlayerHand(expectedPlayer), engine.getDiscardPile(), engine.getYanivThreshold());
 
+        String allCardsDiscardedByUserId = null;
+        String acePickedByUserId = null;
         if (decision.type() == AutoPlayStrategy.ActionType.CALL_YANIV) {
             engine.callYaniv(expectedPlayer);
         } else {
+            int handSizeBeforeDiscard = engine.getPlayerHand(expectedPlayer).size();
             engine.processDiscard(expectedPlayer, decision.discardCards());
             Card drawnCard = null;
             if ("DISCARD_PILE".equals(decision.drawSource())) {
                 drawnCard = engine.getDiscardPile().getDrawableCard(decision.drawnCardId()).orElse(null);
                 if (drawnCard == null) {
                     throw new IllegalStateException("Auto-play picked undrawable card: " + decision.drawnCardId());
+                }
+                if (drawnCard.getRank() == Card.Rank.ACE) {
+                    acePickedByUserId = expectedPlayer;
                 }
             }
             engine.processDraw(expectedPlayer, decision.drawSource(), drawnCard);
@@ -1686,12 +1771,17 @@ public class GameStateController {
             if (engine.getCurrentState() == YanivGameEngine.GameState.BONUS_DISCARD) {
                 engine.processBonusDiscard(expectedPlayer, false);
             }
+
+            if (!decision.discardCards().isEmpty()
+                    && decision.discardCards().size() == handSizeBeforeDiscard) {
+                allCardsDiscardedByUserId = expectedPlayer;
+            }
         }
 
         // This absence has now had its grace; later turns in it go quickly.
         gracedAbsences.put(graceKey(roomId, expectedPlayer), absentSince.get());
         System.out.println("Auto-played turn for player " + expectedPlayer + " in room " + roomId);
-        finishMutation(engine, roomId, expectedPlayer);
+        finishMutation(engine, roomId, expectedPlayer, allCardsDiscardedByUserId, acePickedByUserId);
     }
 
 
@@ -1773,6 +1863,8 @@ public class GameStateController {
         public int turnTimerSeconds;          // Total allowed seconds per turn
         public long turnEndsAt;               // Server epoch ms when the current turn expires
         public String autoPlayedPlayerId;     // Set when this state change was played by auto-play
+        public String allCardsDiscardedByUserId; // Set when this broadcast follows a whole-hand discard
+        public String acePickedByUserId;  // Set when this broadcast follows an ace drawn from the discard pile
 
         // Bonus discard state
         public boolean bonusDiscardActive;    // True when player can do bonus discard

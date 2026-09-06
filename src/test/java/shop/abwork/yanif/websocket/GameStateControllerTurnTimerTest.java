@@ -12,6 +12,8 @@ import shop.abwork.yanif.entity.User;
 import shop.abwork.yanif.game.GameSnapshot;
 import shop.abwork.yanif.game.YanivGameEngine;
 import shop.abwork.yanif.game.model.Card;
+import shop.abwork.yanif.game.model.DiscardCombination;
+import shop.abwork.yanif.game.model.Hand;
 import shop.abwork.yanif.presence.Presence;
 import shop.abwork.yanif.service.GameService;
 import shop.abwork.yanif.service.PresenceService;
@@ -114,6 +116,7 @@ class GameStateControllerTurnTimerTest {
     @AfterEach
     void tearDown() throws Exception {
         // Stop any pending timers so they don't fire during other tests
+        controller.shutdownScheduler();
         clearEngines();
     }
 
@@ -121,6 +124,20 @@ class GameStateControllerTurnTimerTest {
         Field enginesField = GameStateController.class.getDeclaredField("gameEngines");
         enginesField.setAccessible(true);
         ((Map<?, ?>) enginesField.get(controller)).clear();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, YanivGameEngine> enginesMap() throws Exception {
+        Field enginesField = GameStateController.class.getDeclaredField("gameEngines");
+        enginesField.setAccessible(true);
+        return (Map<String, YanivGameEngine>) enginesField.get(controller);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Hand> engineHands(YanivGameEngine engine) throws Exception {
+        Field handsField = YanivGameEngine.class.getDeclaredField("playerHands");
+        handsField.setAccessible(true);
+        return (Map<String, Hand>) handsField.get(engine);
     }
 
     @SuppressWarnings("unchecked")
@@ -148,8 +165,41 @@ class GameStateControllerTurnTimerTest {
                 .toList();
     }
 
+    private YanivGameEngine engineFromSnapshotNow() {
+        String json = snapshotStore.get(ROOM);
+        return json == null ? null : YanivGameEngine.fromSnapshot(json);
+    }
+
+    /**
+     * Snapshots are persisted async after every mutation, so a read immediately
+     * after start/action can observe the previous state. Poll briefly for the
+     * write to land; use {@link #engineFromSnapshotNow()} inside {@code waitFor}
+     * predicates.
+     */
     private YanivGameEngine engineFromSnapshot() {
-        return YanivGameEngine.fromSnapshot(snapshotStore.get(ROOM));
+        String json = awaitSnapshot(5000);
+        assertNotNull(json, "timed out waiting for the async snapshot write");
+        return YanivGameEngine.fromSnapshot(json);
+    }
+
+    private String awaitSnapshot(long timeoutMs) {
+        waitFor(() -> snapshotStore.get(ROOM) != null, timeoutMs);
+        return snapshotStore.get(ROOM);
+    }
+
+    /** Wait until the snapshot differs from {@code beforeJson} (a mutation landed). */
+    private void awaitMutation(String beforeJson, long timeoutMs) {
+        boolean changed = waitFor(() -> {
+            String now = snapshotStore.get(ROOM);
+            return now != null && !now.equals(beforeJson);
+        }, timeoutMs);
+        assertTrue(changed, "timed out waiting for the async snapshot write after mutation");
+    }
+
+    /** Start a game and wait for the async initial snapshot before asserting on it. */
+    private void startStartedGame() {
+        controller.startGame(ROOM, auth(HOST));
+        assertNotNull(awaitSnapshot(5000), "initial deal should be snapshotted (async persist)");
     }
 
     private static boolean waitFor(BooleanSupplier condition, long timeoutMs) {
@@ -177,6 +227,17 @@ class GameStateControllerTurnTimerTest {
         return action;
     }
 
+    private GameStateController.GameActionMessage pileDrawAction(String playerId, String discardId,
+                                                                 String pileCardId) {
+        GameStateController.GameActionMessage action = new GameStateController.GameActionMessage();
+        action.actionType = "DISCARD_AND_DRAW";
+        action.playerId = playerId;
+        action.discardedCardIds = List.of(discardId);
+        action.drawSource = "DISCARD_PILE";
+        action.drawnCardId = pileCardId;
+        return action;
+    }
+
     private GameStateController.GameActionMessage bonusDiscardAction(String playerId, boolean shouldDiscard) {
         GameStateController.GameActionMessage action = new GameStateController.GameActionMessage();
         action.actionType = "BONUS_DISCARD";
@@ -191,9 +252,8 @@ class GameStateControllerTurnTimerTest {
 
     @Test
     void startGamePersistsInitialSnapshot() {
-        controller.startGame(ROOM, auth(HOST));
+        startStartedGame();
 
-        assertTrue(snapshotStore.containsKey(ROOM), "initial deal should be snapshotted");
         YanivGameEngine restored = engineFromSnapshot();
         assertNotNull(restored);
         assertEquals(YanivGameEngine.GameState.WAIT_FOR_TURN, restored.getCurrentState());
@@ -240,18 +300,22 @@ class GameStateControllerTurnTimerTest {
     void humanActionBeforeExpiryIsRespected() throws Exception {
         markDisconnected(HOST);
         markDisconnected(OTHER);
-        controller.startGame(ROOM, auth(HOST));
+        startStartedGame();
 
         String firstPlayer = engineFromSnapshot().getCurrentPlayer();
         String cardId = messagesFor(firstPlayer).get(0).hand.get(0)
                 .get("id").toString();
 
+        String beforeMove = snapshotStore.get(ROOM);
         controller.handleGameAction(ROOM, discardFirstCardAction(firstPlayer, cardId), auth(firstPlayer));
+        awaitMutation(beforeMove, 5000);
 
         // Handle potential bonus discard after the action
         YanivGameEngine engineAfterAction = engineFromSnapshot();
         if (engineAfterAction.getCurrentState() == YanivGameEngine.GameState.BONUS_DISCARD) {
+            String beforeBonus = snapshotStore.get(ROOM);
             controller.handleGameAction(ROOM, bonusDiscardAction(firstPlayer, false), auth(firstPlayer));
+            awaitMutation(beforeBonus, 5000);
         }
 
         // Human action advanced the turn immediately
@@ -268,13 +332,113 @@ class GameStateControllerTurnTimerTest {
     }
 
     @Test
-    void restartRestoresEngineFromSnapshotInsteadOfRedealing() throws Exception {
+    void wholeHandDiscard_broadcastsFlagToAllPlayers() throws Exception {
         controller.startGame(ROOM, auth(HOST));
+        YanivGameEngine engine = enginesMap().get(ROOM);
+        assertNotNull(engine);
+        String current = engine.getCurrentPlayer();
+
+        // Force a one-card hand: discarding it throws the whole hand, a legal single.
+        engineHands(engine).put(current, new Hand(List.of(
+                new Card("solo-1", Card.Suit.HEARTS, Card.Rank.SEVEN))));
+
+        GameStateController.GameActionMessage action = discardFirstCardAction(current, "solo-1");
+        controller.handleGameAction(ROOM, action, auth(current));
+
+        String other = otherPlayer(current);
+        assertTrue(messagesFor(current).stream().anyMatch(m -> current.equals(m.allCardsDiscardedByUserId)),
+                "the discarder's own broadcast should carry the whole-hand flag");
+        assertTrue(messagesFor(other).stream().anyMatch(m -> current.equals(m.allCardsDiscardedByUserId)),
+                "the opponent's broadcast should carry the whole-hand flag too");
+    }
+
+    @Test
+    void partialDiscard_doesNotBroadcastFlag() throws Exception {
+        controller.startGame(ROOM, auth(HOST));
+        YanivGameEngine engine = enginesMap().get(ROOM);
+        assertNotNull(engine);
+        String current = engine.getCurrentPlayer();
+        String cardId = messagesFor(current).get(0).hand.get(0)
+                .get("id").toString();
+
+        controller.handleGameAction(ROOM, discardFirstCardAction(current, cardId), auth(current));
+
+        assertTrue(messagesFor(HOST).stream().noneMatch(m -> m.allCardsDiscardedByUserId != null),
+                "a partial discard must not set the whole-hand flag");
+        assertTrue(messagesFor(OTHER).stream().noneMatch(m -> m.allCardsDiscardedByUserId != null),
+                "a partial discard must not set the whole-hand flag");
+    }
+
+    @Test
+    void aceDrawnFromDiscardPile_broadcastsFlagToAllPlayers() throws Exception {
+        controller.startGame(ROOM, auth(HOST));
+        YanivGameEngine engine = enginesMap().get(ROOM);
+        assertNotNull(engine);
+        String current = engine.getCurrentPlayer();
+        engine.getDiscardPile().addCombination(
+                List.of(new Card("pile-ace-1", Card.Suit.HEARTS, Card.Rank.ACE)),
+                DiscardCombination.Type.SINGLE, 5);
+        String cardId = messagesFor(current).get(0).hand.get(0)
+                .get("id").toString();
+
+        controller.handleGameAction(ROOM, pileDrawAction(current, cardId, "pile-ace-1"), auth(current));
+
+        String other = otherPlayer(current);
+        assertTrue(messagesFor(current).stream().anyMatch(m -> current.equals(m.acePickedByUserId)),
+                "the picker's own broadcast should carry the ace-picked flag");
+        assertTrue(messagesFor(other).stream().anyMatch(m -> current.equals(m.acePickedByUserId)),
+                "the opponent's broadcast should carry the ace-picked flag too");
+    }
+
+    @Test
+    void nonAceDrawnFromDiscardPile_doesNotBroadcastFlag() throws Exception {
+        controller.startGame(ROOM, auth(HOST));
+        YanivGameEngine engine = enginesMap().get(ROOM);
+        assertNotNull(engine);
+        String current = engine.getCurrentPlayer();
+        engine.getDiscardPile().addCombination(
+                List.of(new Card("pile-king-1", Card.Suit.HEARTS, Card.Rank.KING)),
+                DiscardCombination.Type.SINGLE, 5);
+        String cardId = messagesFor(current).get(0).hand.get(0)
+                .get("id").toString();
+
+        controller.handleGameAction(ROOM, pileDrawAction(current, cardId, "pile-king-1"), auth(current));
+
+        assertTrue(messagesFor(HOST).stream().noneMatch(m -> m.acePickedByUserId != null),
+                "picking a non-ace from the pile must not set the ace-picked flag");
+        assertTrue(messagesFor(OTHER).stream().noneMatch(m -> m.acePickedByUserId != null),
+                "picking a non-ace from the pile must not set the ace-picked flag");
+    }
+
+    @Test
+    void deckDraw_neverBroadcastsFlag_evenForAnAce() throws Exception {
+        controller.startGame(ROOM, auth(HOST));
+        YanivGameEngine engine = enginesMap().get(ROOM);
+        assertNotNull(engine);
+        String current = engine.getCurrentPlayer();
+        String cardId = messagesFor(current).get(0).hand.get(0)
+                .get("id").toString();
+
+        // Whatever the deck deals — even an ace — is hidden information and must
+        // never be announced to the table.
+        controller.handleGameAction(ROOM, discardFirstCardAction(current, cardId), auth(current));
+
+        assertTrue(messagesFor(HOST).stream().noneMatch(m -> m.acePickedByUserId != null),
+                "a deck draw must never set the ace-picked flag");
+        assertTrue(messagesFor(OTHER).stream().noneMatch(m -> m.acePickedByUserId != null),
+                "a deck draw must never set the ace-picked flag");
+    }
+
+    @Test
+    void restartRestoresEngineFromSnapshotInsteadOfRedealing() throws Exception {
+        startStartedGame();
 
         String firstPlayer = engineFromSnapshot().getCurrentPlayer();
         String cardId = engineFromSnapshot().getPlayerHand(firstPlayer).getCards().get(0).getId();
 
+        String beforeMove = snapshotStore.get(ROOM);
         controller.handleGameAction(ROOM, discardFirstCardAction(firstPlayer, cardId), auth(firstPlayer));
+        awaitMutation(beforeMove, 5000);
 
         String nextPlayer = engineFromSnapshot().getCurrentPlayer();
         List<String> expectedHandIds = engineFromSnapshot().getPlayerHand(nextPlayer).getCards()
@@ -327,7 +491,9 @@ class GameStateControllerTurnTimerTest {
      * single-card deck draws, which is no way to test it.
      */
     private String dealThatParksOnTheBonus(String toAct) {
-        GameSnapshot snapshot = GameSnapshot.fromJson(snapshotStore.get(ROOM));
+        String json = awaitSnapshot(5000);
+        assertNotNull(json, "deal requires the async initial snapshot to have landed");
+        GameSnapshot snapshot = GameSnapshot.fromJson(json);
 
         List<GameSnapshot.CardDto> handToAct = List.of(
                 card(Card.Suit.HEARTS, Card.Rank.TEN),
@@ -376,10 +542,12 @@ class GameStateControllerTurnTimerTest {
     @Test
     void aBonusDecisionNobodyAnswersIsDeclinedInsteadOfStallingTheRoom() throws Exception {
         controller.startGame(ROOM, auth(HOST));
-        snapshotStore.put(ROOM, dealThatParksOnTheBonus(HOST));
+        String parkedDeal = dealThatParksOnTheBonus(HOST);
+        snapshotStore.put(ROOM, parkedDeal);
         clearEngines();
 
         controller.handleGameAction(ROOM, discardFirstCardAction(HOST, TEN_OF_HEARTS), auth(HOST));
+        awaitMutation(parkedDeal, 5000);
 
         YanivGameEngine parked = engineFromSnapshot();
         assertEquals(YanivGameEngine.GameState.BONUS_DISCARD, parked.getCurrentState(),
@@ -388,7 +556,7 @@ class GameStateControllerTurnTimerTest {
         assertTrue(presence.absentSince(ROOM, HOST).isEmpty(),
                 "precondition: HOST is connected - the absent case is already covered");
 
-        assertTrue(waitFor(() -> engineFromSnapshot().getCurrentState()
+        assertTrue(waitFor(() -> engineFromSnapshotNow().getCurrentState()
                         != YanivGameEngine.GameState.BONUS_DISCARD, 4000),
                 "a bonus decision the client never answers must not hold the room forever");
 
@@ -454,14 +622,16 @@ class GameStateControllerTurnTimerTest {
         controller.watchForAbsenceChanges();
 
         controller.startGame(ROOM, auth(HOST));
-        snapshotStore.put(ROOM, dealThatParksOnTheBonus(HOST));
+        String parkedDeal = dealThatParksOnTheBonus(HOST);
+        snapshotStore.put(ROOM, parkedDeal);
         clearEngines();
         controller.handleGameAction(ROOM, discardFirstCardAction(HOST, TEN_OF_HEARTS), auth(HOST));
+        awaitMutation(parkedDeal, 5000);
 
         assertEquals(YanivGameEngine.GameState.BONUS_DISCARD, engineFromSnapshot().getCurrentState(),
                 "precondition: this deal parks on the bonus decision");
 
-        assertTrue(waitFor(() -> engineFromSnapshot().getCurrentState()
+        assertTrue(waitFor(() -> engineFromSnapshotNow().getCurrentState()
                         != YanivGameEngine.GameState.BONUS_DISCARD, 4000),
                 "the bonus deadline keeps the room alive; it is not a move played for anyone, "
                         + "so turning auto-play off must not bring the stall back");
@@ -469,8 +639,12 @@ class GameStateControllerTurnTimerTest {
 
     @Test
     void lostSnapshotReturnsRoomToLobby() throws Exception {
-        controller.startGame(ROOM, auth(HOST));
-        snapshotStore.clear(); // simulate unrecoverable state
+        startStartedGame();
+        // Simulate unrecoverable state: settle the async write first, then clear
+        // twice so a write still in flight cannot resurrect the snapshot.
+        snapshotStore.clear();
+        try { Thread.sleep(300); } catch (InterruptedException ignored) { }
+        snapshotStore.clear();
         clearEngines();
 
         Game inProgress = new Game("ABC123", 200, HOST, 6);

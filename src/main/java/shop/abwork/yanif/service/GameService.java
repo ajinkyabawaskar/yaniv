@@ -69,9 +69,14 @@ public class GameService {
     /**
      * Get game by ID.
      *
+     * Read-only: runs on the WebSocket hot path (loadRoomView, once per
+     * broadcast), so it must neither hold a write transaction open nor flush
+     * the persistence context — both only add latency to every game action.
+     *
      * @param gameId Game ID
      * @return Game object or null if not found
      */
+    @Transactional(readOnly = true)
     public Game getGameById(String gameId) {
         return gameRepository.findById(gameId).orElse(null);
     }
@@ -217,11 +222,38 @@ public class GameService {
     /**
      * Get all players in a game.
      *
+     * Read-only (see getGameById): second of the 3 queries behind every
+     * per-action broadcast.
+     *
      * @param gameId Game ID
      * @return List of game players
      */
+    @Transactional(readOnly = true)
     public List<GamePlayer> getGamePlayers(String gameId) {
         return gamePlayerRepository.findByGameId(gameId);
+    }
+
+    /**
+     * Find the IN_PROGRESS game a user is seated in, if any.
+     *
+     * Reconnect path (one call per SessionConnected). The old implementation
+     * loaded ALL active games and every one's player list — O(games) queries
+     * per connect, which degrades precisely during the reconnect storms it
+     * serves. This starts from the user's own memberships instead: O(games of
+     * this user), usually one row. Same answer, fewer queries.
+     *
+     * @param userId User ID
+     * @return IN_PROGRESS game ID, or null
+     */
+    @Transactional(readOnly = true)
+    public String findActiveGameIdForUser(String userId) {
+        for (GamePlayer membership : gamePlayerRepository.findByUserId(userId)) {
+            Game game = getGameById(membership.getId().getGameId());
+            if (game != null && game.getStatus() == Game.GameStatus.IN_PROGRESS) {
+                return game.getId();
+            }
+        }
+        return null;
     }
 
     /**
@@ -283,9 +315,12 @@ public class GameService {
      * @param gameState   Game state JSON/object
      */
     public void saveGameState(String gameId, String gameState) {
-        String key = getGameStateKey(gameId);
-        redisTemplate.opsForValue().set(key, gameState);
-        redisTemplate.expire(key, GAME_STATE_TTL, java.util.concurrent.TimeUnit.HOURS);
+        // Single atomic SET .. EX: the old SET + EXPIRE was two round-trips per
+        // mutation with a window where the key had NO ttl — a crash between
+        // them left an immortal snapshot pinning a dead game for inspection.
+        redisTemplate.opsForValue().set(
+                getGameStateKey(gameId), gameState,
+                GAME_STATE_TTL, java.util.concurrent.TimeUnit.HOURS);
     }
 
     /**

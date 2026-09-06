@@ -128,6 +128,7 @@ class GameLifecycleScenariosTest {
 
     @AfterEach
     void tearDown() throws Exception {
+        controller.shutdownScheduler();
         clearEngines();
         presence.roomClosed(ROOM);
     }
@@ -214,8 +215,65 @@ class GameLifecycleScenariosTest {
         return all.get(all.size() - 1);
     }
 
+    private YanivGameEngine engineFromSnapshotNow() {
+        String json = snapshotStore.get(ROOM);
+        return json == null ? null : YanivGameEngine.fromSnapshot(json);
+    }
+
+    /**
+     * Snapshots are persisted async after every mutation, so a read immediately
+     * after an action can observe the previous state. Poll briefly for the write
+     * to land; fail only when it never does. Use {@link #engineFromSnapshotNow()}
+     * inside {@code waitFor} predicates and for assertions about absence.
+     */
     private YanivGameEngine engineFromSnapshot() {
-        return YanivGameEngine.fromSnapshot(snapshotStore.get(ROOM));
+        String json = awaitSnapshot(5000);
+        assertNotNull(json, "timed out waiting for the async snapshot write");
+        return YanivGameEngine.fromSnapshot(json);
+    }
+
+    private String awaitSnapshot(long timeoutMs) {
+        waitFor(() -> snapshotStore.get(ROOM) != null, timeoutMs);
+        return snapshotStore.get(ROOM);
+    }
+
+    /** Wait until the snapshot differs from {@code beforeJson} (a mutation landed). */
+    private String awaitMutation(String beforeJson, long timeoutMs) {
+        boolean changed = waitFor(() -> {
+            String now = snapshotStore.get(ROOM);
+            return now != null && !now.equals(beforeJson);
+        }, timeoutMs);
+        assertTrue(changed, "timed out waiting for the async snapshot write after mutation");
+        return snapshotStore.get(ROOM);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Set<String> unpersistedRoomsSet() {
+        try {
+            Field f = GameStateController.class.getDeclaredField("unpersistedRooms");
+            f.setAccessible(true);
+            return (Set<String>) f.get(controller);
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** Wait until the async persist records its failure (memory is the only copy). */
+    private void awaitUnpersisted() {
+        assertTrue(waitFor(() -> unpersistedRoomsSet().contains(ROOM), 5000),
+                "the async persist failure was not recorded before eviction");
+    }
+
+    /**
+     * Simulate unrecoverable snapshot loss. The start's async write must have
+     * landed first, and a second clear swallows one still in flight, otherwise
+     * the test races the persister instead of testing the loss.
+     */
+    private void simulateSnapshotLoss() {
+        awaitSnapshot(5000);
+        snapshotStore.clear();
+        try { Thread.sleep(300); } catch (InterruptedException ignored) { }
+        snapshotStore.clear();
     }
 
     private static boolean waitFor(BooleanSupplier condition, long timeoutMs) {
@@ -254,6 +312,7 @@ class GameLifecycleScenariosTest {
     /** Drive the game to ROUND_OVER quickly: force a legal yaniv call + contest. */
     private void reachRoundOverViaContest() throws Exception {
         startStartedGame();
+        String beforeContest = snapshotStore.get(ROOM);
         YanivGameEngine engine = liveEngine();
         setEngineField(engine, "yanivThreshold", 200); // any hand may call yaniv
         String caller = engine.getCurrentPlayer();
@@ -262,12 +321,14 @@ class GameLifecycleScenariosTest {
         assertEquals(YanivGameEngine.GameState.YANIV_CALLED, engine.getCurrentState());
         controller.contestYaniv(ROOM, new GameStateController.ContestYanivMessage(), auth(opponent));
         assertTrue(engine.isRoundOver(), "contest should resolve to ROUND_OVER immediately");
+        awaitMutation(beforeContest, 5000); // the ROUND_OVER snapshot lands async
     }
 
     /** Start a game with both players connected and DB status IN_PROGRESS. */
     private void startStartedGame() {
         controller.startGame(ROOM, auth(HOST));
         assertNotNull(liveEngine(), "engine should exist after start");
+        assertNotNull(awaitSnapshot(5000), "initial deal should be snapshotted (async persist)");
     }
 
     // ------------------------------------------------------------ A. start
@@ -353,7 +414,7 @@ class GameLifecycleScenariosTest {
 
         startStartedGame();
 
-        assertEquals(1, engineFromSnapshot().getRoundNumber(),
+        assertTrue(waitFor(() -> engineFromSnapshotNow().getRoundNumber() == 1, 5000),
                 "fresh deal must replace the stale round-99 snapshot");
     }
 
@@ -555,9 +616,11 @@ class GameLifecycleScenariosTest {
     void C4_reconnectAfterRestart_restoresIdenticalState() throws Exception {
         startStartedGame();
         String firstPlayer = engineFromSnapshot().getCurrentPlayer();
+        String beforeMove = snapshotStore.get(ROOM);
         controller.handleGameAction(ROOM, discardAction(firstPlayer,
                 List.of(engineFromSnapshot().getPlayerHand(firstPlayer).getCards().get(0).getId())),
                 auth(firstPlayer));
+        awaitMutation(beforeMove, 5000);
 
         List<String> expectedIds = engineFromSnapshot()
                 .getPlayerHand(engineFromSnapshot().getCurrentPlayer()).getCards()
@@ -577,7 +640,7 @@ class GameLifecycleScenariosTest {
     void C5_missingSnapshotWithDbInProgress_abortsToLobbyOnce() {
         startStartedGame(); // DB flips to IN_PROGRESS via mutating stub
         try { clearEngines(); } catch (Exception ignored) { }
-        snapshotStore.clear(); // pre-deploy style loss
+        simulateSnapshotLoss(); // pre-deploy style loss
 
         controller.handleGameAction(ROOM, discardAction(HOST, List.of("card_1")), auth(HOST));
 
@@ -621,12 +684,16 @@ class GameLifecycleScenariosTest {
         startStartedGame();
         String firstPlayer = engineFromSnapshot().getCurrentPlayer();
         String cardId = engineFromSnapshot().getPlayerHand(firstPlayer).getCards().get(0).getId();
+        String beforeMove = snapshotStore.get(ROOM);
         controller.handleGameAction(ROOM, discardAction(firstPlayer, List.of(cardId)), auth(firstPlayer));
+        awaitMutation(beforeMove, 5000);
 
         // Handle potential bonus discard after the action
         YanivGameEngine engineAfterAction = engineFromSnapshot();
         if (engineAfterAction.getCurrentState() == YanivGameEngine.GameState.BONUS_DISCARD) {
+            String beforeBonus = snapshotStore.get(ROOM);
             controller.handleGameAction(ROOM, bonusDiscardAction(firstPlayer, false), auth(firstPlayer));
+            awaitMutation(beforeBonus, 5000);
         }
 
         // Verify game is in progress with modified state
@@ -693,12 +760,16 @@ class GameLifecycleScenariosTest {
         makeAbsentFromRoom(current);
         controller.handleSessionConnect(connectEvent(current));
         String cardId = engineFromSnapshot().getPlayerHand(current).getCards().get(0).getId();
+        String beforeMove = snapshotStore.get(ROOM);
         controller.handleGameAction(ROOM, discardAction(current, List.of(cardId)), auth(current));
+        awaitMutation(beforeMove, 5000);
 
         // A deck draw matching the discarded rank parks the turn in BONUS_DISCARD.
         // Settle it so the turn always completes, whatever the deck shuffled.
         if (engineFromSnapshot().getCurrentState() == YanivGameEngine.GameState.BONUS_DISCARD) {
+            String beforeBonus = snapshotStore.get(ROOM);
             controller.handleGameAction(ROOM, bonusDiscardAction(current, false), auth(current));
+            awaitMutation(beforeBonus, 5000);
         }
 
         try { Thread.sleep(1800); } catch (InterruptedException ignored) { }
@@ -730,7 +801,9 @@ class GameLifecycleScenariosTest {
 
         GameStateController.GameActionMessage action = discardAction(current, List.of(cardId));
         action.actionId = "dup-1";
+        String beforeFirst = snapshotStore.get(ROOM);
         controller.handleGameAction(ROOM, action, auth(current));
+        awaitMutation(beforeFirst, 5000);
         String playerAfterFirst = engineFromSnapshot().getCurrentPlayer();
         int msgsAfterFirst = messagesFor(current).size();
 
@@ -824,7 +897,10 @@ class GameLifecycleScenariosTest {
 
         controller.callYaniv(ROOM, new GameStateController.YanivCallMessage(), auth(caller));
 
-        boolean resolved = waitFor(() -> engineFromSnapshot().isRoundOver(), 6_000);
+        boolean resolved = waitFor(() -> {
+            YanivGameEngine e = engineFromSnapshotNow();
+            return e != null && e.isRoundOver();
+        }, 6_000);
         assertTrue(resolved, "contest window should auto-resolve to ROUND_OVER");
     }
 
@@ -845,11 +921,14 @@ class GameLifecycleScenariosTest {
         hands.put(first, lowHand);
         snapshotStore.put(ROOM, engine.toSnapshot());
 
-        boolean called = waitFor(() -> engineFromSnapshot() != null
+        boolean called = waitFor(() -> engineFromSnapshotNow() != null
                 && Boolean.TRUE.equals(isYanivCalledSafe()), 8000);
         assertTrue(called, "bot should call yaniv with a low hand");
 
-        boolean resolved = waitFor(() -> engineFromSnapshot() != null && engineFromSnapshot().isRoundOver(), 6_000);
+        boolean resolved = waitFor(() -> {
+            YanivGameEngine e = engineFromSnapshotNow();
+            return e != null && e.isRoundOver();
+        }, 6_000);
         assertTrue(resolved, "contest window must be scheduled even for an auto-played caller");
     }
 
@@ -861,7 +940,7 @@ class GameLifecycleScenariosTest {
     }
 
     private Boolean isYanivCalledSafe() {
-        YanivGameEngine e = engineFromSnapshot();
+        YanivGameEngine e = engineFromSnapshotNow();
         return e != null ? e.isYanivCalled() : null;
     }
 
@@ -966,10 +1045,14 @@ class GameLifecycleScenariosTest {
         clearInvocations(gameService, userService);
 
         String cardId = engineFromSnapshot().getPlayerHand(current).getCards().get(0).getId();
+        String beforeMove = snapshotStore.get(ROOM);
         controller.handleGameAction(ROOM, discardAction(current, List.of(cardId)), auth(current));
+        awaitMutation(beforeMove, 5000);
         if (engineFromSnapshot().getCurrentState() == YanivGameEngine.GameState.BONUS_DISCARD) {
             clearInvocations(gameService, userService);
+            String beforeBonus = snapshotStore.get(ROOM);
             controller.handleGameAction(ROOM, bonusDiscardAction(current, false), auth(current));
+            awaitMutation(beforeBonus, 5000);
         }
 
         // One mutation broadcasts to every player, but the per-room lookups happen once,
@@ -1119,6 +1202,7 @@ class GameLifecycleScenariosTest {
         if (liveEngine().getCurrentState() == YanivGameEngine.GameState.BONUS_DISCARD) {
             controller.handleGameAction(ROOM, bonusDiscardAction(current, false), auth(current));
         }
+        awaitUnpersisted(); // the async write must have failed before the sweep runs
 
         ageEngine(ROOM, 120);
         controller.evictIdleEngines();
@@ -1134,12 +1218,14 @@ class GameLifecycleScenariosTest {
             return null;
         }).when(gameService).saveGameState(anyString(), anyString());
         String nowCurrent = liveEngine().getCurrentPlayer();
+        String beforeRetry = snapshotStore.get(ROOM);
         controller.handleGameAction(ROOM, discardAction(nowCurrent, List.of(
                 liveEngine().getPlayerHand(nowCurrent).getCards().get(0).getId())), auth(nowCurrent));
         if (liveEngine() != null
                 && liveEngine().getCurrentState() == YanivGameEngine.GameState.BONUS_DISCARD) {
             controller.handleGameAction(ROOM, bonusDiscardAction(nowCurrent, false), auth(nowCurrent));
         }
+        awaitMutation(beforeRetry, 5000); // the retry write lands async
         ageEngine(ROOM, 120);
         controller.evictIdleEngines();
 
@@ -1158,6 +1244,7 @@ class GameLifecycleScenariosTest {
         if (liveEngine().getCurrentState() == YanivGameEngine.GameState.BONUS_DISCARD) {
             controller.handleGameAction(ROOM, bonusDiscardAction(current, false), auth(current));
         }
+        awaitUnpersisted(); // the async write must have failed before the sweep runs
 
         ageEngine(ROOM, 120);
         controller.evictIdleEngines();
@@ -1440,7 +1527,9 @@ class GameLifecycleScenariosTest {
             throw new RuntimeException(e);
         }
 
+        String beforeAdvance = snapshotStore.get(ROOM);
         controller.handleNextRound(ROOM, auth(HOST));
+        awaitMutation(beforeAdvance, 5000); // exactly one advance lands async
         controller.handleNextRound(ROOM, auth(OTHER));
 
         assertEquals(2, engineFromSnapshot().getRoundNumber(), "exactly one advance");

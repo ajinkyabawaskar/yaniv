@@ -8,9 +8,17 @@ import java.time.ZoneOffset;
  * Friendship entity representing a friendship relationship between two users.
  */
 @Entity
-@Table(name = "friendships", uniqueConstraints = {
-        @UniqueConstraint(name = "unique_friendship", columnNames = {"user_id_1", "user_id_2"})
-})
+@Table(name = "friendships",
+        uniqueConstraints = {
+                @UniqueConstraint(name = "unique_friendship", columnNames = {"user_id_1", "user_id_2"})
+        },
+        indexes = {
+                // All friendship lookups are `userId1 = ? OR userId2 = ?`
+                // (optionally AND status): the unique pair constraint serves
+                // neither leg, so each leg scanned without these.
+                @Index(name = "idx_friendships_user1", columnList = "user_id_1"),
+                @Index(name = "idx_friendships_user2", columnList = "user_id_2")
+        })
 public class Friendship {
 
     @Id
