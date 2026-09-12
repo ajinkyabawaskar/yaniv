@@ -32,6 +32,33 @@ sudo systemctl status yaniv
 tail -f /var/log/yaniv/app.log
 ```
 
+### Production logging
+
+Per-action lines (game actions, auto-play, timers) log at DEBUG, so the
+default INFO output stays small. The systemd unit appends stdout to
+`/var/log/yaniv/app.log`, which logback cannot rotate -- rotate it on the
+server with logrotate (`copytruncate`, since the unit holds the file open).
+This is a server-side `/etc` file, intentionally not kept in the repo:
+
+```bash
+sudo tee /etc/logrotate.d/yaniv > /dev/null <<'EOF'
+/var/log/yaniv/app.log {
+    daily
+    rotate 30
+    maxsize 100M
+    copytruncate
+    compress
+    delaycompress
+    missingok
+    notifempty
+}
+EOF
+```
+
+To temporarily see the hot-path DEBUG lines, set
+`logging.level.shop.abwork.yanif.websocket.GameStateController=DEBUG`
+in `/opt/yaniv/application-prod.properties` and restart.
+
 ## Run Production Server
 
 ```bash

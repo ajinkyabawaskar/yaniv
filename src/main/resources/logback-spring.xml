@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Task 3 logging backstop for the 207MB unrotated app.log.
+
+  Console stays the primary sink (the prod systemd unit appends it to
+  /var/log/yaniv/app.log; rotate THAT file with logrotate plus copytruncate,
+  see "Production logging" in docs/build-deploy.md, because the unit holds
+  the file open and logback must not write the same path or every line would
+  land twice). No FILE appender here on purpose: rotation belongs to
+  logrotate, not to a second writer on the same file.
+
+  Default level is INFO: the per-action/per-move/per-timer DEBUG lines in
+  GameStateController stay off unless enabled, e.g. via
+  logging.level.shop.abwork.yanif.websocket.GameStateController=DEBUG.
+-->
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+    <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+
+    <logger name="shop.abwork.yanif" level="INFO"/>
+</configuration>

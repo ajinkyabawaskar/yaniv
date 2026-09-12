@@ -112,6 +112,11 @@ Granted once per **absence**, and only counted while it is that player's turn.
 **Turn timer / auto-play** — the server playing a move for an **absent** player once their **grace
 period** has elapsed. A player with any session attached to the room is never auto-played.
 
+**Idle auto-play cap** — the bound on how far a room where *every* active player is **absent**
+may self-advance: at most `game.max-idle-auto-rounds` consecutive fully-auto rounds, or
+`game.max-idle-auto-minutes` of continuous all-absence. Past it the room is **parked**: timers
+cancelled, engine evicted with its **snapshot** kept, so the next human touch resumes play.
+
 **Snapshot** — the full engine state serialised to Redis after every mutation, so a restarted
 server resumes games instead of re-dealing.
 

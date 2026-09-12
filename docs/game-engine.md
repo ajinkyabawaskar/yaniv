@@ -490,12 +490,21 @@ abandons mid-round — never finished, never aborted — would hold memory for t
 
 Two consequences worth knowing:
 
-- **A room whose snapshot write failed is never evicted.** `finishMutation` persists best-effort, so
+- **A room whose snapshot write failed is pinned — but the pin is bounded.** `finishMutation` persists best-effort, so
   a Redis outage leaves memory ahead of the snapshot. Those rooms are tracked in `unpersistedRooms`
-  and held — evicting one would silently roll the game back to a stale snapshot, or lose it
-  entirely. The sweep **retries the write** under the engine lock before giving up on a room:
-  an abandoned game gets no further actions, so that retry is its only route back to being
-  evictable rather than resident forever.
+  (`GameStateController.java:98`); hot-path write failures only pin there. The sweep **retries the write**
+  under the engine lock before giving up on a room (`evictIdleEngines`, `:1290`; retry at `:1326`):
+  an abandoned game gets no further actions, so that retry is its route back to being
+  evictable. Only the sweep's own retries count toward the bound (`sweepRetryFailures`, `:109`,
+  incremented at `:1335` — hot-path failures do not count, since one player turn can schedule
+  1-2 async persists). If the retry still fails, the room is **evicted on top of its last good snapshot**
+  once sweep retries reach `MAX_PERSIST_FAILURES_BEFORE_EVICT` (**3**, `:112`) — provided the room is
+  otherwise idle-eviction eligible (past the touch cutoff, no pending timers) and has at least one
+  successful persist on record (`lastSuccessfulPersist`, `:110`). A room that **never** persisted
+  (no good snapshot exists) stays pinned, since evicting it would lose the game entirely rather
+  than roll it back to a stale copy. Any successful persist (hot path or sweep retry) clears the
+  retry count. The async persist task (`:1538-1544`) catches all `Throwable`s including `Error`,
+  so a failed write never kills the persist worker thread.
 - **A finished game is kept in memory until its result reaches the database.** `GAME_OVER` releases
   the engine only once `completeGame` succeeds; the snapshot is deleted last, so the game stays
   recoverable until then. Nothing else would retry — a terminal engine accepts no further actions —
@@ -746,6 +755,38 @@ watching. Only absence starts a clock.
 `turnTimerSeconds`. Note "active" means non-eliminated, not connected — an
 eliminated spectator who is still connected does not hold the round open. A player who drops during `ROUND_OVER` is still recorded as
 absent by Presence, so unlike before, their drop *can* now trigger the advance.
+
+### Idle auto-play cap
+
+An all-absent room would otherwise self-advance forever — every bot move costs a
+Redis write, a MySQL insert and an N-player broadcast. Two config keys bound it
+(`application.properties:102-113`):
+`game.max-idle-auto-rounds` (**20**) and `game.max-idle-auto-minutes` (**30**).
+Either disables its half when set to 0.
+
+Tracking is per room (`GameStateController.java:168,174`): `idleAutoRounds` counts
+consecutive fully-auto rounds — incremented each time `runAutoNextRound` advances
+an all-absent room (`:1811`) — and `idleAutoSinceMillis` stamps when the room was
+first observed all-absent. **Any human action restarts both budgets**
+(`noteHumanAction`, `:249`, called from the action, Yaniv, contest and next-round
+handlers); a room that stops being all-absent restarts only the clock. The trigger
+reuses the same all-absent predicate as the round-over advance
+(`isAllActiveAbsent`, `:242`), so a room with even one connected active player is
+never affected.
+
+When the cap fires, the room is parked (`stopIdleAutoPlay`, `:301`): its turn and
+contest timers are cancelled and no further auto timers are scheduled. A finished
+engine goes through the existing `finalizeFinishedGame` path; anything earlier
+cannot cleanly declare a winner — no engine API sets one — so the engine is
+evicted with its snapshot kept, and the next human touch restores it via
+`getOrRestoreEngine` and play continues. One line is logged either way. The
+rounds half is enforced only at `ROUND_OVER` boundaries (`:1776,1806`) so a round
+already under way is never stalled mid-hand; the minutes half is also checked on
+the turn path (`:1884,1929`), where a capped room simply idles with no deadline
+armed until the sweep reclaims it. The in-flight Yaniv contest timer is left to
+resolve — it is a single bounded timer, and its `ROUND_OVER` is what the cap
+parks on. Bookkeeping is dropped with everything else on finalize, evict and
+abort (`forgetIdleAutoState`, `:255`).
 
 ### What the bot plays
 

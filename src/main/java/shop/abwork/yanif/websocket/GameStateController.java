@@ -15,6 +15,9 @@ import shop.abwork.yanif.game.model.Hand;
 import shop.abwork.yanif.service.GameService;
 import shop.abwork.yanif.service.PresenceService;
 import shop.abwork.yanif.service.UserService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.event.EventListener;
 import tools.jackson.databind.json.JsonMapper;
@@ -38,6 +41,8 @@ import java.util.concurrent.*;
  */
 @Controller
 public class GameStateController {
+
+    private static final Logger log = LoggerFactory.getLogger(GameStateController.class);
 
     private static final JsonMapper JSON_MAPPER = JsonMapper.builder().build();
 
@@ -98,6 +103,20 @@ public class GameStateController {
     private final Set<String> unpersistedRooms = ConcurrentHashMap.newKeySet();
 
     /**
+     * Sweep-retry failures per room, and the last time a write landed. The pin in
+     * {@link #evictIdleEngines} is bounded: a room that keeps failing is eventually
+     * evicted on top of its last good snapshot instead of occupying memory for the
+     * life of the process. Only the sweep's own retries count toward the bound —
+     * hot-path writes merely pin via {@code unpersistedRooms}, since one player turn
+     * can schedule 1-2 async persists (discard + bonus-discard). A room with no good
+     * snapshot (never persisted) stays pinned.
+     */
+    private final Map<String, Integer> sweepRetryFailures = new ConcurrentHashMap<>();
+    private final Map<String, Long> lastSuccessfulPersist = new ConcurrentHashMap<>();
+    /** Consecutive sweep-retry failures after which an idle room falls back to its last good snapshot. */
+    private static final int MAX_PERSIST_FAILURES_BEFORE_EVICT = 3;
+
+    /**
      * Finished games whose result has not reached the database. The engine is held until
      * it does, because nothing else would ever retry: a terminal engine accepts no
      * further actions, so no later mutation would run the write again.
@@ -126,8 +145,7 @@ public class GameStateController {
 
     // Turn timer configuration (game.turn-timer-seconds / game.auto-play-enabled)
     private final int turnTimerSeconds;
-    private final boolean autoPlayEnabled;
-    // Yaniv contest window (game.yaniv-contest-timer-seconds)
+    private final boolean autoPlayEnabled;    // Yaniv contest window (game.yaniv-contest-timer-seconds)
     private final int yanivContestTimerSeconds;
     /**
      * How long a parked bonus decision is held before the server declines it
@@ -136,6 +154,28 @@ public class GameStateController {
     private final int bonusDiscardTimeoutSeconds;
     // Max hand score for a legal Yaniv call (game.yaniv-threshold)
     private final int yanivThreshold;
+    /**
+     * Idle auto-play caps (game.max-idle-auto-rounds / game.max-idle-auto-minutes).
+     * A room where every active player is absent self-advances via auto-play; these
+     * bound how far that may run before the room is parked. Non-positive disables
+     * that cap. Constructor-injected like the turn-timer settings above so tests
+     * constructing this class directly keep working through the short overload.
+     */
+    private final int maxIdleAutoRounds;
+    private final long maxIdleAutoMinutes;
+
+    /**
+     * Consecutive fully-auto rounds per room: incremented each time an all-absent
+     * room auto-advances past ROUND_OVER, reset to 0 on ANY human action in that
+     * room. Rooms with even one connected active player never accrue here.
+     */
+    private final Map<String, Integer> idleAutoRounds = new ConcurrentHashMap<>();
+    /**
+     * Wall-clock ms when the room was first observed with every active player
+     * absent. Cleared whenever the room stops being all-absent, so the minutes
+     * cap measures one continuous all-absent stretch.
+     */
+    private final Map<String, Long> idleAutoSinceMillis = new ConcurrentHashMap<>();
 
     // Action deduplication: track processed action IDs per player per room
     // Format: roomId:playerId:actionId -> timestamp
@@ -149,17 +189,38 @@ public class GameStateController {
     // roomId -> Set of disconnected userIds
 
     public GameStateController(GameService gameService,
-                              PresenceService presenceService,
-                              UserService userService,
-                              SimpMessagingTemplate messagingTemplate,
-                              Presence presence,
-                              @Value("${game.turn-timer-seconds:45}") int turnTimerSeconds,
-                              @Value("${game.auto-play-enabled:true}") boolean autoPlayEnabled,
-                              @Value("${game.yaniv-contest-timer-seconds:5}") int yanivContestTimerSeconds,
-                              @Value("${game.yaniv-threshold:7}") int yanivThreshold,
-                              @Value("${game.absence-grace-seconds:45}") long absenceGraceSeconds,
-                              @Value("${game.bonus-discard-timeout-seconds:30}") int bonusDiscardTimeoutSeconds,
-                              @Value("${game.spectator-meters-enabled:true}") boolean spectatorMetersEnabled) {
+                               PresenceService presenceService,
+                               UserService userService,
+                               SimpMessagingTemplate messagingTemplate,
+                               Presence presence,
+                               @Value("${game.turn-timer-seconds:45}") int turnTimerSeconds,
+                               @Value("${game.auto-play-enabled:true}") boolean autoPlayEnabled,
+                               @Value("${game.yaniv-contest-timer-seconds:5}") int yanivContestTimerSeconds,
+                               @Value("${game.yaniv-threshold:7}") int yanivThreshold,
+                               @Value("${game.absence-grace-seconds:45}") long absenceGraceSeconds,
+                               @Value("${game.bonus-discard-timeout-seconds:30}") int bonusDiscardTimeoutSeconds,
+                               @Value("${game.spectator-meters-enabled:true}") boolean spectatorMetersEnabled) {
+        this(gameService, presenceService, userService, messagingTemplate, presence,
+                turnTimerSeconds, autoPlayEnabled, yanivContestTimerSeconds, yanivThreshold,
+                absenceGraceSeconds, bonusDiscardTimeoutSeconds, spectatorMetersEnabled,
+                20, 30L);
+    }
+
+    @Autowired
+    public GameStateController(GameService gameService,
+                               PresenceService presenceService,
+                               UserService userService,
+                               SimpMessagingTemplate messagingTemplate,
+                               Presence presence,
+                               @Value("${game.turn-timer-seconds:45}") int turnTimerSeconds,
+                               @Value("${game.auto-play-enabled:true}") boolean autoPlayEnabled,
+                               @Value("${game.yaniv-contest-timer-seconds:5}") int yanivContestTimerSeconds,
+                               @Value("${game.yaniv-threshold:7}") int yanivThreshold,
+                               @Value("${game.absence-grace-seconds:45}") long absenceGraceSeconds,
+                               @Value("${game.bonus-discard-timeout-seconds:30}") int bonusDiscardTimeoutSeconds,
+                               @Value("${game.spectator-meters-enabled:true}") boolean spectatorMetersEnabled,
+                               @Value("${game.max-idle-auto-rounds:20}") int maxIdleAutoRounds,
+                               @Value("${game.max-idle-auto-minutes:30}") long maxIdleAutoMinutes) {
         this.gameService = gameService;
         this.presenceService = presenceService;
         this.userService = userService;
@@ -172,7 +233,108 @@ public class GameStateController {
         this.absenceGraceSeconds = absenceGraceSeconds;
         this.bonusDiscardTimeoutSeconds = bonusDiscardTimeoutSeconds;
         this.spectatorMetersEnabled = spectatorMetersEnabled;
+        this.maxIdleAutoRounds = maxIdleAutoRounds;
+        this.maxIdleAutoMinutes = maxIdleAutoMinutes;
 
+    }
+
+    /**
+     * The same all-absent check round-over self-advance uses: every non-eliminated
+     * player has an absence recorded against this room. A room with even one
+     * connected active player is never treated as idle, whatever the caps say.
+     */
+    private boolean isAllActiveAbsent(YanivGameEngine engine, String roomId) {
+        return engine.getAllPlayerIds().stream()
+                .filter(p -> !engine.getEliminatedPlayers().contains(p))
+                .allMatch(p -> presence.absentSince(roomId, p).isPresent());
+    }
+
+    /** ANY human action in the room restarts the idle budget from zero. */
+    private void noteHumanAction(String roomId) {
+        idleAutoRounds.remove(roomId);
+        idleAutoSinceMillis.remove(roomId);
+    }
+
+    /** Drop the per-room idle bookkeeping (same places unpersistedRooms entries go). */
+    private void forgetIdleAutoState(String roomId) {
+        idleAutoRounds.remove(roomId);
+        idleAutoSinceMillis.remove(roomId);
+    }
+
+    /**
+     * Wall-clock half of the idle cap: true when an all-absent room has been
+     * continuously absent past game.max-idle-auto-minutes. Checked on the turn
+     * path too, so a single never-ending round cannot outrun the rounds cap.
+     * A room that stops being all-absent restarts the clock; only a human action
+     * restarts the rounds count.
+     */
+    private boolean isIdleTimeCapped(String roomId, YanivGameEngine engine) {
+        if (!isAllActiveAbsent(engine, roomId)) {
+            idleAutoSinceMillis.remove(roomId);
+            return false;
+        }
+        if (maxIdleAutoMinutes <= 0) {
+            return false;
+        }
+        long since = idleAutoSinceMillis.computeIfAbsent(roomId, k -> System.currentTimeMillis());
+        return System.currentTimeMillis() - since >= maxIdleAutoMinutes * 60_000L;
+    }
+
+    /**
+     * Full idle cap: the rounds half (consecutive auto-advanced rounds past
+     * game.max-idle-auto-rounds) or the wall-clock half above. Only ever true
+     * for an all-absent room.
+     */
+    private boolean isIdleAutoCapped(String roomId, YanivGameEngine engine) {
+        if (maxIdleAutoRounds > 0 && idleAutoRounds.getOrDefault(roomId, 0) >= maxIdleAutoRounds
+                && isAllActiveAbsent(engine, roomId)) {
+            return true;
+        }
+        return isIdleTimeCapped(roomId, engine);
+    }
+
+    /**
+     * The idle cap fired for an all-absent room: no more auto timers for it.
+     * A finished engine goes through the existing finalize path; anything else
+     * cannot cleanly declare a winner (no engine API sets one), so the engine is
+     * evicted with its snapshot kept — the next human touch restores it via
+     * getOrRestoreEngine and play continues. Must be called with the engine lock
+     * held, from a ROUND_OVER context (never YANIV_CALLED: resolving the contest
+     * is what reaches that restorable state).
+     */
+    private void stopIdleAutoPlay(String roomId, YanivGameEngine engine) {
+        cancelTurnTimer(roomId);
+        yanivTimers.computeIfPresent(roomId, (k, f) -> {
+            f.cancel(false);
+            return null;
+        });
+        if (engine.isGameOver()) {
+            if (!finalizeFinishedGame(roomId, engine)) {
+                System.err.println("Holding finished game " + roomId + " until its result is recorded");
+            }
+            return;
+        }
+        int autoRounds = idleAutoRounds.getOrDefault(roomId, 0);
+        boolean persisted = true;
+        if (gameEngines.containsKey(roomId)) {
+            persisted = persistSnapshot(roomId, engine);
+        }
+        if (persisted || lastSuccessfulPersist.containsKey(roomId)) {
+            if (gameEngines.remove(roomId, engine)) {
+                engineLastTouched.remove(roomId);
+                forgetIdleAutoState(roomId);
+                presence.roomClosed(roomId);
+                forgetGracedAbsences(roomId);
+            }
+            System.out.println("Stopped idle auto-play for room " + roomId + " after "
+                    + autoRounds + " auto rounds; engine evicted, snapshot kept for returning players");
+        } else {
+            // No good snapshot exists: evicting would lose the game outright, so the
+            // engine stays pinned with no timers armed — costing nothing further —
+            // until the sweep can retry the write.
+            System.err.println("Idle auto-play cap hit for room " + roomId
+                    + " but its snapshot is unwritten; holding engine with no timers");
+        }
     }
 
     /**
@@ -235,7 +397,7 @@ public class GameStateController {
             GameStateMessage stateMessage = buildGameStateForPlayers(engine, roomId, userId);
             messagingTemplate.convertAndSendToUser(userId, gameStateDestination(roomId), stateMessage);
 
-            System.out.println("Player " + userId + " reconnected to active game in room " + roomId + "; game state sent proactively");
+            log.debug("Player " + userId + " reconnected to active game in room " + roomId + "; game state sent proactively");
         } else {
             // Normal join or new connection to existing game
 
@@ -259,10 +421,10 @@ public class GameStateController {
                                 Authentication auth) {
         try {
             String userId = auth.getName();
-            System.out.println("=== GAME ACTION REQUEST ===");
-            System.out.println("Room ID: " + roomId);
-            System.out.println("User ID: " + userId);
-            System.out.println("Action: " + action.actionType);
+            log.debug("=== GAME ACTION REQUEST ===");
+            log.debug("Room ID: " + roomId);
+            log.debug("User ID: " + userId);
+            log.debug("Action: " + action.actionType);
 
             // Validate action
             if (!userId.equals(action.playerId)) {
@@ -276,7 +438,7 @@ public class GameStateController {
                 String dedupKey = roomId + ":" + userId + ":" + action.actionId;
                 Long existing = processedActions.putIfAbsent(dedupKey, System.currentTimeMillis());
                 if (existing != null) {
-                    System.out.println("Duplicate action ignored: " + dedupKey);
+                    log.debug("Duplicate action ignored: " + dedupKey);
                     // Re-send current state to ensure client is in sync
                     YanivGameEngine engine = gameEngines.get(roomId);
                     if (engine != null) {
@@ -379,9 +541,10 @@ public class GameStateController {
                 }
 
                 // Persist snapshot and broadcast game state to all players
+                noteHumanAction(roomId);
                 finishMutation(engine, roomId, null, allCardsDiscardedByUserId, acePickedByUserId);
             }
-            System.out.println("Game action processed, state broadcasted");
+            log.debug("Game action processed, state broadcasted");
 
         } catch (Exception e) {
             System.err.println("Error processing game action: " + e.getMessage());
@@ -417,6 +580,7 @@ public class GameStateController {
                 engine.callYaniv(userId);
 
                 // Persist snapshot, schedule the contest timer, broadcast YANIV_CALLED
+                noteHumanAction(roomId);
                 finishMutation(engine, roomId);
             }
 
@@ -458,9 +622,10 @@ public class GameStateController {
                 }
 
                 // Persist snapshot and broadcast resolved state to all players
+                noteHumanAction(roomId);
                 finishMutation(engine, roomId);
             }
-            System.out.println("Yaniv contested by " + userId + " in room " + roomId);
+            log.debug("Yaniv contested by " + userId + " in room " + roomId);
 
         } catch (Exception e) {
             sendErrorToUser(roomId, auth.getName(), e.getMessage());
@@ -1081,6 +1246,7 @@ public class GameStateController {
 
             synchronized (engine) {
                 engine.startNextRound();
+                noteHumanAction(roomId);
                 finishMutation(engine, roomId);
             }
 
@@ -1224,6 +1390,9 @@ public class GameStateController {
         gameEngines.remove(roomId);
         engineLastTouched.remove(roomId);
         unpersistedRooms.remove(roomId);
+        sweepRetryFailures.remove(roomId);
+        lastSuccessfulPersist.remove(roomId);
+        forgetIdleAutoState(roomId);
         presence.roomClosed(roomId); // an absence must not outlive the game that recorded it
         forgetGracedAbsences(roomId);
         return true;
@@ -1250,10 +1419,12 @@ public class GameStateController {
         try {
             gameService.saveGameState(roomId, engine.toSnapshot());
             unpersistedRooms.remove(roomId);
+            sweepRetryFailures.remove(roomId);
+            lastSuccessfulPersist.put(roomId, System.currentTimeMillis());
             return true;
-        } catch (Exception e) {
+        } catch (Throwable t) {
             unpersistedRooms.add(roomId);
-            System.err.println("Failed to persist game snapshot for room " + roomId + ": " + e.getMessage());
+            System.err.println("Failed to persist game snapshot for room " + roomId + ": " + t.getMessage());
             return false;
         }
     }
@@ -1306,16 +1477,31 @@ public class GameStateController {
                     continue;
                 }
                 if (unpersistedRooms.contains(roomId) && !persistSnapshot(roomId, engine)) {
-                    continue; // storage still unreachable; memory is the only copy
+                    // Retry failed too. Only sweep retries count toward the bound: a
+                    // single player turn can schedule 1-2 hot-path persists, so counting
+                    // those would evict after one turn + one sweep. Keep pinning unless
+                    // the room has a last good snapshot to fall back on AND sweep retries
+                    // passed the threshold: then evict on the stale-but-restorable copy
+                    // instead of holding memory forever. A room that never persisted once
+                    // stays pinned. Cutoff and pending-timer eligibility were already
+                    // checked above.
+                    int failures = sweepRetryFailures.merge(roomId, 1, Integer::sum);
+                    if (!lastSuccessfulPersist.containsKey(roomId)
+                            || failures < MAX_PERSIST_FAILURES_BEFORE_EVICT) {
+                        continue; // storage still unreachable; memory is the only copy
+                    }
                 }
 
                 if (gameEngines.remove(roomId, engine)) {
                     engineLastTouched.remove(roomId);
                     unpersistedRooms.remove(roomId);
+                    sweepRetryFailures.remove(roomId);
+                    lastSuccessfulPersist.remove(roomId);
+                    forgetIdleAutoState(roomId);
                     presence.roomClosed(roomId);
                 forgetGracedAbsences(roomId);
                     forgetGracedAbsences(roomId);
-                    System.out.println("Evicted idle engine for room " + roomId
+                    log.debug("Evicted idle engine for room " + roomId
                             + "; it will be restored from its snapshot on next use");
                 }
             }
@@ -1396,7 +1582,7 @@ public class GameStateController {
         YanivGameEngine restored = YanivGameEngine.fromSnapshot(snapshotJson);
         if (restored != null && !dbSaysInProgress) {
             // Stale snapshot (game finished/aborted earlier): discard it
-            System.out.println("Discarding stale snapshot for room " + roomId
+            log.debug("Discarding stale snapshot for room " + roomId
                     + " (status=" + (dbGame != null ? dbGame.getStatus() : "unknown") + ")");
             try {
                 gameService.deleteGameState(roomId);
@@ -1415,7 +1601,7 @@ public class GameStateController {
                 return published; // another thread won the race; everyone shares its instance
             }
             scheduleTurnTimerIfNeeded(restored, roomId);
-            System.out.println("Restored game engine for room " + roomId + " from snapshot");
+            log.debug("Restored game engine for room " + roomId + " from snapshot");
             return restored;
         }
 
@@ -1462,6 +1648,9 @@ public class GameStateController {
                 gameEngines.remove(roomId);
                 engineLastTouched.remove(roomId);
                 unpersistedRooms.remove(roomId);
+                sweepRetryFailures.remove(roomId);
+                lastSuccessfulPersist.remove(roomId);
+                forgetIdleAutoState(roomId);
                 presence.roomClosed(roomId);
                 forgetGracedAbsences(roomId);
                 System.err.println("Game state lost for room " + roomId + "; returned to lobby");
@@ -1498,7 +1687,17 @@ public class GameStateController {
         // and must not block the broadcast either -- see evictIdleEngines).
         // Runs on persistExecutor, NOT scheduler, so a slow Redis cannot delay
         // turn/contest/round-over timers sharing that 2-thread pool.
-        persistExecutor.execute(() -> persistSnapshot(roomId, engine));
+        // The catch-all keeps the single worker thread alive: an Error (e.g. OOM)
+        // escaping the task would kill it and pin every later failure in
+        // unpersistedRooms, so nothing may escape here.
+        persistExecutor.execute(() -> {
+            try {
+                persistSnapshot(roomId, engine);
+            } catch (Throwable t) {
+                unpersistedRooms.add(roomId);
+                System.err.println("Failed to persist game snapshot for room " + roomId + ": " + t.getMessage());
+            }
+        });
 
         // The round that ends the game transitions straight to GAME_OVER, never
         // ROUND_OVER, so it must be persisted here too or round_histories is
@@ -1551,7 +1750,7 @@ public class GameStateController {
                     }
                     engine.resolveYanivCall();
                     finishMutation(engine, roomId);
-                    System.out.println("Yaniv contest timer expired, round resolved for room: " + roomId);
+                    log.debug("Yaniv contest timer expired, round resolved for room: " + roomId);
                 }
             } catch (Exception e) {
                 System.err.println("Error auto-resolving Yaniv: " + e.getMessage());
@@ -1563,19 +1762,23 @@ public class GameStateController {
     /**
      * Schedule automatic advancement past the ROUND_OVER results screen - but only
      * when every active player is disconnected. Connected players advance manually.
+     * An all-absent room past its idle budget is parked instead (stopIdleAutoPlay).
      */
     private void scheduleRoundOverAdvance(YanivGameEngine engine, String roomId) {
         if (!autoPlayEnabled) {
             return;
         }
-        boolean allActivePlayersGone = engine.getAllPlayerIds().stream()
-                .filter(p -> !engine.getEliminatedPlayers().contains(p))
-                .allMatch(p -> presence.absentSince(roomId, p).isPresent());
-        if (!allActivePlayersGone) {
+        if (!isAllActiveAbsent(engine, roomId)) {
+            idleAutoSinceMillis.remove(roomId);
             ScheduledFuture<?> old = turnTimers.remove(roomId);
             if (old != null) {
                 old.cancel(false);
             }
+            return;
+        }
+        idleAutoSinceMillis.putIfAbsent(roomId, System.currentTimeMillis());
+        if (isIdleAutoCapped(roomId, engine)) {
+            stopIdleAutoPlay(roomId, engine);
             return;
         }
         ScheduledFuture<?> old = turnTimers.remove(roomId);
@@ -1604,10 +1807,15 @@ public class GameStateController {
                         || engine.getRoundNumber() != expectedRoundNumber) {
                     return; // players advanced already
                 }
+                if (isIdleAutoCapped(roomId, engine)) {
+                    stopIdleAutoPlay(roomId, engine);
+                    return;
+                }
                 engine.startNextRound();
+                idleAutoRounds.merge(roomId, 1, Integer::sum);
                 finishMutation(engine, roomId);
             }
-            System.out.println("Auto-started round " + engine.getRoundNumber() + " in room " + roomId);
+            log.debug("Auto-started round " + engine.getRoundNumber() + " in room " + roomId);
         } catch (Exception e) {
             System.err.println("Error auto-starting next round in room " + roomId + ": " + e.getMessage());
         }
@@ -1673,6 +1881,14 @@ public class GameStateController {
             return; // a session is still watching this game for them
         }
 
+        // Idle wall-clock cap: an all-absent room past its minutes budget idles with
+        // no deadline armed instead of burning another turn. Deliberately the minutes
+        // half only — the rounds half is enforced at ROUND_OVER boundaries, so a round
+        // already under way is never stalled mid-hand.
+        if (isIdleTimeCapped(roomId, engine)) {
+            return;
+        }
+
         // The grace clock starts now, when it becomes their turn -- not when they left.
         boolean graceSpent = absentSince.get().equals(gracedAbsences.get(graceKey(roomId, currentPlayer)));
         armTurnDeadline(roomId, currentPlayer, graceSpent ? spentGraceDelayMs : absenceGraceSeconds * 1000L);
@@ -1710,7 +1926,15 @@ public class GameStateController {
                 }
                 switch (engine.getCurrentState()) {
                     case BONUS_DISCARD -> declineUnansweredBonus(engine, roomId, expectedPlayer);
-                    case WAIT_FOR_TURN -> autoPlayTurn(engine, roomId, expectedPlayer);
+                    case WAIT_FOR_TURN -> {
+                        // A deadline armed before the minutes budget ran out must not
+                        // fire past it. (Bonus deadlines are liveness, not auto-play,
+                        // and always run.)
+                        if (isIdleTimeCapped(roomId, engine)) {
+                            return;
+                        }
+                        autoPlayTurn(engine, roomId, expectedPlayer);
+                    }
                     default -> { /* the wait resolved itself */ }
                 }
             }
@@ -1731,7 +1955,7 @@ public class GameStateController {
         // If they are absent, this counted as their grace: later turns go quickly.
         presence.absentSince(roomId, player)
                 .ifPresent(since -> gracedAbsences.put(graceKey(roomId, player), since));
-        System.out.println("Declined an unanswered bonus discard for player " + player + " in room " + roomId);
+        log.debug("Declined an unanswered bonus discard for player " + player + " in room " + roomId);
         finishMutation(engine, roomId);
     }
 
@@ -1780,7 +2004,7 @@ public class GameStateController {
 
         // This absence has now had its grace; later turns in it go quickly.
         gracedAbsences.put(graceKey(roomId, expectedPlayer), absentSince.get());
-        System.out.println("Auto-played turn for player " + expectedPlayer + " in room " + roomId);
+        log.debug("Auto-played turn for player " + expectedPlayer + " in room " + roomId);
         finishMutation(engine, roomId, expectedPlayer, allCardsDiscardedByUserId, acePickedByUserId);
     }
 
