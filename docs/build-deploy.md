@@ -85,3 +85,19 @@ Edit production config on server:
 ```bash
 sudo nano /opt/yaniv/application-prod.properties
 ```
+
+### Production server tuning (896MB box, few fast tables)
+
+These live in server-side `/etc` files, recorded here so a rebuild stays fast:
+
+- `yaniv.service` JVM flags: `-Xms256m -Xmx384m -XX:MaxMetaspaceSize=160m
+  -XX:+UseSerialGC` (96m metaspace OOMs at boot; SerialGC fits 2 vCPU).
+- `/etc/sysctl.d/99-yaniv.conf`: `vm.swappiness=10` — keeps heap in RAM,
+  swaps file cache instead (default 60 paged the heap out).
+- MySQL: `max_connections = 40` (dynamic `SET GLOBAL` + persisted in
+  `/etc/mysql/mysql.conf.d/mysqld.cnf`); 128M buffer pool is plenty.
+- Redis: `CONFIG SET maxmemory 64mb` + `maxmemory-policy allkeys-lru`
+  (persisted via `CONFIG REWRITE`); snapshots carry their own 24h TTL.
+- In-repo caps that ship with the JAR: Tomcat `threads.max=50` /
+  `min-spare=5`, Hikari `maximum-pool-size=10` / `minimum-idle=2`
+  (`src/main/resources/application.properties`).
