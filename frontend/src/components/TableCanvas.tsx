@@ -4,6 +4,7 @@ import { soundEngine } from '../utils/soundEngine';
 import { playAsafSound, stopAsafSound, playWaitingForAsafSound, stopWaitingForAsafSound } from '../utils/sound';
 import { hapticLightTick, hapticFirmSnap, hapticDoubleError } from '../utils/haptics';
 import CardFlightLayer, { CardFlightSpec, FlightPoint } from './CardFlightLayer';
+import CardFace from './CardFace';
 import './TableCanvas.css';
 import { Card, isValidCombination, calculateHandScore, getRankValueLow } from '../utils/yanivRules';
 
@@ -482,10 +483,11 @@ const HandCard = React.memo(function HandCard({
       onClick={() => onCardClick(card)}
       whileHover={{ y: isSelected ? -28 : -14, scale: 1.05, zIndex: 60 }}
     >
-      <img
+      <CardFace
+        rank={card.rank}
+        suit={card.suit}
         src={getCardImagePath(card.rank, card.suit)}
         alt={`${card.rank} of ${card.suit}`}
-        className="card-img"
       />
       {isSelected && <div className="selected-gold-trim" />}
       {isDragTarget && <div className="reorder-insert-glow" />}
@@ -565,10 +567,11 @@ const DiscardFanCard = React.memo(function DiscardFanCard({
       whileHover={isDrawable ? { y: -8, scale: 1.03, rotate: 0 } : { x: [-1, 1, -1, 0] }}
       onClick={() => onDraw(card)}
     >
-      <img
+      <CardFace
+        rank={card.rank}
+        suit={card.suit}
         src={getCardImagePath(card.rank, card.suit)}
         alt={`${card.rank} of ${card.suit}`}
-        className="card-img"
       />
       {isSequenceMiddleLocked && totalCards < 4 && (
         <div className="locked-indicator" title="Middle sequence cards cannot be drawn">
@@ -938,6 +941,8 @@ function TableCanvas({
           faceUp: true,
           faceImageSrc: getCardImagePath(card.rank, card.suit),
           faceAlt: `${card.rank} of ${card.suit}`,
+          faceRank: card.rank,
+          faceSuit: card.suit,
           rotation: slots[i].rotation,
           delay: i * 0.06,
         }))
@@ -967,6 +972,8 @@ function TableCanvas({
           faceUp: true,
           faceImageSrc: getCardImagePath(card.rank, card.suit),
           faceAlt: `${card.rank} of ${card.suit}`,
+          faceRank: card.rank,
+          faceSuit: card.suit,
         },
       ]);
     }
@@ -1035,6 +1042,8 @@ function TableCanvas({
           // when the withheld card joins the hand on landing.
           faceImageSrc: getCardImagePath(drawn.rank, drawn.suit),
           faceAlt: `${drawn.rank} of ${drawn.suit}`,
+          faceRank: drawn.rank,
+          faceSuit: drawn.suit,
           revealFace: !faceUp,
         });
         soundEngine.playDealerFlick();
@@ -1427,6 +1436,8 @@ function TableCanvas({
           faceUp: true,
           faceImageSrc: getCardImagePath(card.rank, card.suit),
           faceAlt: `${card.rank} of ${card.suit}`,
+          faceRank: card.rank,
+          faceSuit: card.suit,
           rotation: slot.rotation,
           delay: i * 0.06,
         });
@@ -1831,7 +1842,9 @@ function TableCanvas({
                 You drew a <strong>{pendingBonusCard.rank} of {pendingBonusCard.suit}</strong>, matching the {pendingBonusCard.rank} you just discarded!
               </div>
               <div className="bonus-card-display">
-                <img
+                <CardFace
+                  rank={pendingBonusCard.rank}
+                  suit={pendingBonusCard.suit}
                   src={getCardImagePath(pendingBonusCard.rank, pendingBonusCard.suit)}
                   alt={`${pendingBonusCard.rank} of ${pendingBonusCard.suit}`}
                   className="bonus-card-img"

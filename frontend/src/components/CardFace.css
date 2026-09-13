@@ -1,0 +1,76 @@
+/* ==========================================================================
+   CardFace.css — text fallback behind every card-face image.
+   The fallback paints underneath the <img>: visible while the SVG is still
+   loading or when it fails (blank-white-card devices), covered once it loads.
+   ========================================================================== */
+
+.card-face {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #fff;
+  overflow: hidden;
+  /* Lets the fallback glyphs scale with the card instead of the viewport. */
+  container-type: size;
+}
+
+/* Sized contexts (revealed hands, rules page, bonus panel) put the size on
+   the wrapper via their own class; the fallback simply fills it. */
+.card-face > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.card-face-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+}
+
+.card-face-center {
+  font-size: 32px;
+  font-size: 38cqw;
+  line-height: 1;
+}
+
+.card-face-corner {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.05;
+}
+
+.card-face-corner-tl {
+  top: 5cqh;
+  left: 7cqw;
+}
+
+.card-face-corner-br {
+  bottom: 5cqh;
+  right: 7cqw;
+  transform: rotate(180deg);
+}
+
+.card-face-rank {
+  font-family: 'DM Mono', monospace;
+  font-weight: 700;
+  font-size: 14px;
+  font-size: 17cqw;
+}
+
+.card-face-suit {
+  font-size: 13px;
+  font-size: 15cqw;
+}
+
+/* While loading the image is transparent so the fallback shows through, but
+   it still occupies the full face so there is no layout shift on swap. */
+.card-face-img-loading {
+  opacity: 0;
+}

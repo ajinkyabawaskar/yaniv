@@ -3,6 +3,7 @@ import { useStomp } from '../contexts/StompContext';
 import { useGameStore, ReactionEvent } from '../stores/gameStore';
 import { gameApi } from '../utils/api';
 import TableCanvas, { OpponentInfo, TableCanvasHandle, getCardImagePath } from './TableCanvas';
+import CardFace from './CardFace';
 import ScoreboardView from './ScoreboardView';
 import { playTurnChangeSound, playYourTurnSound, isSoundEnabled, setSoundEnabled, setupAudioUnlock, preloadAsafSound, stopAsafSound, preloadWaitingForAsafSound, playAllCardsDiscardedSound, preloadAllCardsDiscardedSound, playAcePickedSound, preloadAcePickedSound } from '../utils/sound';
 import { setupBgMusicUnlock, preloadBgMusic } from '../utils/backgroundMusic';
@@ -689,8 +690,10 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
                         </div>
                         <div className="revealed-hand-cards">
                           {hand.map((card) => (
-                            <img
+                            <CardFace
                               key={card.id}
+                              rank={card.rank}
+                              suit={card.suit}
                               src={getCardImagePath(card.rank, card.suit)}
                               alt={`${card.rank} of ${card.suit}`}
                               className="revealed-card-img"

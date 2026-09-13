@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getCardImagePath } from '../components/TableCanvas';
+import CardFace from '../components/CardFace';
 import './RulesView.css';
 
 /**
@@ -15,8 +16,10 @@ type Spec = [string, string];
 const Cards = ({ cards, muted }: { cards: Spec[]; muted?: boolean }) => (
   <div className={`rule-cards${muted ? ' rule-cards-muted' : ''}`}>
     {cards.map(([rank, suit], i) => (
-      <img
+      <CardFace
         key={`${rank}-${suit}-${i}`}
+        rank={rank}
+        suit={suit}
         src={getCardImagePath(rank, suit)}
         alt={`${rank} of ${suit}`}
         className="rule-card"

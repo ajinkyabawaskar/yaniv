@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
+import CardFace from './CardFace';
 import './CardFlightLayer.css';
 
 /**
@@ -26,6 +27,9 @@ export interface CardFlightSpec {
   /** Resolved face image URL, required when faceUp. */
   faceImageSrc?: string;
   faceAlt?: string;
+  /** Rank/suit for the text fallback shown while the face image loads or fails. */
+  faceRank?: string;
+  faceSuit?: string;
   /**
    * Deck-draw reveal: the flight starts showing the back and flips to the
    * face mid-travel (requires faceImageSrc). Without this the drawn card
@@ -131,9 +135,17 @@ function SingleFlight({
       </div>
     </div>
   );
-  const faceImg = flight.faceImageSrc ? (
-    <img src={flight.faceImageSrc} alt={flight.faceAlt ?? 'card'} className="card-img" draggable={false} />
-  ) : null;
+  const faceImg =
+    flight.faceImageSrc && flight.faceRank && flight.faceSuit ? (
+      <CardFace
+        rank={flight.faceRank}
+        suit={flight.faceSuit}
+        src={flight.faceImageSrc}
+        alt={flight.faceAlt ?? 'card'}
+      />
+    ) : flight.faceImageSrc ? (
+      <img src={flight.faceImageSrc} alt={flight.faceAlt ?? 'card'} className="card-img" draggable={false} />
+    ) : null;
 
   const flightBody = shouldReveal ? (
     <motion.div
