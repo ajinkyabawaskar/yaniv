@@ -6,6 +6,8 @@ import { useAuthStore } from './stores/authStore';
 import AuthView from './views/AuthView';
 import MainView from './views/MainView';
 import RulesView from './views/RulesView';
+import UpdateBanner from './components/UpdateBanner';
+import { useBackendVersionCheck } from './hooks/useBackendVersionCheck';
 import { preloadAllCards, preloadCardsViaLink } from './utils/cardPreload';
 import './App.css';
 
@@ -33,9 +35,12 @@ function LoginRoute() {
 
 function AppContent() {
   const { isAuthenticated } = useAuthStore();
+  const { updateAvailable, backendVersion, snooze } = useBackendVersionCheck();
 
   return (
-    <Routes>
+    <>
+      {updateAvailable && <UpdateBanner backendVersion={backendVersion} onLater={snooze} />}
+      <Routes>
       <Route path="/login" element={<LoginRoute />} />
       <Route
         path="/home"
@@ -58,6 +63,7 @@ function AppContent() {
       <Route path="/" element={<Navigate to="/home" replace />} />
       <Route path="*" element={<Navigate to="/home" replace />} />
     </Routes>
+    </>
   );
 }
 

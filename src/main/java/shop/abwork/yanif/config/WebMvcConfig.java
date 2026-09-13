@@ -6,7 +6,6 @@ import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 import org.springframework.web.servlet.resource.PathResourceResolver;
-import org.springframework.http.CacheControl;
 
 import java.io.IOException;
 
@@ -33,10 +32,11 @@ public class WebMvcConfig implements WebMvcConfigurer {
 
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
-        // Single handler for all static resources with SPA fallback to index.html
+        // Single handler for all static resources with SPA fallback to index.html.
+        // No handler-level Cache-Control here: StaticResourceCacheInterceptor is the
+        // single writer, and the resource handler would overwrite its headers.
         registry.addResourceHandler("/**")
                 .addResourceLocations("classpath:/static/")
-                .setCacheControl(CacheControl.noStore().mustRevalidate())
                 .resourceChain(true)
                 .addResolver(new PathResourceResolver() {
                     @Override

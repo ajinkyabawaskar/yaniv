@@ -2,6 +2,7 @@
 // Two distinct sounds:
 // 1. playTurnChangeSound — soft tick when turn passes to another player
 // 2. playYourTurnSound  — bright ding when it's your turn (don't play #1 in this case)
+import { assetUrl } from './api';
 
 let audioCtx: AudioContext | null = null;
 const STORAGE_KEY = 'yanif_sound_enabled';
@@ -88,7 +89,7 @@ let asafAudio: HTMLAudioElement | null = null;
 function getAsafAudio(): HTMLAudioElement | null {
   if (typeof window === 'undefined' || typeof Audio === 'undefined') return null;
   if (!asafAudio) {
-    asafAudio = new Audio('/asaf.mp3');
+    asafAudio = new Audio(assetUrl('/asaf.mp3'));
     asafAudio.preload = 'auto';
   }
   return asafAudio;
@@ -127,7 +128,7 @@ let waitingForAsafAudio: HTMLAudioElement | null = null;
 function getWaitingForAsafAudio(): HTMLAudioElement | null {
   if (typeof window === 'undefined' || typeof Audio === 'undefined') return null;
   if (!waitingForAsafAudio) {
-    waitingForAsafAudio = new Audio('/waiting-for-asaf.mp3');
+    waitingForAsafAudio = new Audio(assetUrl('/waiting-for-asaf.mp3'));
     waitingForAsafAudio.preload = 'auto';
   }
   return waitingForAsafAudio;
@@ -165,7 +166,7 @@ let allCardsDiscardedAudio: HTMLAudioElement | null = null;
 function getAllCardsDiscardedAudio(): HTMLAudioElement | null {
   if (typeof window === 'undefined' || typeof Audio === 'undefined') return null;
   if (!allCardsDiscardedAudio) {
-    allCardsDiscardedAudio = new Audio('/all-cards-discarded.mp3');
+    allCardsDiscardedAudio = new Audio(assetUrl('/all-cards-discarded.mp3'));
     allCardsDiscardedAudio.preload = 'auto';
   }
   return allCardsDiscardedAudio;
@@ -198,7 +199,7 @@ const ACE_PICKED_PLAY_MS = 3000;
 function getAcePickedAudio(): HTMLAudioElement | null {
   if (typeof window === 'undefined' || typeof Audio === 'undefined') return null;
   if (!acePickedAudio) {
-    acePickedAudio = new Audio('/ace-picked.mp3');
+    acePickedAudio = new Audio(assetUrl('/ace-picked.mp3'));
     acePickedAudio.preload = 'auto';
   }
   return acePickedAudio;

@@ -7,6 +7,7 @@ import CardFlightLayer, { CardFlightSpec, FlightPoint } from './CardFlightLayer'
 import CardFace from './CardFace';
 import './TableCanvas.css';
 import { Card, isValidCombination, calculateHandScore, getRankValueLow } from '../utils/yanivRules';
+import { assetUrl } from '../utils/api';
 
 import type { ReactionEvent, SpectatorReading } from '../stores/gameStore';
 
@@ -130,10 +131,10 @@ export const getCardImagePath = (rank: string, suit: string): string => {
   const suitStr = suitMap[suit];
 
   if (!rankStr || !suitStr) {
-    return '/cards/ace_of_hearts.svg'; // fallback
+    return assetUrl('/cards/ace_of_hearts.svg'); // fallback
   }
 
-  const path = `/cards/${rankStr}_of_${suitStr}.svg`;
+  const path = assetUrl(`/cards/${rankStr}_of_${suitStr}.svg`);
   cardImagePathCache.set(cacheKey, path);
   return path;
 };

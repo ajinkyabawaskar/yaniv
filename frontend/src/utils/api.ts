@@ -133,6 +133,16 @@ export const presenceApi = {
   markOnline: () => apiClient.post('/presence/online', {}),
 };
 
+// Backend version (for drift detection against FRONTEND_VERSION)
+export interface BackendVersionResponse {
+  version: string;
+  name: string;
+}
+
+export const versionApi = {
+  getVersion: () => apiClient.get<BackendVersionResponse>('/version'),
+};
+
 // Room/Game API Response Types
 export interface CreateRoomResponse {
   gameId: string;
@@ -166,6 +176,19 @@ export interface PlayersResponse {
 
 // Embedded frontend version (injected at build time via REACT_APP_VERSION)
 export const FRONTEND_VERSION: string = process.env.REACT_APP_VERSION || 'dev';
+
+/**
+ * Release-pin an unhashed static asset URL (card SVGs, sounds) with the build
+ * version. Bundles under /static/** are content-hashed already, but these
+ * files keep the same URL across deploys — the ?v= pin makes each release's
+ * URL distinct so immutable (1-year) caching can never serve stale bytes
+ * after a version-drift reload. No-op on dev builds.
+ */
+export function assetUrl(path: string, version: string = FRONTEND_VERSION): string {
+  if (!version || version === 'dev') return path;
+  const sep = path.includes('?') ? '&' : '?';
+  return `${path}${sep}v=${encodeURIComponent(version)}`;
+}
 
 // Room/Game API
 export const gameApi = {

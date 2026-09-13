@@ -4,13 +4,15 @@
  * so they render instantly during gameplay.
  */
 import { useState, useCallback } from 'react';
+import { assetUrl } from './api';
 
 // All 13 ranks × 4 suits = 52 cards
 const RANKS = ['ace', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'jack', 'queen', 'king'] as const;
 const SUITS = ['hearts', 'diamonds', 'clubs', 'spades'] as const;
 
 /**
- * Generate all card image paths
+ * Generate all card image paths, release-pinned (?v=) so immutable caching
+ * can never serve last-release's art after a version-drift reload.
  */
 export function getAllCardPaths(): string[] {
   const paths: string[] = [];
@@ -18,7 +20,7 @@ export function getAllCardPaths(): string[] {
   // Standard 52 cards
   for (const suit of SUITS) {
     for (const rank of RANKS) {
-      paths.push(`/cards/${rank}_of_${suit}.svg`);
+      paths.push(assetUrl(`/cards/${rank}_of_${suit}.svg`));
     }
   }
 

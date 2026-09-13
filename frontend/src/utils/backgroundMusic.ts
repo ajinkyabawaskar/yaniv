@@ -1,14 +1,20 @@
 // Background music — hidden HTMLAudio, low volume so turn sounds stay audible.
 // Loads /background.mp3 in background, plays only after user interaction.
+import { assetUrl } from './api';
 
 let bgAudio: HTMLAudioElement | null = null;
 const STORAGE_KEY = 'yanif_bg_music_enabled';
 const VOLUME = 0.15; // low so game action audio is clearly audible
 
+/** Release-pinned background track URL (single place so <audio> and preload hint match). */
+export function getBgMusicUrl(): string {
+  return assetUrl('/background.mp3');
+}
+
 function getBgAudio(): HTMLAudioElement | null {
   if (typeof window === 'undefined') return null;
   if (!bgAudio) {
-    bgAudio = new Audio('/background.mp3');
+    bgAudio = new Audio(getBgMusicUrl());
     bgAudio.loop = true;
     bgAudio.preload = 'auto';
     bgAudio.volume = VOLUME;
@@ -94,11 +100,12 @@ export function preloadBgMusic() {
     audio.load();
   }
   // Also add link preload for early fetch (no UI)
-  if (typeof document !== 'undefined' && !document.querySelector('link[href="/background.mp3"]')) {
+  const bgUrl = getBgMusicUrl();
+  if (typeof document !== 'undefined' && !document.querySelector(`link[href="${bgUrl}"]`)) {
     const link = document.createElement('link');
     link.rel = 'preload';
     link.as = 'audio';
-    link.href = '/background.mp3';
+    link.href = bgUrl;
     document.head.appendChild(link);
   }
 }
