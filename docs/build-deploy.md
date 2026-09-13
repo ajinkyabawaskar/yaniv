@@ -86,6 +86,22 @@ Edit production config on server:
 sudo nano /opt/yaniv/application-prod.properties
 ```
 
+### Version ownership (`app.version` lives in three places)
+
+The service runs with
+`-Dspring.config.location=file:/opt/yaniv/application-prod.properties`,
+which **replaces** the JAR-baked `application.properties` at runtime. So:
+
+- `src/main/resources/application.properties` (`app.version`) — bumped by
+  `./bump-version.sh`, baked into the JAR, and embedded into the frontend as
+  `REACT_APP_VERSION` by `frontend/build-version.sh`. Source of truth in git.
+- `frontend/package.json` (`version`) — bumped alongside, for consistency.
+- `/opt/yaniv/application-prod.properties` (`app.version`) — **authoritative
+  at runtime** (this is what `/api/v1/version` reports). Managed by
+  `./deploy.sh` step 4 on every deploy; the final step polls
+  `/api/v1/version` until it matches. Never hand-edit this line — it will
+  just be overwritten (and drift again) on the next deploy.
+
 ### Production server tuning (896MB box, few fast tables)
 
 These live in server-side `/etc` files, recorded here so a rebuild stays fast:
