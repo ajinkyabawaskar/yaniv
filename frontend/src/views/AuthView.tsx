@@ -3,7 +3,6 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { userApi } from '../utils/api';
 import { getPersistentFingerprint } from '../utils/fingerprint';
-import { preloadAllCards } from '../utils/cardPreload';
 import './AuthView.css';
 
 export default function AuthView() {
@@ -15,13 +14,9 @@ export default function AuthView() {
   const [displayName, setDisplayName] = useState('');
   const [isAutoResolving, setIsAutoResolving] = useState(true);
 
-  // Start preloading card assets immediately on auth page load
-  // This runs in background while user enters name / auto-resolves
-  useEffect(() => {
-    preloadAllCards().catch(() => {
-      // Silently ignore - lobby will also attempt preload
-    });
-  }, []);
+  // Card preload moved to MainView (the logged-in shell): warming 52 SVGs on
+  // the login screen spent a login-visitor's bandwidth for cards they may
+  // never see. Card faces still paint their text fallback while loading.
 
   useEffect(() => {
     // Attempt zero-friction auto-resolution if stored displayName exists

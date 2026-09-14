@@ -149,6 +149,44 @@
   color: var(--gold-light);
 }
 
+/* Non-blocking join failure notice — the old alert() claimed a table was
+   invalid on a transient race, so failures surface inline instead. */
+.join-error-banner {
+  position: fixed;
+  top: calc(var(--navbar-height, 56px) + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  max-width: min(520px, calc(100vw - 24px));
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(80, 7, 7, 0.95);
+  border: 1px solid rgba(239, 68, 68, 0.6);
+  color: #fca5a5;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.join-error-dismiss {
+  background: transparent;
+  border: none;
+  color: #fca5a5;
+  font-size: 18px;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.join-error-dismiss:hover {
+  background: rgba(239, 68, 68, 0.25);
+  color: #fff;
+}
+
 @media (max-width: 600px) {
   /* The icon carries it on a narrow navbar. The label is removed outright rather
      than collapsed with font-size: 0 -- iOS renders Apple Color Emoji at a minimum
@@ -313,8 +351,8 @@
   .sidebar-toggle-btn {
     padding: 5px 8px;
     font-size: 11px;
-    min-height: 32px;
-    min-width: 32px;
+    min-height: 40px;
+    min-width: 40px;
   }
 
   .nav-right {
@@ -327,8 +365,8 @@
 
   .user-profile-badge {
     padding: 5px;
-    min-height: 32px;
-    min-width: 32px;
+    min-height: 40px;
+    min-width: 40px;
   }
 
   .nav-avatar .avatar-wrapper {
@@ -338,7 +376,8 @@
   .nav-logout-btn {
     padding: 5px 8px;
     font-size: 11px;
-    min-height: 32px;
+    min-height: 40px;
+    min-width: 40px;
   }
 
   .main-sidebar-aside {
@@ -382,8 +421,8 @@
 
   .sidebar-toggle-btn {
     padding: 4px 6px;
-    min-height: 28px;
-    min-width: 28px;
+    min-height: 40px;
+    min-width: 40px;
   }
 
   .nav-logout-btn {

@@ -485,3 +485,9 @@
     display: none;
   }
 }
+
+@media (max-width: 768px) {
+  .rules-back {
+    min-height: 40px;
+  }
+}

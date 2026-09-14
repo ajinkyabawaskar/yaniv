@@ -10,10 +10,20 @@ class SoundEngine {
 
   constructor() {
     this.setupUnlockListeners();
+    // Pre-create the context now, not on first keypress: constructing an
+    // AudioContext needs no user gesture (resuming a suspended context does),
+    // so the first tap plays its sound on that same tick instead of paying a
+    // context-construction + resume round trip. Harmless while suspended; the
+    // unlock listeners resume it on the first gesture.
+    try {
+      this.getContext();
+    } catch {
+      // Browsers with no or blocked AudioContext: stay silent, like before.
+    }
   }
 
   private getContext(): AudioContext | null {
-    if (!this.ctx && (typeof window !== 'undefined' || typeof (window as any).webkitAudioContext !== 'undefined')) {
+    if (!this.ctx && typeof window !== 'undefined') {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
       if (AudioCtx) {
         this.ctx = new AudioCtx();

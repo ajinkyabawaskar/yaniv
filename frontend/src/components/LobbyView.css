@@ -338,6 +338,7 @@
   width: 100%;
   margin-top: 4px;
   padding: 8px 14px;
+  min-height: 40px;
   border-radius: 8px;
   background: rgba(212, 175, 55, 0.12);
   border: 1px solid rgba(212, 175, 55, 0.35);

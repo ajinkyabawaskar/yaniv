@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { preloadAllCards } from '../utils/cardPreload';
 import { gameApi } from '../utils/api';
 import './LobbyView.css';
 
@@ -26,16 +25,8 @@ export default function LobbyView({ onCreateGame, onJoinGame }: LobbyViewProps) 
   const [openLobbies, setOpenLobbies] = useState<OpenLobby[]>([]);
   const [loadingLobbies, setLoadingLobbies] = useState(true);
 
-  // Preload all card SVGs when lobby mounts - happens silently in background
-  useEffect(() => {
-    preloadAllCards()
-      .then(() => {
-        console.log('[CardPreload] All 54 card SVGs preloaded successfully');
-      })
-      .catch((err) => {
-        console.warn('[CardPreload] Preload completed with some errors:', err);
-      });
-  }, []);
+  // Card art preload now lives in MainView (the logged-in shell that mounts
+  // this view) — one warm-up for every path into a table, not three.
 
   // Fetch open lobbies (uses authenticated apiClient; endpoint is also public as fallback)
   useEffect(() => {

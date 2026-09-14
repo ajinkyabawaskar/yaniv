@@ -1,5 +1,7 @@
 // Background music — hidden HTMLAudio, low volume so turn sounds stay audible.
-// Loads /background.mp3 in background, plays only after user interaction.
+// Lazy: the 2.1MB track is NOT fetched at app mount. The <audio> element is
+// created only on the first user interaction that actually plays it (or an
+// explicit unmute), so muted/never-tapping players never pay the download.
 import { assetUrl } from './api';
 
 let bgAudio: HTMLAudioElement | null = null;
@@ -16,7 +18,9 @@ function getBgAudio(): HTMLAudioElement | null {
   if (!bgAudio) {
     bgAudio = new Audio(getBgMusicUrl());
     bgAudio.loop = true;
-    bgAudio.preload = 'auto';
+    // 'none' + first play(): the file's bytes only arrive once the user
+    // actually hears it — never during app/tab load.
+    bgAudio.preload = 'none';
     bgAudio.volume = VOLUME;
     // Hidden — no UI, background load
     bgAudio.style.display = 'none';
@@ -51,6 +55,9 @@ export function playBgMusic() {
   if (!isBgMusicEnabled()) return;
   const audio = getBgAudio();
   if (!audio) return;
+  // Promote to auto so the browser buffers the full track once playback
+  // starts. Kept as 'none' until this point to avoid fetching on load.
+  if (audio.preload !== 'auto') audio.preload = 'auto';
   audio.volume = VOLUME;
   const p = audio.play();
   if (p) p.catch(() => {});
@@ -67,8 +74,10 @@ export function unlockBgMusic() {
 }
 
 export function setupBgMusicUnlock() {
-  // Create element early so file starts loading in background
-  getBgAudio();
+  // Deliberately does NOT touch the audio element: no file bytes before the
+  // first attempt to play. The listeners below are what flip play on the
+  // first click/keydown/touch for players who enabled music. Muted players
+  // lose the whole 2.1MB download on every session.
   const handler = () => {
     unlockBgMusic();
     document.removeEventListener('click', handler);
@@ -92,20 +101,10 @@ export function setupBgMusicUnlock() {
   // });
 }
 
-// Preload hint for browser — hidden, background
+// Legacy eager preload: now a no-op. The track loads on first play; the bytes
+// are never spent before the user actually wants to hear the music. Kept as an
+// export so existing call sites read naturally and a future preload policy can
+// slot back in here without touching them.
 export function preloadBgMusic() {
-  const audio = getBgAudio();
-  if (audio) {
-    // Trigger load without playing
-    audio.load();
-  }
-  // Also add link preload for early fetch (no UI)
-  const bgUrl = getBgMusicUrl();
-  if (typeof document !== 'undefined' && !document.querySelector(`link[href="${bgUrl}"]`)) {
-    const link = document.createElement('link');
-    link.rel = 'preload';
-    link.as = 'audio';
-    link.href = bgUrl;
-    document.head.appendChild(link);
-  }
+  // Intentionally empty — see header comment.
 }

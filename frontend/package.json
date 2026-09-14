@@ -1,11 +1,11 @@
 {
   "name": "yanif-client",
-  "version": "2.0.15",
+  "version": "2.0.16",
   "description": "React frontend for Yanif card game platform",
   "private": true,
   "scripts": {
     "start": "react-scripts start",
-    "build": "./build-version.sh && cp -r build/* ../src/main/resources/static/",
+    "build": "./build-version.sh && rm -rf ../src/main/resources/static/* && cp -r build/* ../src/main/resources/static/",
     "build:local": "REACT_APP_VERSION=dev react-scripts build",
     "test": "react-scripts test",
     "test:e2e": "tsc -p tsconfig.json --noEmit || exit 1 && npx playwright test api-game-flow --project=chromium --workers=1 --reporter=line && npx playwright test full-game-flow --project=chromium --workers=1 --reporter=line && npx playwright test websocket-game --project=chromium --workers=1 --reporter=line",

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { useStomp } from '../contexts/StompContext';
@@ -8,7 +8,8 @@ import InviteNotificationToast from '../components/InviteNotificationToast';
 import LobbyView from '../components/LobbyView';
 import GameView from '../components/GameView';
 import Avatar from '../components/Avatar';
-import { isBgMusicEnabled, setBgMusicEnabled, setupBgMusicUnlock, preloadBgMusic } from '../utils/backgroundMusic';
+import { preloadAllCards } from '../utils/cardPreload';
+import { isBgMusicEnabled, setBgMusicEnabled, setupBgMusicUnlock } from '../utils/backgroundMusic';
 import './MainView.css';
 
 interface MainViewProps {
@@ -36,11 +37,23 @@ export default function MainView({ initialRoomCode }: MainViewProps) {
   const [newDisplayName, setNewDisplayName] = useState(user?.displayName || '');
   const [savingProfile, setSavingProfile] = useState(false);
   const [bgMusicEnabled, setBgMusicEnabledState] = useState(() => isBgMusicEnabled());
+  const [joinError, setJoinError] = useState<string | null>(null);
+  const joinInFlight = useRef<Record<string, Promise<unknown> | null>>({});
 
-  // Background music — hidden, low volume, plays after first interaction
+  // The one place card art is preloaded: the logged-in shell every game path
+  // (lobby, host, deep-link join) passes through. The login screen no longer
+  // spends 52 image fetches warming cards no one can play there yet.
+  useEffect(() => {
+    preloadAllCards().catch(() => {
+      // Silently ignore - CardFace's text fallback covers the brief window until
+      // the SVGs arrive; no first-deal animation depends on preload completion.
+    });
+  }, []);
+
+  // Background music — hidden, low volume, plays after first interaction.
+  // The track itself is not fetched until the first play (see backgroundMusic.ts).
   useEffect(() => {
     setupBgMusicUnlock();
-    preloadBgMusic();
     const handler = (e: Event) => setBgMusicEnabledState((e as CustomEvent).detail);
     window.addEventListener('yanif:bg-music-toggled', handler as EventListener);
     return () => window.removeEventListener('yanif:bg-music-toggled', handler as EventListener);
@@ -100,15 +113,26 @@ export default function MainView({ initialRoomCode }: MainViewProps) {
   }, [isConnected, subscribe, send, loadFriends]);
 
   const handleJoinGame = useCallback(async (code: string) => {
-    try {
-      const response = await gameApi.joinRoom(code);
-      setCurrentGameId(response.gameId);
-      setCurrentRoomCode(response.roomCode);
-      setActiveView('game');
-    } catch (err) {
-      console.error('Failed to join game:', err);
-      alert('Could not join table #' + code + '. It may be full or invalid.');
+    const normalized = code.trim().toUpperCase();
+    if (joinInFlight.current[normalized]) {
+      return joinInFlight.current[normalized];
     }
+    const run = (async () => {
+      try {
+        const response = await gameApi.joinRoom(normalized);
+        setJoinError(null);
+        setCurrentGameId(response.gameId);
+        setCurrentRoomCode(response.roomCode);
+        setActiveView('game');
+      } catch (err) {
+        console.error('Failed to join game:', err);
+        setJoinError(`Could not join table #${normalized}. Please try the invite link again.`);
+      } finally {
+        delete joinInFlight.current[normalized];
+      }
+    })();
+    joinInFlight.current[normalized] = run;
+    return run;
   }, []);
 
   // Handle deep-link join on load if roomCode exists
@@ -274,6 +298,19 @@ export default function MainView({ initialRoomCode }: MainViewProps) {
 
         {/* Center Canvas Area */}
         <main className="main-canvas-area">
+          {joinError && (
+            <div className="join-error-banner" role="alert">
+              <span>{joinError}</span>
+              <button
+                type="button"
+                className="join-error-dismiss"
+                aria-label="Dismiss"
+                onClick={() => setJoinError(null)}
+              >
+                &times;
+              </button>
+            </div>
+          )}
           {activeView === 'lobby' ? (
             <LobbyView
               onCreateGame={handleCreateGame}

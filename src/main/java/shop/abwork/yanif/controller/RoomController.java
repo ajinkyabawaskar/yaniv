@@ -5,6 +5,8 @@ import shop.abwork.yanif.game.ScoreLimits;
 import shop.abwork.yanif.entity.GamePlayer;
 import shop.abwork.yanif.service.GameService;
 import shop.abwork.yanif.service.UserService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -23,6 +25,8 @@ public class RoomController {
     private static final int MIN_PLAYERS_LIMIT = 2;
     /** 6 x 5 dealt cards + 1 turned up leaves a workable deck; more exhausts 52 fast. */
     private static final int MAX_PLAYERS_LIMIT = 6;
+
+    private static final Logger log = LoggerFactory.getLogger(RoomController.class);
 
     private static final Random RANDOM = new Random();
     private static final List<String> ROOM_CODE_WORDS = List.of(
@@ -202,10 +206,12 @@ public class RoomController {
 
             return ResponseEntity.ok(result);
         } catch (RuntimeException e) {
-            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+            log.warn("Room join failed (roomCode={}): {}", roomCode, e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of("error", "Could not join room"));
         } catch (Exception e) {
+            log.warn("Room join failed unexpectedly (roomCode={}): {}", roomCode, e.getMessage());
             return ResponseEntity.internalServerError()
-                    .body(Map.of("error", "An error occurred: " + e.getMessage()));
+                    .body(Map.of("error", "An error occurred"));
         }
     }
 

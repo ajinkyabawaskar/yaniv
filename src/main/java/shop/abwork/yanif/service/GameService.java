@@ -6,6 +6,7 @@ import shop.abwork.yanif.entity.RoundHistory;
 import shop.abwork.yanif.repository.GameRepository;
 import shop.abwork.yanif.repository.GamePlayerRepository;
 import shop.abwork.yanif.repository.RoundHistoryRepository;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -164,11 +165,22 @@ public class GameService {
         // Check if player already in game
         GamePlayer existing = gamePlayerRepository.findByGameIdAndUserId(gameId, userId);
         if (existing != null) {
-            throw new RuntimeException("Player already in game: " + userId);
+            return existing;
         }
 
-        GamePlayer gamePlayer = new GamePlayer(gameId, userId);
-        return gamePlayerRepository.save(gamePlayer);
+        try {
+            GamePlayer gamePlayer = new GamePlayer(gameId, userId);
+            return gamePlayerRepository.save(gamePlayer);
+        } catch (DataIntegrityViolationException e) {
+            // Two joins racing: the losing insert violates game_players.PRIMARY.
+            // The winner has seated this player between our read and insert, so
+            // replay as an idempotent join instead of surfacing a raw SQL error.
+            GamePlayer winner = gamePlayerRepository.findByGameIdAndUserId(gameId, userId);
+            if (winner != null) {
+                return winner;
+            }
+            throw new RuntimeException("Player already in game: " + userId);
+        }
     }
 
     /**

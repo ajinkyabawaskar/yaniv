@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useSearchParams } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { StompProvider } from './contexts/StompContext';
@@ -8,7 +8,6 @@ import MainView from './views/MainView';
 import RulesView from './views/RulesView';
 import UpdateBanner from './components/UpdateBanner';
 import { useBackendVersionCheck } from './hooks/useBackendVersionCheck';
-import { preloadAllCards, preloadCardsViaLink } from './utils/cardPreload';
 import './App.css';
 
 function RequireAuth({ children }: { children: JSX.Element }) {
@@ -68,17 +67,9 @@ function AppContent() {
 }
 
 export default function App() {
-  // Start preloading card assets as early as possible - at app mount
-  // This runs in background before user even reaches AuthView
-  useEffect(() => {
-    console.log('[CardPreload] Starting preload at App mount');
-    // Use both methods for maximum browser coverage
-    preloadAllCards().catch(() => {
-      // Silently ignore - individual views will also attempt preload
-    });
-    preloadCardsViaLink();
-  }, []);
-
+  // Card art preload happens once the player is signed in (MainView), not here:
+  // the login screen has no cards to show and shouldn't spend 54 image fetches
+  // (or 54 <link rel=preload> head entries) on every visitor's load.
   return (
     <Router>
       <AuthProvider>
