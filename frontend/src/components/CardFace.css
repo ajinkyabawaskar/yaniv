@@ -22,10 +22,18 @@
   height: 100%;
   object-fit: cover;
   display: block;
+  /* Above the fallback (which is positioned, so it would otherwise paint on
+     top): while the image has not decoded yet it paints nothing, so the
+     fallback shows through; once decoded it covers the fallback. No
+     background here — an element background would paint even while loading
+     and hide the fallback. */
+  position: relative;
+  z-index: 1;
 }
 .card-face-fallback {
   position: absolute;
   inset: 0;
+  z-index: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -67,10 +75,4 @@
 .card-face-suit {
   font-size: 13px;
   font-size: 15cqw;
-}
-
-/* While loading the image is transparent so the fallback shows through, but
-   it still occupies the full face so there is no layout shift on swap. */
-.card-face-img-loading {
-  opacity: 0;
 }
