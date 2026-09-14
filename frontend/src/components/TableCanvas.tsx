@@ -6,7 +6,13 @@ import { hapticLightTick, hapticFirmSnap, hapticDoubleError } from '../utils/hap
 import CardFlightLayer, { CardFlightSpec, FlightPoint, isLowEndDevice } from './CardFlightLayer';
 import CardFace from './CardFace';
 import './TableCanvas.css';
-import { Card, isValidCombination, calculateHandScore, getRankValueLow } from '../utils/yanivRules';
+import { Card, isValidCombination, calculateHandScore } from '../utils/yanivRules';
+import {
+  HandSortMode,
+  applyHandSortMode,
+  detectHandSortMode,
+  mergeHandPreservingSort,
+} from '../utils/yanivRules';
 import { assetUrl } from '../utils/api';
 
 import type { ReactionEvent, SpectatorReading } from '../stores/gameStore';
@@ -797,6 +803,11 @@ function TableCanvas({
   isFlightAnimatingRef.current = isFlightAnimating;
   const localSortedHandRef = useRef(localSortedHand);
   localSortedHandRef.current = localSortedHand;
+  // Last explicit hand sort ('rank' | 'suit'), cleared by any manual reorder.
+  // Decides the comparator re-applied when a discard-and-draw push lands on a
+  // sorted hand; null falls back to detecting the current display order, so a
+  // hand that merely happens to be sorted stays sorted too.
+  const sortModeRef = useRef<HandSortMode | null>(null);
   // Prop mirrors for stable empty-deps callbacks (draw handlers, flight
   // completion). Ref writes during render are safe here: they are only read
   // inside event/effect callbacks, never during a concurrent render pass.
@@ -862,7 +873,12 @@ function TableCanvas({
         setLocalSortedHand((sorted) => {
           const sortedIds = new Set(sorted.map((c) => c.id));
           const fresh = withheld.filter((c) => !sortedIds.has(c.id));
-          return fresh.length > 0 ? [...sorted, ...fresh] : sorted;
+          if (fresh.length === 0) return sorted;
+          const combined = [...sorted, ...fresh];
+          // The hand was sorted before the draw flight: land the drawn card
+          // in its sorted slot instead of appending it at the end.
+          const mode = sortModeRef.current ?? detectHandSortMode(sorted);
+          return mode ? applyHandSortMode(combined, mode) : combined;
         });
       }
       return null;
@@ -1084,6 +1100,9 @@ function TableCanvas({
   }, [topDiscardCards, drawableDiscardCards, deckCount, currentTurnPlayerId, opponents, roundNumber, currentUserId]);
 
   // Preserve user custom card reordering when hand state updates from server.
+  // A hand that is currently sorted (by rank or by suit) stays sorted across
+  // discard-and-draw pushes: the drawn card lands in its sorted slot. Custom
+  // orders keep their positions with fresh cards appended.
   // When the push is the result of our own discard-and-draw, the drawn card
   // is withheld and flown in from the pile it came from instead of popping
   // into the hand: deck draws fly out card-back-down and turn over mid-travel
@@ -1102,13 +1121,9 @@ function TableCanvas({
         : added[0];
       const rest = hand.filter((c) => c.id !== drawn.id);
       withheldRef.current = [drawn];
-      setLocalSortedHand((sorted) => {
-        const restIds = new Set(rest.map((c) => c.id));
-        const retained = sorted.filter((c) => restIds.has(c.id));
-        const retainedIds = new Set(retained.map((c) => c.id));
-        const newlyDrawn = rest.filter((c) => !retainedIds.has(c.id));
-        return [...retained, ...newlyDrawn];
-      });
+      setLocalSortedHand((sorted) =>
+        mergeHandPreservingSort(sorted, rest, [drawn.id], sortModeRef.current)
+      );
       const fromEl =
         pendingDraw.drawSource === 'DECK' ? drawPileRef.current : discardPileRef.current;
       // Batched read pass: size (cached) + both endpoint rects back-to-back
@@ -1152,25 +1167,22 @@ function TableCanvas({
       } else {
         // No measurable anchor (hidden tab, unmounted pile): render at once.
         withheldRef.current = [];
-        setLocalSortedHand((sorted) => {
-          const restIds = new Set(rest.map((c) => c.id));
-          const retained = sorted.filter((c) => restIds.has(c.id));
-          return [...retained, drawn];
-        });
+        setLocalSortedHand((sorted) =>
+          mergeHandPreservingSort(sorted, hand, [], sortModeRef.current)
+        );
       }
       return;
     }
 
     pendingDrawRef.current = null;
-    setLocalSortedHand((prevSorted) => {
-      const incomingIds = new Set(hand.map((c) => c.id));
-      const retained = prevSorted.filter((c) => incomingIds.has(c.id));
-      const retainedIds = new Set(retained.map((c) => c.id));
-      // Cards withheld for an in-progress draw flight join only when it lands.
-      const heldIds = new Set(withheldRef.current.map((c) => c.id));
-      const newlyDrawn = hand.filter((c) => !retainedIds.has(c.id) && !heldIds.has(c.id));
-      return [...retained, ...newlyDrawn];
-    });
+    setLocalSortedHand((prevSorted) =>
+      mergeHandPreservingSort(
+        prevSorted,
+        hand,
+        withheldRef.current.map((c) => c.id),
+        sortModeRef.current
+      )
+    );
   }, [hand]);
 
   useEffect(() => {
@@ -1451,6 +1463,8 @@ function TableCanvas({
     const sourceId = e.dataTransfer.getData('handReorderId') || draggedCardIdRef.current;
 
     if (sourceId && sourceId !== targetCardId) {
+      // Manual reorder leaves any active sort: later draws append again.
+      sortModeRef.current = null;
       setLocalSortedHand((prev) => {
         const sourceIdx = prev.findIndex((c) => c.id === sourceId);
         const targetIdx = prev.findIndex((c) => c.id === targetCardId);
@@ -1588,20 +1602,15 @@ function TableCanvas({
   const handleSortByRank = () => {
     soundEngine.playSortCascade();
     hapticLightTick();
-    setLocalSortedHand((prev) => [...prev].sort((a, b) => getRankValueLow(a.rank) - getRankValueLow(b.rank)));
+    sortModeRef.current = 'rank';
+    setLocalSortedHand((prev) => applyHandSortMode(prev, 'rank'));
   };
 
   const handleSortBySuit = () => {
     soundEngine.playSortCascade();
     hapticLightTick();
-    setLocalSortedHand((prev) =>
-      [...prev].sort((a, b) => {
-        if (a.suit === b.suit) {
-          return getRankValueLow(a.rank) - getRankValueLow(b.rank);
-        }
-        return a.suit.localeCompare(b.suit);
-      })
-    );
+    sortModeRef.current = 'suit';
+    setLocalSortedHand((prev) => applyHandSortMode(prev, 'suit'));
   };
 
   // Keyboard navigation for reordering selected card
@@ -1611,6 +1620,8 @@ function TableCanvas({
         const cardId = selectedCards[0];
         if (e.key === 'ArrowLeft') {
           e.preventDefault();
+          // Manual reorder leaves any active sort: later draws append again.
+          sortModeRef.current = null;
           setLocalSortedHand((prev) => {
             const idx = prev.findIndex((c) => c.id === cardId);
             if (idx <= 0) return prev;
@@ -1623,6 +1634,7 @@ function TableCanvas({
           hapticLightTick();
         } else if (e.key === 'ArrowRight') {
           e.preventDefault();
+          sortModeRef.current = null;
           setLocalSortedHand((prev) => {
             const idx = prev.findIndex((c) => c.id === cardId);
             if (idx === -1 || idx >= prev.length - 1) return prev;

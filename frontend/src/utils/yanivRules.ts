@@ -52,6 +52,72 @@ export const calculateHandScore = (hand: Card[]): number => {
   return hand.reduce((sum, card) => sum + (rankValues[card.rank] !== undefined ? rankValues[card.rank] : 0), 0);
 };
 
+/**
+ * Hand display ordering. The table lets the player sort their hand by rank or
+ * by suit (suit first, then rank); any manual reorder (drag, arrow keys) drops
+ * back to custom order. When a sorted hand changes via discard-and-draw, the
+ * result is re-sorted with the same comparator instead of appending the drawn
+ * card at the end.
+ */
+export type HandSortMode = 'rank' | 'suit';
+
+/** Rank ascending, Ace low — the same order the "sort by rank" button applies. */
+export const compareCardsByRank = (a: Card, b: Card): number =>
+  getRankValueLow(a.rank) - getRankValueLow(b.rank);
+
+/** Suit alphabetical, rank ascending within a suit — the "sort by suit" order. */
+export const compareCardsBySuit = (a: Card, b: Card): number => {
+  if (a.suit === b.suit) return getRankValueLow(a.rank) - getRankValueLow(b.rank);
+  return a.suit.localeCompare(b.suit);
+};
+
+const isSortedBy = (cards: Card[], cmp: (a: Card, b: Card) => number): boolean =>
+  cards.every((c, i) => i === 0 || cmp(cards[i - 1], c) <= 0);
+
+export const isHandSortedByRank = (cards: Card[]): boolean => isSortedBy(cards, compareCardsByRank);
+
+export const isHandSortedBySuit = (cards: Card[]): boolean => isSortedBy(cards, compareCardsBySuit);
+
+/**
+ * Which sort (if any) the currently displayed hand satisfies. Rank is checked
+ * first: a hand satisfying both (e.g. single-suit, rank-ordered) reports
+ * 'rank', which keeps the drawn card in rank position either way.
+ */
+export const detectHandSortMode = (cards: Card[]): HandSortMode | null => {
+  if (isHandSortedByRank(cards)) return 'rank';
+  if (isHandSortedBySuit(cards)) return 'suit';
+  return null;
+};
+
+/** Return a sorted copy, leaving the input untouched. */
+export const applyHandSortMode = (cards: Card[], mode: HandSortMode): Card[] =>
+  [...cards].sort(mode === 'rank' ? compareCardsByRank : compareCardsBySuit);
+
+/**
+ * Merge a server hand push into the displayed hand, preserving order.
+ *
+ * Kept cards hold their displayed positions, fresh cards are appended — unless
+ * the displayed hand is sorted (explicit mode, or a currently-sorted display),
+ * in which case the whole result is re-sorted so the drawn card lands in its
+ * sorted slot instead of at the end. Cards in `withheldIds` (drawn card still
+ * flying in) join only when their flight lands.
+ */
+export const mergeHandPreservingSort = (
+  displayed: Card[],
+  incoming: Card[],
+  withheldIds: Iterable<string>,
+  explicitMode: HandSortMode | null
+): Card[] => {
+  const incomingIds = new Set(incoming.map((c) => c.id));
+  const retained = displayed.filter((c) => incomingIds.has(c.id));
+  const retainedIds = new Set(retained.map((c) => c.id));
+  const held = new Set(withheldIds);
+  const fresh = incoming.filter((c) => !retainedIds.has(c.id) && !held.has(c.id));
+  const combined = [...retained, ...fresh];
+  const mode = explicitMode ?? detectHandSortMode(displayed);
+  return mode ? applyHandSortMode(combined, mode) : combined;
+};
+
 const isValidSequenceRanks = (ranks: number[]): boolean => {
   if (ranks.length === 0) return false;
   const sorted = [...ranks].sort((a, b) => a - b);

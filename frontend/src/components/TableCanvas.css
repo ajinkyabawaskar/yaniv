@@ -1354,9 +1354,11 @@
     margin-top: 0;
   }
 
-  /* Player HUD Bar - single row on mobile */
+  /* Player HUD Bar - single row of 4 equal buttons on mobile. The sort
+     wrapper is flattened (display: contents) so its buttons become direct
+     flex items of the bar and share one sizing rule with Hand Total. */
   .player-hud-bar {
-    gap: 4px;
+    gap: 6px;
     margin-bottom: 10px;
     flex-wrap: nowrap;
     overflow-x: auto;
@@ -1371,33 +1373,18 @@
     display: none;
   }
 
-  .hud-btn {
-    padding: 2px 10px;
-    min-height: 28px;
-    min-width: 74px;
-    font-size: 11px;
-    flex-shrink: 1;
-    width: auto;
-  }
-
   .hand-sort-controls {
-    display: flex;
-    gap: 2px;
-    flex-wrap: nowrap;
-    justify-content: center;
+    display: contents;
   }
 
-  .sort-btn {
-    min-width: 60px;
-    padding: 2px 8px;
-    min-height: 40px;
-  }
-
+  .hud-btn,
+  .sort-btn,
   .call-yaniv-btn-hud {
-    min-width: 78px;
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 40px;
     padding: 2px 8px;
     font-size: 11px;
-    min-height: 40px;
   }
 
   /* Player Hand - overlapping fan layout, all 5 cards visible.
@@ -1548,27 +1535,14 @@
     height: clamp(84px, 20vw, 110px);
   }
 
-  .sort-btn {
-    padding: 2px 6px;
-    font-size: 10px;
-    min-height: 40px;
-    min-width: 54px;
-  }
-
-  .hud-btn {
-    padding: 2px 8px;
-    min-height: 26px;
-    min-width: 64px;
-    font-size: 10px;
-    flex-shrink: 1;
-    width: auto;
-  }
-
+  .hud-btn,
+  .sort-btn,
   .call-yaniv-btn-hud {
-    min-width: 70px;
     padding: 2px 6px;
     font-size: 10px;
     min-height: 40px;
+    flex: 1 1 0;
+    min-width: 0;
   }
 
   /* 480px - fan capped at two card widths: 5 x 60px in 120px (15px step). */
