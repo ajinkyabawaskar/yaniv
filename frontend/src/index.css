@@ -70,6 +70,14 @@ button, input {
   outline: none;
 }
 
+/* Visible keyboard focus everywhere. Mouse/touch clicks keep the sleek
+   outline-free look; :focus-visible only fires for keyboard navigation,
+   and !important wins over any per-component outline:none. */
+:focus-visible {
+  outline: 2px solid var(--gold-light) !important;
+  outline-offset: 2px;
+}
+
 button {
   cursor: pointer;
   border: 0;
@@ -101,27 +109,27 @@ button:disabled {
   background: rgba(212, 175, 55, 0.6);
 }
 
-/* Animations */
-@keyframes goldPulse {
+/* Animations — consolidated pulse variants use CSS variables for color.
+   prefers-reduced-motion disables all infinite animations. */
+@keyframes pulse {
   0%, 100% {
-    box-shadow: 0 0 15px rgba(212, 175, 55, 0.3), inset 0 0 10px rgba(212, 175, 55, 0.2);
-    border-color: rgba(212, 175, 55, 0.6);
+    box-shadow: 0 0 15px var(--pulse-glow, rgba(212, 175, 55, 0.3)), inset 0 0 10px var(--pulse-glow-inset, rgba(212, 175, 55, 0.2));
+    border-color: var(--pulse-border, rgba(212, 175, 55, 0.6));
   }
   50% {
-    box-shadow: 0 0 28px rgba(212, 175, 55, 0.7), inset 0 0 16px rgba(212, 175, 55, 0.4);
-    border-color: rgba(246, 226, 157, 0.95);
+    box-shadow: 0 0 28px var(--pulse-glow, rgba(212, 175, 55, 0.7)), inset 0 0 16px var(--pulse-glow-inset, rgba(212, 175, 55, 0.4));
+    border-color: var(--pulse-border-peak, rgba(246, 226, 157, 0.95));
   }
 }
 
-@keyframes greenGlow {
-  0%, 100% {
-    box-shadow: 0 0 15px rgba(16, 185, 129, 0.4), inset 0 0 10px rgba(16, 185, 129, 0.2);
-    border-color: rgba(16, 185, 129, 0.7);
-  }
-  50% {
-    box-shadow: 0 0 30px rgba(16, 185, 129, 0.8), inset 0 0 18px rgba(16, 185, 129, 0.5);
-    border-color: rgba(52, 211, 153, 1);
-  }
+@keyframes pulseScale {
+  0%, 100% { transform: scale(1); filter: brightness(1); }
+  50% { transform: scale(var(--pulse-scale, 1.08)); filter: brightness(var(--pulse-brightness, 1.3)); }
+}
+
+@keyframes pulseRing {
+  0% { transform: scale(0.5); opacity: 0.8; }
+  100% { transform: scale(1.5); opacity: 0; }
 }
 
 @keyframes crimsonFlash {
@@ -130,7 +138,16 @@ button:disabled {
   100% { box-shadow: inset 0 0 0 0 rgba(239, 68, 68, 0); }
 }
 
-@keyframes timerHeartbeat {
-  0%, 100% { transform: scale(1); filter: brightness(1); }
-  50% { transform: scale(1.08); filter: brightness(1.3); }
+@media (prefers-reduced-motion: reduce) {
+  .pulse,
+  .pulse-scale,
+  .pulse-ring,
+  /* Every infinite table animation runs on the consolidated keyframes above,
+     so gate the keyframes themselves — not just helper class names that no
+     component uses — otherwise the table keeps pulsing for reduced-motion
+     users while the helpers sit idle. One-shot transitions stay intact. */
+  .table-canvas-root *,
+  .game-view-container * {
+    animation: none !important;
+  }
 }

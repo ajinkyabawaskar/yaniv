@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { soundEngine } from '../utils/soundEngine';
 import { playAsafSound, stopAsafSound, playWaitingForAsafSound, stopWaitingForAsafSound } from '../utils/sound';
 import { hapticLightTick, hapticFirmSnap, hapticDoubleError } from '../utils/haptics';
-import CardFlightLayer, { CardFlightSpec, FlightPoint } from './CardFlightLayer';
+import CardFlightLayer, { CardFlightSpec, FlightPoint, isLowEndDevice } from './CardFlightLayer';
 import CardFace from './CardFace';
 import './TableCanvas.css';
 import { Card, isValidCombination, calculateHandScore, getRankValueLow } from '../utils/yanivRules';
@@ -475,14 +475,19 @@ const HandCard = React.memo(function HandCard({
         rotate: isSelected || isDragTarget ? 0 : rotationDeg,
         scale: isSelected ? 1.08 : isDragTarget ? 1.05 : 1,
       }}
-      transition={{ type: 'spring', stiffness: 400, damping: 28 }}
+      transition={{
+        type: 'spring',
+        // Low-end devices (<= 4 cores) select softer: smaller per-frame deltas
+        // keep the fan inside the compositor budget instead of repaints.
+        stiffness: isLowEndDevice() ? 250 : 400,
+        damping: isLowEndDevice() ? 24 : 28,
+      }}
       draggable={true}
       onDragStart={(e) => onDragStart(e as unknown as React.DragEvent, card.id)}
       onDragOver={(e) => onDragOver(e as unknown as React.DragEvent, card.id)}
       onDragLeave={() => onDragLeave(card.id)}
       onDrop={(e) => onDrop(e as unknown as React.DragEvent, card.id)}
       onClick={() => onCardClick(card)}
-      whileHover={{ y: isSelected ? -28 : -14, scale: 1.05, zIndex: 60 }}
     >
       <CardFace
         rank={card.rank}
@@ -560,12 +565,12 @@ const DiscardFanCard = React.memo(function DiscardFanCard({
         rotate: rotationDeg,
         y: translateY,
       }}
-      transition={{ type: 'spring', stiffness: 500, damping: 30 }}
-      // Transform-only hover: the gold glow lives in CSS (:hover in
-      // TableCanvas.css), which paints once per hover enter/exit. Animating
-      // boxShadow through framer-motion repaints a blurred shadow on EVERY
-      // spring frame — the single most expensive per-frame paint on the table.
-      whileHover={isDrawable ? { y: -8, scale: 1.03, rotate: 0 } : { x: [-1, 1, -1, 0] }}
+      transition={{
+        type: 'spring',
+        stiffness: isLowEndDevice() ? 300 : 500,
+        damping: isLowEndDevice() ? 26 : 30,
+      }}
+      // Hover handled by CSS :hover (transform-only, no framer-motion repaint)
       onClick={() => onDraw(card)}
     >
       <CardFace
@@ -595,6 +600,93 @@ function areDiscardFanCardPropsEqual(prev: DiscardFanCardProps, next: DiscardFan
     prev.onDraw === next.onDraw
   );
 }
+
+/**
+ * Yaniv contest reveal window. Mounted only while a contest is open and owns
+ * its countdown, so the per-second tick re-renders just this overlay — the
+ * table, piles and seats underneath stay put for the whole 5s.
+ */
+const YanivContestOverlay = React.memo(function YanivContestOverlay({
+  callerName,
+  calledAt,
+  contestTimerSeconds,
+  onCountdownEnd,
+}: {
+  callerName: string;
+  calledAt: number;
+  contestTimerSeconds: number;
+  onCountdownEnd: () => void;
+}) {
+  const [remaining, setRemaining] = useState(contestTimerSeconds);
+
+  useEffect(() => {
+    const endTime = calledAt + contestTimerSeconds * 1000;
+    const updateTimer = () => {
+      const next = Math.max(0, Math.ceil((endTime - Date.now()) / 1000));
+      setRemaining((prev) => (prev === next ? prev : next));
+      if (next <= 0) onCountdownEnd();
+    };
+    updateTimer();
+    const interval = setInterval(updateTimer, 250);
+    return () => clearInterval(interval);
+  }, [calledAt, contestTimerSeconds, onCountdownEnd]);
+
+  return (
+    <motion.div
+      className="yaniv-contest-overlay"
+      initial={{ opacity: 0, scale: 0.9 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 1.1 }}
+      transition={{
+        type: 'spring',
+        damping: isLowEndDevice() ? 18 : 20,
+        stiffness: isLowEndDevice() ? 140 : 200,
+      }}
+    >
+      <div className="contest-overlay-bg" />
+      <div className="contest-overlay-content">
+        <div className="contest-pulse-ring" />
+        <div className="contest-pulse-ring" style={{ animationDelay: '0.5s' }} />
+        <div className="contest-pulse-ring" style={{ animationDelay: '1s' }} />
+
+        <div className="contest-header">
+          <h1 className="contest-title">YANIV!</h1>
+        </div>
+
+        <div className="contest-caller-info">
+          <span className="contest-caller-label">Called by</span>
+          <span className="contest-caller-name">{callerName}</span>
+        </div>
+
+        <div className="contest-timer">
+          <span className={`contest-timer-value ${remaining <= 2 ? 'urgent' : ''}`}>{remaining}s</span>
+          <span className="contest-timer-label">until reveal</span>
+        </div>
+
+        <div className="contest-progress-bar">
+          <div
+            className="contest-progress-fill"
+            style={{
+              width: `${(remaining / contestTimerSeconds) * 100}%`,
+            }}
+          />
+        </div>
+
+        {/* One shared popup for every seat — caller included. There is
+            no contest action anymore; the window simply auto-reveals,
+            so nothing here is gated on who called. */}
+        <div className="contest-waiting-message">
+          Revealing result…
+        </div>
+      </div>
+    </motion.div>
+  );
+}, (prev, next) =>
+  prev.callerName === next.callerName &&
+  prev.calledAt === next.calledAt &&
+  prev.contestTimerSeconds === next.contestTimerSeconds &&
+  prev.onCountdownEnd === next.onCountdownEnd
+);
 
 function TableCanvas({
   hand,
@@ -645,7 +737,6 @@ function TableCanvas({
   const [, setLastTapTime] = useState<Record<string, number>>({});
   const [turnTimerSeconds, setTurnTimerSeconds] = useState<number>(30);
   const [hasPlayedYanivReadyChime, setHasPlayedYanivReadyChime] = useState(false);
-  const [yanivContestTimerRemaining, setYanivContestTimerRemaining] = useState<number>(0);
   const [showYanivContestOverlay, setShowYanivContestOverlay] = useState(false);
 
   // ---- Card flight animations (discard out, draw in) ----
@@ -809,16 +900,26 @@ function TableCanvas({
   // Layout breakpoint changes (fan overlap, card clamp()) resize every card:
   // drop the cached size so the next batch re-measures once. Observes the
   // table root (covers hand/pile/seat resizes via bubbled layout) rather than
-  // each card — one observer, no per-card lifecycle.
+  // each card — one observer, no per-card lifecycle. Throttled to one
+  // invalidate per frame: a window drag fires ResizeObserver continuously and
+  // each invalidate forces a full re-measure on the next flight batch.
   useEffect(() => {
     if (typeof ResizeObserver === 'undefined') return;
+    let throttle: ReturnType<typeof setTimeout> | null = null;
     const invalidate = () => {
-      cardSizeCacheRef.current = null;
+      if (throttle !== null) return;
+      throttle = setTimeout(() => {
+        throttle = null;
+        cardSizeCacheRef.current = null;
+      }, 16);
     };
     const ro = new ResizeObserver(invalidate);
     if (rootRef.current) ro.observe(rootRef.current);
     if (handRowRef.current) ro.observe(handRowRef.current);
-    return () => ro.disconnect();
+    return () => {
+      if (throttle !== null) clearTimeout(throttle);
+      ro.disconnect();
+    };
   }, []);
 
   // Single-query seat lookup. The old querySelectorAll + forEach visited every
@@ -1193,31 +1294,16 @@ function TableCanvas({
     }
   }, [isPlayerTurn, currentTurnPlayerId]);
 
-  // Yaniv Contest Timer Effect. Guarded like the turn timer: the 100ms
-  // poll only commits when the displayed second changes, so overlay ticks
-  // don't re-render the table 10x/sec.
+  // Yaniv Contest window: just whether the overlay is shown. The countdown
+  // lives inside <YanivContestOverlay>, so the table underneath does not
+  // re-render once per second for the whole 5s reveal.
   useEffect(() => {
-    if (yanivCallerId && yanivCalledAt && yanivContestTimerSeconds > 0) {
-      setShowYanivContestOverlay(true);
-      const endTime = yanivCalledAt + yanivContestTimerSeconds * 1000;
-      
-      const updateTimer = () => {
-        const now = Date.now();
-        const remaining = Math.max(0, Math.ceil((endTime - now) / 1000));
-        setYanivContestTimerRemaining((prev) => (prev === remaining ? prev : remaining));
-        
-        if (remaining <= 0) {
-          setShowYanivContestOverlay(false);
-        }
-      };
-      
-      updateTimer();
-      const interval = setInterval(updateTimer, 100);
-      return () => clearInterval(interval);
-    } else {
-      setShowYanivContestOverlay(false);
-    }
+    setShowYanivContestOverlay(!!(yanivCallerId && yanivCalledAt && yanivContestTimerSeconds > 0));
   }, [yanivCallerId, yanivCalledAt, yanivContestTimerSeconds]);
+
+  const handleContestCountdownEnd = useCallback(() => {
+    setShowYanivContestOverlay(false);
+  }, []);
 
   const currentHandCards = localSortedHand;
 
@@ -1635,50 +1721,12 @@ function TableCanvas({
         {/* Yaniv Contest Overlay */}
         <AnimatePresence>
           {showYanivContestOverlay && yanivCallerId && yanivCallerName && (
-            <motion.div
-              className="yaniv-contest-overlay"
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 1.1 }}
-              transition={{ type: 'spring', damping: 20, stiffness: 200 }}
-            >
-              <div className="contest-overlay-bg" />
-              <div className="contest-overlay-content">
-                <div className="contest-pulse-ring" />
-                <div className="contest-pulse-ring" style={{ animationDelay: '0.5s' }} />
-                <div className="contest-pulse-ring" style={{ animationDelay: '1s' }} />
-                
-                <div className="contest-header">
-                  <h1 className="contest-title">YANIV!</h1>
-                </div>
-                
-                <div className="contest-caller-info">
-                  <span className="contest-caller-label">Called by</span>
-                  <span className="contest-caller-name">{yanivCallerName}</span>
-                </div>
-                
-                <div className="contest-timer">
-                  <span className={`contest-timer-value ${yanivContestTimerRemaining <= 2 ? 'urgent' : ''}`}>{yanivContestTimerRemaining}s</span>
-                  <span className="contest-timer-label">until reveal</span>
-                </div>
-                
-                <div className="contest-progress-bar">
-                  <div 
-                    className="contest-progress-fill"
-                    style={{ 
-                      width: `${(yanivContestTimerRemaining / yanivContestTimerSeconds) * 100}%` 
-                    }} 
-                  />
-                </div>
-                
-                {/* One shared popup for every seat — caller included. There is
-                    no contest action anymore; the window simply auto-reveals,
-                    so nothing here is gated on who called. */}
-                <div className="contest-waiting-message">
-                  Revealing result…
-                </div>
-              </div>
-            </motion.div>
+            <YanivContestOverlay
+              callerName={yanivCallerName}
+              calledAt={yanivCalledAt ?? 0}
+              contestTimerSeconds={yanivContestTimerSeconds || 5}
+              onCountdownEnd={handleContestCountdownEnd}
+            />
           )}
         </AnimatePresence>
 
@@ -1972,7 +2020,6 @@ function TableCanvas({
 
           <div className="player-hand-container">
             <div ref={handRowRef} className="player-hand-fanned">
-              <AnimatePresence>
                 {localSortedHand.map((card, idx) => (
                   <HandCard
                     key={card.id}
@@ -1991,7 +2038,6 @@ function TableCanvas({
                     registerEl={registerHandCardEl}
                   />
                 ))}
-              </AnimatePresence>
             </div>
           </div>
         </div>
@@ -2009,4 +2055,8 @@ function TableCanvas({
   );
 }
 
-export default forwardRef(TableCanvas);
+// Shallow-memoized: every prop is a store slice / stable memoized object, and
+// the store preserves reference identity for untouched slices, so a GameView
+// re-render that doesn't change any prop skips re-rendering the whole table.
+// (React.memo over forwardRef: the ref is handled outside the props compare.)
+export default React.memo(forwardRef(TableCanvas));

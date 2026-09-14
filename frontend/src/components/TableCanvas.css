@@ -30,6 +30,7 @@
   box-shadow: inset 0 0 100px rgba(0, 0, 0, 0.75), 0 10px 40px rgba(0, 0, 0, 0.6);
   border-radius: 12px;
   overflow: hidden;
+  contain: layout paint;
 }
 
 /* Subtle micro-grain overlay on the felt */
@@ -220,6 +221,7 @@
      and nothing in-flow changes size on turn change, so there are no shifts. */
   flex: 0 1 auto;
   min-width: 110px;
+  contain: layout paint;
 }
 
 /* Active turn is border glow + progress bar + an inline dot by the name. All
@@ -258,7 +260,12 @@
 .turn-progress-fill.urgent {
   background: linear-gradient(90deg, #ef4444, #f87171);
   box-shadow: 0 0 8px var(--crimson-light);
-  animation: timerHeartbeat 0.8s infinite;
+  /* Consolidated pulse: single keyframes in index.css, color via variables. */
+  animation: pulse 0.8s infinite;
+  --pulse-glow: rgba(239, 68, 68, 0.7);
+  --pulse-glow-inset: rgba(239, 68, 68, 0.3);
+  --pulse-border: rgba(248, 113, 113, 0.6);
+  --pulse-border-peak: rgba(252, 165, 165, 0.95);
 }
 
 /* Identity is one inline row: dot + name + status marks. The initials avatar
@@ -279,12 +286,11 @@
   border-radius: 50%;
   background: var(--gold-gradient);
   box-shadow: 0 0 6px rgba(212, 175, 55, 0.9);
-  animation: turnDotPulse 1.2s ease-in-out infinite;
-}
-
-@keyframes turnDotPulse {
-  0%, 100% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.3); opacity: 0.7; }
+  animation: pulseScale 1.2s ease-in-out infinite;
+  --pulse-scale: 1.3;
+  --pulse-brightness: 1;
+  --pulse-glow: rgba(212, 175, 55, 0);
+  --pulse-glow-inset: rgba(212, 175, 55, 0);
 }
 
 .inline-badge {
@@ -419,6 +425,7 @@
   justify-content: flex-start;
   flex: 0 0 auto;
   /* No box, no border, no background - just cards on felt */
+  contain: layout paint;
 }
 
 .pile-label {
@@ -448,7 +455,7 @@
 }
 
 .draw-pile-column .deck-stack-3d.pulse-prompt {
-  animation: goldPulse 2s infinite ease-in-out;
+  animation: pulse 2s infinite ease-in-out;
 }
 
 .deck-stack-3d {
@@ -667,19 +674,27 @@
 .discard-fan-card.drawable-eligible {
   box-shadow: 0 0 20px rgba(212, 175, 55, 0.9), 0 6px 20px rgba(0, 0, 0, 0.7);
   border: 2px solid var(--gold-primary);
-  /* Lift on hover/active is handled by framer-motion whileHover */
+  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
 }
 
 .discard-fan-card.drawable-eligible:hover,
 .discard-fan-card.drawable-eligible:active {
   box-shadow: 0 0 28px rgba(212, 175, 55, 1), 0 10px 28px rgba(0, 0, 0, 0.8);
   border-color: #f6e29d;
+  transform: translateY(-8px) scale(1.03);
+  rotate: 0deg;
 }
 
 .discard-fan-card.locked-ineligible {
   filter: brightness(0.6) grayscale(0.4);
   cursor: not-allowed;
   border: 1px solid rgba(255, 255, 255, 0.1);
+  transition: transform 0.15s ease, filter 0.15s ease;
+}
+
+.discard-fan-card.locked-ineligible:hover,
+.discard-fan-card.locked-ineligible:active {
+  transform: translateX(-1px);
 }
 
 .locked-indicator {
@@ -780,7 +795,7 @@
   background: var(--gold-gradient);
   border-color: #fff;
   color: #0a241a;
-  animation: goldPulse 1.8s infinite ease-in-out;
+  animation: pulse 1.8s infinite ease-in-out;
 }
 
 .hand-sort-controls {
@@ -814,7 +829,7 @@
   background: var(--gold-gradient);
   border-color: #fff;
   color: #0a241a;
-  animation: goldPulse 1.8s infinite ease-in-out;
+  animation: pulse 1.8s infinite ease-in-out;
   box-shadow: 0 2px 8px rgba(212, 175, 55, 0.4);
 }
 
@@ -856,6 +871,15 @@
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
   cursor: pointer;
   transform-origin: bottom center;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+@media (hover: hover) {
+  .hand-card:not(.selected-lift):not(.is-being-dragged):not(.drag-over-target):hover {
+    transform: translateY(-14px) scale(1.05);
+    box-shadow: 0 16px 32px rgba(0, 0, 0, 0.6), 0 4px 12px rgba(0, 0, 0, 0.5);
+    z-index: 60;
+  }
 }
 
 .hand-card.selected-lift {
@@ -962,12 +986,11 @@
   position: absolute;
   inset: 0;
   background: radial-gradient(ellipse at center, rgba(18, 52, 38, 0.35) 0%, rgba(5, 20, 14, 0.85) 70%);
-  animation: contestPulse 2s ease-in-out infinite;
-}
-
-@keyframes contestPulse {
-  0%, 100% { opacity: 0.6; }
-  50% { opacity: 1; }
+  animation: pulse 2s ease-in-out infinite;
+  --pulse-glow: rgba(18, 52, 38, 0);
+  --pulse-glow-inset: rgba(18, 52, 38, 0);
+  --pulse-border: rgba(18, 52, 38, 0);
+  --pulse-border-peak: rgba(18, 52, 38, 0);
 }
 
 .contest-pulse-ring {
@@ -976,16 +999,11 @@
   height: 200px;
   border: 2px solid rgba(212, 175, 55, 0.35);
   border-radius: 50%;
-  animation: pulseRingExpand 2s ease-out infinite;
+  animation: pulseRing 2s ease-out infinite;
 }
 
 .contest-pulse-ring:nth-child(2) { animation-delay: 0.5s; }
 .contest-pulse-ring:nth-child(3) { animation-delay: 1s; }
-
-@keyframes pulseRingExpand {
-  0% { transform: scale(0.5); opacity: 0.8; }
-  100% { transform: scale(1.5); opacity: 0; }
-}
 
 .contest-overlay-content {
   position: relative;
@@ -1066,7 +1084,11 @@
 .contest-timer-value.urgent {
   color: #fca5a5;
   text-shadow: 0 0 20px rgba(239, 68, 68, 0.7);
-  animation: waitingPulse 1s ease-in-out infinite;
+  animation: pulse 1s ease-in-out infinite;
+  --pulse-glow: rgba(239, 68, 68, 0.5);
+  --pulse-glow-inset: rgba(239, 68, 68, 0.25);
+  --pulse-border: rgba(239, 68, 68, 0.4);
+  --pulse-border-peak: rgba(252, 165, 165, 0.9);
 }
 
 .contest-timer-label {
@@ -1102,12 +1124,11 @@
   font-size: 13px;
   color: var(--gold-light);
   letter-spacing: 0.05em;
-  animation: waitingPulse 1.5s ease-in-out infinite;
-}
-
-@keyframes waitingPulse {
-  0%, 100% { opacity: 0.6; }
-  50% { opacity: 1; }
+  animation: pulse 1.5s ease-in-out infinite;
+  --pulse-glow: rgba(212, 175, 55, 0);
+  --pulse-glow-inset: rgba(212, 175, 55, 0);
+  --pulse-border: rgba(212, 175, 55, 0);
+  --pulse-border-peak: rgba(212, 175, 55, 0);
 }
 
 /* ==========================================================================
@@ -1369,12 +1390,14 @@
   .sort-btn {
     min-width: 60px;
     padding: 2px 8px;
+    min-height: 40px;
   }
 
   .call-yaniv-btn-hud {
     min-width: 78px;
     padding: 2px 8px;
     font-size: 11px;
+    min-height: 40px;
   }
 
   /* Player Hand - overlapping fan layout, all 5 cards visible.
@@ -1528,7 +1551,7 @@
   .sort-btn {
     padding: 2px 6px;
     font-size: 10px;
-    min-height: 26px;
+    min-height: 40px;
     min-width: 54px;
   }
 
@@ -1545,6 +1568,7 @@
     min-width: 70px;
     padding: 2px 6px;
     font-size: 10px;
+    min-height: 40px;
   }
 
   /* 480px - fan capped at two card widths: 5 x 60px in 120px (15px step). */
@@ -1706,7 +1730,8 @@
 
 .bonus-icon {
   font-size: 28px;
-  animation: goldPulse 1.8s infinite ease-in-out;
+  animation: pulseScale 1.8s infinite ease-in-out;
+  --pulse-scale: 1.15;
 }
 
 .bonus-title {
@@ -1860,16 +1885,38 @@
   color: #fca5a5;
   border-color: rgba(248, 113, 113, 0.6);
   background: rgba(127, 29, 29, 0.55);
-  animation: spectator-meter-pulse 1.4s ease-in-out infinite;
-}
-
-@keyframes spectator-meter-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
+  animation: pulse 1.4s ease-in-out infinite;
+  --pulse-glow: rgba(248, 113, 113, 0);
+  --pulse-glow-inset: rgba(248, 113, 113, 0);
+  --pulse-border: rgba(248, 113, 113, 0);
+  --pulse-border-peak: rgba(248, 113, 113, 0);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .spectator-meter.imminent {
+  .spectator-meter.imminent,
+  .turn-progress-fill.urgent,
+  .turn-dot,
+  .draw-pile-column .deck-stack-3d.pulse-prompt,
+  .hand-total-btn.ready-yaniv,
+  .call-yaniv-btn-hud.eligible,
+  .contest-overlay-bg,
+  .contest-pulse-ring,
+  .contest-timer-value.urgent,
+  .contest-waiting-message,
+  .bonus-icon,
+  .emote-log-row {
     animation: none;
+  }
+}
+
+/* Touch devices: backdrop-filter blur over a full-felt table forces the
+   whole surface to repaint every frame it animates. Drop the blur where
+   there is no hover (phones/tablets); the semi-opaque backgrounds stay. */
+@media (hover: none) {
+  .opponent-seat,
+  .contest-overlay-content,
+  .bonus-discard-panel {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
 }

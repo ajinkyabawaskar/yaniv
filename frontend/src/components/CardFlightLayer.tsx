@@ -57,6 +57,19 @@ const prefersReducedMotion = (): boolean =>
   window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /**
+ * Low-end gate for spring physics. Cores are a cheap, stable proxy for the
+ * compositor budget: phones with <= 4 logical cores stutter on stiff springs
+ * (large per-frame deltas repaint bigger regions), so every spring in the
+ * table reads this and softens stiffness/damping. Evaluated per render — it
+ * is a single property read, not layout — so tests and hot-swapped hardware
+ * always see the truth.
+ */
+export const isLowEndDevice = (): boolean =>
+  typeof navigator !== 'undefined' &&
+  typeof navigator.hardwareConcurrency === 'number' &&
+  navigator.hardwareConcurrency <= 4;
+
+/**
  * Organic in-travel tilt, deterministic per flight: a stable hash of the
  * flight key mapped to [-5deg, +5deg], added to the landing rotation. Stable
  * matters — Math.random() in render would re-roll on every re-render (and
@@ -206,10 +219,11 @@ function SingleFlight({
       }
       transition={{
         // Weighted travel, softly damped so the card settles without
-        // high-frequency dock jitter.
+        // high-frequency dock jitter. Low-end devices fly softer: smaller
+        // per-frame deltas, smaller repaint regions on weak compositors.
         type: 'spring',
-        stiffness: 300,
-        damping: 34,
+        stiffness: isLowEndDevice() ? 180 : 300,
+        damping: isLowEndDevice() ? 28 : 34,
         delay: flight.delay ?? 0,
         // Micro-interactions ease out over the flight duration.
         scale: { duration, ease: [0.25, 1, 0.5, 1] },

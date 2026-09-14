@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useState, useMemo, useRef } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useStomp } from '../contexts/StompContext';
-import { useGameStore, ReactionEvent } from '../stores/gameStore';
+import { useGameStore, GameState, ReactionEvent, selectYanivContest } from '../stores/gameStore';
 import { gameApi } from '../utils/api';
 import TableCanvas, { OpponentInfo, TableCanvasHandle, getCardImagePath } from './TableCanvas';
 import CardFace from './CardFace';
 import ScoreboardView from './ScoreboardView';
 import { playTurnChangeSound, playYourTurnSound, isSoundEnabled, setSoundEnabled, setupAudioUnlock, preloadAsafSound, stopAsafSound, preloadWaitingForAsafSound, playAllCardsDiscardedSound, preloadAllCardsDiscardedSound, playAcePickedSound, preloadAcePickedSound } from '../utils/sound';
-import { setupBgMusicUnlock, preloadBgMusic } from '../utils/backgroundMusic';
+import { setupBgMusicUnlock } from '../utils/backgroundMusic';
 import { SCORE_LIMITS, DEFAULT_SCORE_LIMIT, canChooseScoreLimit } from '../utils/scoreLimits';
 import './GameView.css';
 
@@ -26,9 +27,80 @@ interface GameViewProps {
 let actionCounter = 0;
 const newActionId = (): string => `${Date.now()}-${++actionCounter}`;
 
+/**
+ * Every slice GameView renders. Selected with useShallow so a store write that
+ * only touches slices this view does NOT use (errors, transient push bookkeeping)
+ * does not re-render GameView — and therefore does not re-render TableCanvas.
+ * Turn-timer ticks never write the store, so they never touch this component at all.
+ */
+const selectGameViewState = (s: GameState) => ({
+  currentState: s.currentState,
+  currentTurnPlayerId: s.currentTurnPlayerId,
+  roundNumber: s.roundNumber,
+  scores: s.scores,
+  playerNames: s.playerNames,
+  players: s.players,
+  eliminatedPlayers: s.eliminatedPlayers,
+  deckCount: s.deckCount,
+  topDiscardCard: s.topDiscardCard,
+  topDiscardCards: s.topDiscardCards,
+  playerHand: s.playerHand,
+  drawableDiscardCards: s.drawableDiscardCards,
+  opponentCounts: s.opponentCounts,
+  roundScores: s.roundScores,
+  roundWinner: s.roundWinner,
+  roundWinners: s.roundWinners,
+  isAsaf: s.isAsaf,
+  asafByUserId: s.asafByUserId,
+  isRoundOver: s.isRoundOver,
+  isGameOver: s.isGameOver,
+  maxPlayers: s.maxPlayers,
+  targetScore: s.targetScore,
+  yanivCallerId: s.yanivCallerId,
+  yanivCallerName: s.yanivCallerName,
+  yanivCalledAt: s.yanivCalledAt,
+  yanivContestTimerSeconds: s.yanivContestTimerSeconds,
+  allPlayerHands: s.allPlayerHands,
+  turnEndsAt: s.turnEndsAt,
+  turnTimerSeconds: s.turnTimerSeconds,
+  autoPlayedPlayerId: s.autoPlayedPlayerId,
+  bonusDiscardActive: s.bonusDiscardActive,
+  pendingBonusCard: s.pendingBonusCard,
+  spectatorReadings: s.spectatorReadings,
+  setGame: s.setGame,
+});
+
+/**
+ * Header countdown during a Yaniv contest. Self-contained: it subscribes to the
+ * contest slices and ticks its own local state, so GameView (and through it the
+ * whole table) does not re-render every second while the contest window is open.
+ */
+function YanivContestTimerBadge() {
+  const { yanivCallerId, yanivCalledAt, yanivContestTimerSeconds } = useGameStore(selectYanivContest);
+  const [remaining, setRemaining] = useState(0);
+
+  useEffect(() => {
+    if (!yanivCallerId || !yanivCalledAt || yanivContestTimerSeconds <= 0) {
+      setRemaining(0);
+      return;
+    }
+    const endTime = yanivCalledAt + yanivContestTimerSeconds * 1000;
+    const updateTimer = () => {
+      const next = Math.max(0, Math.ceil((endTime - Date.now()) / 1000));
+      setRemaining((prev) => (prev === next ? prev : next));
+    };
+    updateTimer();
+    const interval = setInterval(updateTimer, 250);
+    return () => clearInterval(interval);
+  }, [yanivCallerId, yanivCalledAt, yanivContestTimerSeconds]);
+
+  if (!yanivCallerId || remaining <= 0) return null;
+  return <span className="yaniv-timer-badge">⏱️ {remaining}s</span>;
+}
+
 export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
   const { send, subscribe, isConnected, flushPending } = useStomp();
-  const gameState = useGameStore();
+  const gameState = useGameStore(useShallow(selectGameViewState));
   const [loading, setLoading] = useState(true);
   const [isPlayerTurn, setIsPlayerTurn] = useState(false);
   const [gameStarted, setGameStarted] = useState(false);
@@ -43,7 +115,6 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
   
   const [isMobile, setIsMobile] = useState(false);
   const [showScoreboard, setShowScoreboard] = useState(false);
-  const [yanivContestTimerRemaining, setYanivContestTimerRemaining] = useState<number>(0);
   const [autoPlayNotice, setAutoPlayNotice] = useState<string | null>(null);
 
   // Read once: localStorage is synchronous I/O, and the old code paid it on
@@ -61,7 +132,6 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
   useEffect(() => {
     setupAudioUnlock();
     setupBgMusicUnlock();
-    preloadBgMusic();
     preloadAsafSound();
     preloadWaitingForAsafSound();
     preloadAllCardsDiscardedSound();
@@ -110,19 +180,33 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
 
   // Keep --game-header-h in sync with the real header height (it can wrap to
   // multiple rows on mobile); fixed-position drawer/overlay offset by this.
+  // Throttled to one write per frame: a style write per observer fire
+  // interleaved with reads elsewhere forces a reflow each time.
   const containerRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const container = containerRef.current;
     const header = headerRef.current;
     if (!container || !header) return;
-    const update = () =>
-      container.style.setProperty('--game-header-h', `${header.offsetHeight}px`);
-    update();
+    let throttle: ReturnType<typeof setTimeout> | null = null;
+    const update = () => {
+      if (throttle !== null) return;
+      throttle = setTimeout(() => {
+        throttle = null;
+        if (container.isConnected) {
+          container.style.setProperty('--game-header-h', `${header.offsetHeight}px`);
+        }
+      }, 16);
+    };
+    // First paint needs the real height synchronously; only resizes throttle.
+    container.style.setProperty('--game-header-h', `${header.offsetHeight}px`);
     if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(update);
     observer.observe(header);
-    return () => observer.disconnect();
+    return () => {
+      if (throttle !== null) clearTimeout(throttle);
+      observer.disconnect();
+    };
   }, []);
 
   // Handle visibility change for robust reconnection on mobile
@@ -141,25 +225,6 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
     window.addEventListener('visibilitychange', handleVisibilityChange);
     return () => window.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [isConnected, gameId, send]);
-
-  // Yaniv Contest Timer - updates every 100ms during contest period
-  useEffect(() => {
-    if (gameState.yanivCallerId && gameState.yanivCalledAt && gameState.yanivContestTimerSeconds > 0) {
-      const endTime = gameState.yanivCalledAt + gameState.yanivContestTimerSeconds * 1000;
-
-      const updateTimer = () => {
-        const now = Date.now();
-        const remaining = Math.max(0, Math.ceil((endTime - now) / 1000));
-        setYanivContestTimerRemaining(remaining);
-      };
-
-      updateTimer();
-      const interval = setInterval(updateTimer, 100);
-      return () => clearInterval(interval);
-    } else {
-      setYanivContestTimerRemaining(0);
-    }
-  }, [gameState.yanivCallerId, gameState.yanivCalledAt, gameState.yanivContestTimerSeconds]);
 
   // Helper to check if a player is a round winner
   const isRoundWinner = (userId: string) => {
@@ -423,11 +488,7 @@ export default function GameView({ gameId, roomCode, onExit }: GameViewProps) {
             <span className="room-code-tag">TABLE #{roomCode}</span>
             <span className="round-badge">ROUND {gameState.roundNumber || 1}</span>
           </div>
-          {gameState.yanivCallerId && yanivContestTimerRemaining > 0 && (
-            <span className="yaniv-timer-badge">
-              ⏱️ {yanivContestTimerRemaining}s
-            </span>
-          )}
+          <YanivContestTimerBadge />
           {autoPlayNotice && (
             <span className="autoplay-notice-badge">
               🤖 {autoPlayNotice}
